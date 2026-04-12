@@ -25,6 +25,12 @@ The binaries are stamped with:
 
 Release assets are uploaded to the GitHub release as platform-specific binaries named like `clix-linux-amd64`, `clix-darwin-arm64`, and `clix-windows-amd64.exe`.
 Each binary is published with a matching `.sha256` sidecar file. The install script verifies the checksum before moving the binary into place.
+The release workflow also produces:
+
+- an SBOM in SPDX JSON format
+- a GitHub provenance attestation for the built release artifacts
+
+Those artifacts live alongside the binaries in the release and give you traceability without adding any install-time complexity.
 
 The installer script downloads either:
 

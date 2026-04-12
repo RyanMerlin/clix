@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -84,8 +85,46 @@ jobs:
           name: clix-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*
 
-  release:
+  sbom:
     needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.2"
+
+      - name: Generate SBOM
+        shell: bash
+        run: |
+          mkdir -p dist
+          go run github.com/anchore/syft/cmd/syft@latest dir:. -o spdx-json=dist/clix-sbom.spdx.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clix-sbom
+          path: dist/clix-sbom.spdx.json
+
+  provenance:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Generate provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/**/*
+
+  release:
+    needs: [build, sbom, provenance]
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts

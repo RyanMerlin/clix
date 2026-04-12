@@ -27,6 +27,8 @@ Tagged releases are built by GitHub Actions for:
 - macOS `amd64` and `arm64`
 - Windows `amd64`
 
+Releases also include checksum sidecars, an SBOM, and GitHub provenance attestation artifacts.
+
 ## Quick start
 
 ```powershell
