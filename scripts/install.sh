@@ -29,7 +29,11 @@ if [ "$os" = "windows" ]; then
   asset="${asset}.exe"
 fi
 
-url="https://github.com/${repo}/releases/download/${version}/${asset}"
+if [ "$version" = "latest" ]; then
+  url="https://github.com/${repo}/releases/latest/download/${asset}"
+else
+  url="https://github.com/${repo}/releases/download/${version}/${asset}"
+fi
 tmp="$(mktemp)"
 cleanup() {
   rm -f "$tmp"

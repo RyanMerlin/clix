@@ -23,6 +23,13 @@ The binaries are stamped with:
 - commit SHA
 - build timestamp
 
+Release assets are uploaded to the GitHub release as platform-specific binaries named like `clix-linux-amd64`, `clix-darwin-arm64`, and `clix-windows-amd64.exe`.
+
+The installer script downloads either:
+
+- `https://github.com/RyanMerlin/clix/releases/latest/download/<asset>` when `CLIX_VERSION` is unset
+- `https://github.com/RyanMerlin/clix/releases/download/<tag>/<asset>` when `CLIX_VERSION` is set to a tag like `v0.1.0`
+
 ## Local build
 
 ```powershell
