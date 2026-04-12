@@ -1,0 +1,33 @@
+name: build-linux
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.2'
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build Linux binary
+        run: |
+          mkdir -p dist
+          GOOS=linux GOARCH=amd64 go build -o dist/clix-linux-amd64 ./cmd/clix
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clix-linux-amd64
+          path: dist/clix-linux-amd64

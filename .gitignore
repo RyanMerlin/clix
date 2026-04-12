@@ -1,0 +1,8 @@
+dist/
+bin/
+*.exe
+*.test
+*.out
+clix
+*.log
+.clix/
