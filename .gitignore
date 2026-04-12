@@ -3,6 +3,6 @@ bin/
 *.exe
 *.test
 *.out
-clix
+clix.exe
 *.log
 .clix/
