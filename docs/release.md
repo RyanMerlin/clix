@@ -25,6 +25,7 @@ The binaries are stamped with:
 
 Release assets are uploaded to the GitHub release as platform-specific binaries named like `clix-linux-amd64`, `clix-darwin-arm64`, and `clix-windows-amd64.exe`.
 Each binary is published with a matching `.sha256` sidecar file. The install script verifies the checksum before moving the binary into place.
+Each binary also ships with an SPDX SBOM (`.spdx.json`) and a matching checksum sidecar.
 The release workflow also produces:
 
 - an SBOM in SPDX JSON format
@@ -38,6 +39,7 @@ The installer script downloads either:
 - `https://github.com/RyanMerlin/clix/releases/download/<tag>/<asset>` when `CLIX_VERSION` is set to a tag like `v0.1.0`
 
 For hardened installs, pin both the script URL and `CLIX_VERSION` to the same release tag.
+Set `CLIX_STRICT_VERIFY=1` to also verify the SBOM asset and GitHub attestations with `gh attestation verify`.
 
 ## Local build
 

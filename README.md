@@ -14,10 +14,11 @@ go build ./cmd/clix
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RyanMerlin/clix/v0.1.2/scripts/install.sh | CLIX_VERSION=v0.1.2 sh
+curl -fsSL https://raw.githubusercontent.com/RyanMerlin/clix/v0.1.3/scripts/install.sh | CLIX_VERSION=v0.1.3 sh
 ```
 
 The installer verifies the downloaded binary against the release checksum before installing it.
+Set `CLIX_STRICT_VERIFY=1` to also verify the SBOM asset and GitHub attestations when `gh` is available.
 
 ## Releases
 

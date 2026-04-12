@@ -7,7 +7,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  attestations: write
   id-token: write
 
 concurrency:
@@ -55,6 +56,10 @@ jobs:
             goarch: amd64
             ext: ".exe"
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -75,9 +80,18 @@ jobs:
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -trimpath \
             -ldflags "-s -w -X github.com/RyanMerlin/clix/internal/clix.Version=${VERSION} -X github.com/RyanMerlin/clix/internal/clix.Commit=${COMMIT} -X github.com/RyanMerlin/clix/internal/clix.BuildDate=${BUILD_DATE}" \
             -o "${OUTPUT}" ./cmd/clix
+          go run github.com/anchore/syft/cmd/syft@latest "${OUTPUT}" -o spdx-json="${OUTPUT}.spdx.json"
           PYTHON_BIN="$(command -v python3 || command -v python)"
-          CHECKSUM="$("$PYTHON_BIN" -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$OUTPUT")"
-          printf '%s  %s\n' "$CHECKSUM" "$(basename "$OUTPUT")" > "${OUTPUT}.sha256"
+          for artifact in "${OUTPUT}" "${OUTPUT}.spdx.json"; do
+            CHECKSUM="$("$PYTHON_BIN" -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$artifact")"
+            printf '%s  %s\n' "$CHECKSUM" "$(basename "$artifact")" > "${artifact}.sha256"
+          done
+
+      - name: Generate attestation
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/clix-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          sbom-path: dist/clix-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}.spdx.json
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -85,47 +99,11 @@ jobs:
           name: clix-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*
 
-  sbom:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.2"
-
-      - name: Generate SBOM
-        shell: bash
-        run: |
-          mkdir -p dist
-          go run github.com/anchore/syft/cmd/syft@latest dir:. -o spdx-json=dist/clix-sbom.spdx.json
-
-      - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: clix-sbom
-          path: dist/clix-sbom.spdx.json
-
-  provenance:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-
-      - name: Generate provenance
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: dist/**/*
-
   release:
-    needs: [build, sbom, provenance]
+    needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
