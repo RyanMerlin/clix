@@ -14,8 +14,10 @@ go build ./cmd/clix
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RyanMerlin/clix/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/RyanMerlin/clix/v0.1.1/scripts/install.sh | CLIX_VERSION=v0.1.1 sh
 ```
+
+The installer verifies the downloaded binary against the release checksum before installing it.
 
 ## Releases
 

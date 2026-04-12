@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -70,6 +74,16 @@ jobs:
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -trimpath \
             -ldflags "-s -w -X github.com/RyanMerlin/clix/internal/clix.Version=${VERSION} -X github.com/RyanMerlin/clix/internal/clix.Commit=${COMMIT} -X github.com/RyanMerlin/clix/internal/clix.BuildDate=${BUILD_DATE}" \
             -o "${OUTPUT}" ./cmd/clix
+          PYTHON_BIN="$(command -v python3 || command -v python)"
+          CHECKSUM="$("$PYTHON_BIN" - "$OUTPUT" <<'PY'
+import hashlib
+import pathlib
+import sys
+path = pathlib.Path(sys.argv[1])
+print(hashlib.sha256(path.read_bytes()).hexdigest())
+PY
+          )"
+          printf '%s  %s\n' "$CHECKSUM" "$(basename "$OUTPUT")" > "${OUTPUT}.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

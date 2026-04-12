@@ -140,6 +140,9 @@ func prepareBundleArtifact(sourcePath string) (string, PackBundleManifest, error
 
 func installPack(sourceDir, packsDir string, force bool) (PackManifest, error) {
 	if isArchivePath(sourceDir) {
+		if err := verifyBundleChecksum(sourceDir); err != nil {
+			return PackManifest{}, err
+		}
 		tempDir, err := os.MkdirTemp("", "clix-install-*")
 		if err != nil {
 			return PackManifest{}, err
@@ -171,6 +174,9 @@ func installPack(sourceDir, packsDir string, force bool) (PackManifest, error) {
 
 func discoverPack(path string) (PackManifest, error) {
 	if isArchivePath(path) {
+		if err := verifyBundleChecksum(path); err != nil {
+			return PackManifest{}, err
+		}
 		tempDir, err := os.MkdirTemp("", "clix-discover-*")
 		if err != nil {
 			return PackManifest{}, err
