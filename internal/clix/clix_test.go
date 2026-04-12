@@ -191,7 +191,7 @@ func TestPackScaffoldPresets(t *testing.T) {
 		t.Run(tc.preset, func(t *testing.T) {
 			home := t.TempDir()
 			target := filepath.Join(home, tc.name)
-			manifest, err := scaffoldPackWithPreset(target, tc.name, "desc", tc.preset, false)
+			manifest, err := scaffoldPackWithPreset(target, tc.name, "desc", tc.preset, "", false)
 			if err != nil {
 				t.Fatalf("scaffold pack: %v", err)
 			}
@@ -209,5 +209,60 @@ func TestPackScaffoldPresets(t *testing.T) {
 				t.Fatalf("expected workflow %s in %#v", tc.workflow, manifest.Workflows)
 			}
 		})
+	}
+}
+
+func TestPackScaffoldWithCommandBinding(t *testing.T) {
+	home := t.TempDir()
+	target := filepath.Join(home, "probe-pack")
+	manifest, err := scaffoldPackWithPreset(target, "probe-pack", "desc", "read-only", "mycli", false)
+	if err != nil {
+		t.Fatalf("scaffold pack: %v", err)
+	}
+	if len(manifest.Capabilities) != 1 {
+		t.Fatalf("expected one capability, got %#v", manifest.Capabilities)
+	}
+	if manifest.Capabilities[0] != "probe-pack.inspect" {
+		t.Fatalf("unexpected capability list: %#v", manifest.Capabilities)
+	}
+	var cap CapabilityManifest
+	if err := readJSON(filepath.Join(target, "capabilities", "probe-pack.inspect.json"), &cap); err != nil {
+		t.Fatalf("read capability: %v", err)
+	}
+	if cap.Backend.Command != "mycli" {
+		t.Fatalf("unexpected command binding: %#v", cap.Backend)
+	}
+	if len(cap.Backend.Args) != 1 || cap.Backend.Args[0] != "--help" {
+		t.Fatalf("unexpected inspect args: %#v", cap.Backend.Args)
+	}
+}
+
+func TestOnboardPresetInference(t *testing.T) {
+	help := `
+Usage: demo [command]
+
+Commands:
+  plan        Preview a change
+  apply       Apply a change
+  status      Show state
+  verify      Verify state
+`
+	preset := inferPackPreset(help)
+	if preset != "operator" {
+		t.Fatalf("expected operator, got %s", preset)
+	}
+	commands := extractObservedCommands(help)
+	if len(commands) == 0 {
+		t.Fatalf("expected commands from help")
+	}
+	found := false
+	for _, name := range commands {
+		if name == "plan" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected plan in %#v", commands)
 	}
 }

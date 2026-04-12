@@ -807,17 +807,17 @@ func discoverPack(path string) (PackManifest, error) {
 }
 
 func scaffoldPack(targetDir, name, description string, force bool) (PackManifest, error) {
-	return scaffoldPackWithPreset(targetDir, name, description, "read-only", force)
+	return scaffoldPackWithPreset(targetDir, name, description, "read-only", "", force)
 }
 
-func scaffoldPackWithPreset(targetDir, name, description, preset string, force bool) (PackManifest, error) {
+func scaffoldPackWithPreset(targetDir, name, description, preset, command string, force bool) (PackManifest, error) {
 	if name == "" {
 		return PackManifest{}, fmt.Errorf("pack name is required")
 	}
 	if description == "" {
 		description = "Generated pack scaffold."
 	}
-	spec, err := packScaffoldSpec(name, description, preset)
+	spec, err := packScaffoldSpec(name, description, preset, command)
 	if err != nil {
 		return PackManifest{}, err
 	}
@@ -870,19 +870,29 @@ func scaffoldPackWithPreset(targetDir, name, description, preset string, force b
 		}
 	}
 
-	readme := strings.TrimSpace(fmt.Sprintf(`# %s
-
-%s
-
-## Contents
-
-- pack manifest: %s
-- profile: profiles/%s.json
-- capabilities:
-%s
-- workflows:
-%s
-`, name, description, "pack.json", name, indentBulletList(spec.capabilityNames()), indentBulletList(spec.workflowNames())))
+	readmeParts := []string{
+		fmt.Sprintf(`# %s`, name),
+		"",
+		description,
+		"",
+		"## Contents",
+		"",
+		"- pack manifest: pack.json",
+		"- profile: profiles/" + name + ".json",
+	}
+	if command != "" {
+		readmeParts = append(readmeParts,
+			"- command binding: "+command,
+			"- onboarding report: onboard.json",
+		)
+	}
+	readmeParts = append(readmeParts,
+		"- capabilities:",
+		indentBulletList(spec.capabilityNames()),
+		"- workflows:",
+		indentBulletList(spec.workflowNames()),
+	)
+	readme := strings.TrimSpace(strings.Join(readmeParts, "\n"))
 	if err := os.WriteFile(filepath.Join(targetDir, "README.md"), []byte(readme+"\n"), 0o644); err != nil {
 		return PackManifest{}, err
 	}
@@ -912,7 +922,7 @@ func (t packScaffoldTemplate) workflowNames() []string {
 	return names
 }
 
-func packScaffoldSpec(name, description, preset string) (packScaffoldTemplate, error) {
+func packScaffoldSpec(name, description, preset, command string) (packScaffoldTemplate, error) {
 	baseProfile := ProfileManifest{
 		Name:        name,
 		Version:     1,
@@ -929,9 +939,13 @@ func packScaffoldSpec(name, description, preset string) (packScaffoldTemplate, e
 			"preset":   preset,
 		},
 	}
+	if command != "" {
+		baseProfile.Settings["command"] = command
+	}
 
 	switch preset {
 	case "read-only":
+		stepName := "version"
 		cap := CapabilityManifest{
 			Name:            name + ".version",
 			Version:         1,
@@ -939,6 +953,12 @@ func packScaffoldSpec(name, description, preset string) (packScaffoldTemplate, e
 			Backend:         CapabilityBackend{Type: "builtin", Name: "node.version"},
 			Risk:            "low",
 			SideEffectClass: "read_only",
+		}
+		if command != "" {
+			stepName = "inspect"
+			cap.Name = name + ".inspect"
+			cap.Description = "Inspect the CLI help output."
+			cap.Backend = CapabilityBackend{Type: "subprocess", Command: command, Args: []string{"--help"}}
 		}
 		baseProfile.Capabilities = []CapabilityManifest{cap}
 		return packScaffoldTemplate{
@@ -949,16 +969,20 @@ func packScaffoldSpec(name, description, preset string) (packScaffoldTemplate, e
 					Name:        name + "-health-check",
 					Version:     1,
 					Description: "Basic read-only scaffold workflow.",
-					Steps:       []WorkflowStep{{Name: "version", Capability: cap.Name}},
+					Steps:       []WorkflowStep{{Name: stepName, Capability: cap.Name}},
 				},
 			},
 		}, nil
 	case "change-controlled":
+		binary := "replace-me"
+		if command != "" {
+			binary = command
+		}
 		plan := CapabilityManifest{
 			Name:            name + ".plan",
 			Version:         1,
 			Description:     "Plan a change without applying it.",
-			Backend:         CapabilityBackend{Type: "subprocess", Command: "replace-me", Args: []string{"plan"}},
+			Backend:         CapabilityBackend{Type: "subprocess", Command: binary, Args: []string{"plan"}},
 			Risk:            "medium",
 			SideEffectClass: "read_only",
 			Validators:      []Validator{{Type: "requiredInputKey", Key: "target"}},
@@ -967,7 +991,7 @@ func packScaffoldSpec(name, description, preset string) (packScaffoldTemplate, e
 			Name:            name + ".apply",
 			Version:         1,
 			Description:     "Apply a reviewed change.",
-			Backend:         CapabilityBackend{Type: "subprocess", Command: "replace-me", Args: []string{"apply"}},
+			Backend:         CapabilityBackend{Type: "subprocess", Command: binary, Args: []string{"apply"}},
 			Risk:            "high",
 			SideEffectClass: "write_remote",
 			Validators:      []Validator{{Type: "requiredInputKey", Key: "target"}},
@@ -999,6 +1023,10 @@ func packScaffoldSpec(name, description, preset string) (packScaffoldTemplate, e
 			},
 		}, nil
 	case "operator":
+		binary := "replace-me"
+		if command != "" {
+			binary = command
+		}
 		status := CapabilityManifest{
 			Name:            name + ".status",
 			Version:         1,
@@ -1011,7 +1039,7 @@ func packScaffoldSpec(name, description, preset string) (packScaffoldTemplate, e
 			Name:            name + ".reconcile",
 			Version:         1,
 			Description:     "Reconcile the pack's intended state.",
-			Backend:         CapabilityBackend{Type: "subprocess", Command: "replace-me", Args: []string{"reconcile"}},
+			Backend:         CapabilityBackend{Type: "subprocess", Command: binary, Args: []string{"reconcile"}},
 			Risk:            "medium",
 			SideEffectClass: "write_local",
 			Validators:      []Validator{{Type: "requiredInputKey", Key: "target"}},

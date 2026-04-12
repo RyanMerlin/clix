@@ -269,17 +269,41 @@ func newPackCmd() *cobra.Command {
 			if targetDir == "" {
 				targetDir = filepath.Join(".", args[0])
 			}
-			manifest, err := scaffoldPackWithPreset(targetDir, args[0], mustString(cmd, "description"), mustString(cmd, "preset"), boolFlag(cmd, "force"))
+			manifest, err := scaffoldPackWithPreset(targetDir, args[0], mustString(cmd, "description"), mustString(cmd, "preset"), mustString(cmd, "command"), boolFlag(cmd, "force"))
 			if err != nil {
 				return err
 			}
 			return printJSON(map[string]any{"ok": true, "pack": manifest, "path": targetDir})
 		},
 	})
-	cmd.Flags().Bool("force", false, "overwrite an existing pack")
-	cmd.Flags().String("dir", "", "target directory for the scaffold")
-	cmd.Flags().String("description", "", "pack description")
-	cmd.Flags().String("preset", "read-only", "scaffold preset: read-only, change-controlled, or operator")
+	onboardCmd := &cobra.Command{
+		Use:   "onboard <name>",
+		Short: "Probe a CLI and generate a first-pass pack",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			command := mustString(cmd, "command")
+			if command == "" {
+				return fmt.Errorf("command is required")
+			}
+			targetDir, _ := cmd.Flags().GetString("dir")
+			if targetDir == "" {
+				targetDir = filepath.Join(".", args[0])
+			}
+			manifest, report, err := onboardPack(targetDir, args[0], mustString(cmd, "description"), command, mustString(cmd, "runner"), mustString(cmd, "image"), boolFlag(cmd, "force"))
+			if err != nil {
+				return err
+			}
+			return printJSON(map[string]any{"ok": true, "pack": manifest, "onboard": report, "path": targetDir})
+		},
+	}
+	cmd.AddCommand(onboardCmd)
+	cmd.PersistentFlags().Bool("force", false, "overwrite an existing pack")
+	cmd.PersistentFlags().String("dir", "", "target directory for the scaffold")
+	cmd.PersistentFlags().String("description", "", "pack description")
+	cmd.PersistentFlags().String("preset", "read-only", "scaffold preset: read-only, change-controlled, or operator")
+	cmd.PersistentFlags().String("command", "", "external CLI command to bind to the scaffold")
+	cmd.PersistentFlags().String("runner", "auto", "onboard probe runner: local, docker, podman, or auto")
+	cmd.PersistentFlags().String("image", "", "container image for onboard probes")
 	return cmd
 }
 

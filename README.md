@@ -25,6 +25,7 @@ Tagged releases are built by GitHub Actions for:
 go run .\cmd\clix init
 go run .\cmd\clix capabilities list
 go run .\cmd\clix pack list
+go run .\cmd\clix pack onboard demo-pack --command mycli
 go run .\cmd\clix profile active
 go run .\cmd\clix version
 go run .\cmd\clix run system.date

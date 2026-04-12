@@ -5,6 +5,7 @@
 Main pieces:
 
 - `packs`: installable bundles that package profiles, capabilities, workflows, and plugins
+- `pack onboarding`: probe unknown CLIs from help/version output and generate a first-pass scaffold
 - `profiles`: named bundles of capabilities, workflows, and policy
 - `capabilities`: typed execution units that wrap external CLIs or builtins
 - `policy`: allow, deny, or approval decisions for every run
