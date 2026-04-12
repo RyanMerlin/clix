@@ -260,7 +260,25 @@ func newPackCmd() *cobra.Command {
 			return printJSON(map[string]any{"ok": true, "pack": manifest})
 		},
 	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "scaffold <name>",
+		Short: "Create a new pack scaffold",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			targetDir, _ := cmd.Flags().GetString("dir")
+			if targetDir == "" {
+				targetDir = filepath.Join(".", args[0])
+			}
+			manifest, err := scaffoldPack(targetDir, args[0], mustString(cmd, "description"), boolFlag(cmd, "force"))
+			if err != nil {
+				return err
+			}
+			return printJSON(map[string]any{"ok": true, "pack": manifest, "path": targetDir})
+		},
+	})
 	cmd.Flags().Bool("force", false, "overwrite an existing pack")
+	cmd.Flags().String("dir", "", "target directory for the scaffold")
+	cmd.Flags().String("description", "", "pack description")
 	return cmd
 }
 
@@ -495,4 +513,9 @@ func currentUserName() string {
 		return v
 	}
 	return "unknown"
+}
+
+func mustString(cmd *cobra.Command, name string) string {
+	v, _ := cmd.Flags().GetString(name)
+	return v
 }

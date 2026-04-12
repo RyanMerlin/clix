@@ -17,6 +17,7 @@ my-pack/
 
 - `clix pack discover <path>`: inspect a source directory without installing it
 - `clix pack install <path>`: copy a pack into the local packs directory
+- `clix pack scaffold <name>`: generate a new pack from the standard template
 - `clix pack list`: list installed packs
 - `clix pack show <name>`: show a single installed pack
 
@@ -42,3 +43,15 @@ The seeded install includes packs for:
 - `argocd-observe`
 
 Each pack ships a profile, real command-backed capabilities, and at least one workflow playbook.
+
+## Authoring Workflow
+
+Recommended workflow for a new pack:
+
+1. Run `clix pack scaffold my-pack`.
+2. Edit `pack.json` to describe the pack.
+3. Fill in `profiles/`, `capabilities/`, and `workflows/`.
+4. Run `clix pack discover ./my-pack` to validate the manifest.
+5. Run `clix pack install ./my-pack` to install it locally.
+
+The scaffold is intentionally minimal so authors can start simple and add only the pieces they need.

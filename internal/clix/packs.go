@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 func loadManifestsFromDir[T any](dir string, fn func(string) (T, error)) ([]T, error) {
@@ -802,5 +803,113 @@ func discoverPack(path string) (PackManifest, error) {
 	if err := readJSON(filepath.Join(path, "pack.json"), &manifest); err != nil {
 		return PackManifest{}, err
 	}
+	return manifest, nil
+}
+
+func scaffoldPack(targetDir, name, description string, force bool) (PackManifest, error) {
+	if name == "" {
+		return PackManifest{}, fmt.Errorf("pack name is required")
+	}
+	if description == "" {
+		description = "Generated pack scaffold."
+	}
+	manifest := PackManifest{
+		Name:        name,
+		Version:     1,
+		Description: description,
+		Profiles:    []string{name},
+	}
+
+	if fileExists(targetDir) {
+		if !force {
+			return PackManifest{}, fmt.Errorf("target already exists: %s", targetDir)
+		}
+		if err := os.RemoveAll(targetDir); err != nil {
+			return PackManifest{}, err
+		}
+	}
+	for _, dir := range []string{
+		targetDir,
+		filepath.Join(targetDir, "profiles"),
+		filepath.Join(targetDir, "capabilities"),
+		filepath.Join(targetDir, "workflows"),
+		filepath.Join(targetDir, "plugins"),
+	} {
+		if err := ensureDir(dir); err != nil {
+			return PackManifest{}, err
+		}
+	}
+	if err := writeJSON(filepath.Join(targetDir, "pack.json"), manifest); err != nil {
+		return PackManifest{}, err
+	}
+
+	profile := ProfileManifest{
+		Name:        name,
+		Version:     1,
+		Description: description,
+		Capabilities: []CapabilityManifest{
+			{
+				Name:            name + ".version",
+				Version:         1,
+				Description:     "Return version information for the pack.",
+				Backend:         CapabilityBackend{Type: "builtin", Name: "node.version"},
+				Risk:            "low",
+				SideEffectClass: "read_only",
+			},
+		},
+		Policy: &PolicyBundle{
+			SchemaVersion:   1,
+			DefaultDecision: "deny",
+			Rules: []PolicyRule{
+				{Effect: "allow", Match: PolicyMatch{Profiles: []string{name}, SideEffects: []string{"read_only"}}},
+			},
+		},
+		Settings: map[string]any{
+			"packName": name,
+		},
+	}
+	if err := writeJSON(filepath.Join(targetDir, "profiles", name+".json"), profile); err != nil {
+		return PackManifest{}, err
+	}
+
+	capability := CapabilityManifest{
+		Name:            name + ".version",
+		Version:         1,
+		Description:     "Return version information for the pack.",
+		Backend:         CapabilityBackend{Type: "builtin", Name: "node.version"},
+		Risk:            "low",
+		SideEffectClass: "read_only",
+	}
+	if err := writeJSON(filepath.Join(targetDir, "capabilities", capability.Name+".json"), capability); err != nil {
+		return PackManifest{}, err
+	}
+
+	workflow := WorkflowManifest{
+		Name:        name + "-health-check",
+		Version:     1,
+		Description: "Basic scaffold workflow for this pack.",
+		Steps: []WorkflowStep{
+			{Name: "version", Capability: capability.Name},
+		},
+	}
+	if err := writeJSON(filepath.Join(targetDir, "workflows", workflow.Name+".json"), workflow); err != nil {
+		return PackManifest{}, err
+	}
+
+	readme := strings.TrimSpace(fmt.Sprintf(`# %s
+
+%s
+
+## Contents
+
+- pack manifest: %s
+- profile: profiles/%s.json
+- capability: capabilities/%s.json
+- workflow: workflows/%s.json
+`, name, description, "pack.json", name, capability.Name, workflow.Name))
+	if err := os.WriteFile(filepath.Join(targetDir, "README.md"), []byte(readme+"\n"), 0o644); err != nil {
+		return PackManifest{}, err
+	}
+
 	return manifest, nil
 }

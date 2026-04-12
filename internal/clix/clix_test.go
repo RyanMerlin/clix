@@ -142,3 +142,36 @@ func TestPackInstallAndProfileDiscovery(t *testing.T) {
 		t.Fatalf("installed profile not found: %#v", profiles)
 	}
 }
+
+func TestPackScaffoldCreatesTemplate(t *testing.T) {
+	home := t.TempDir()
+	state, err := SeedState(home)
+	if err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+	target := filepath.Join(home, "my-pack")
+	manifest, err := scaffoldPack(target, "my-pack", "My pack", false)
+	if err != nil {
+		t.Fatalf("scaffold pack: %v", err)
+	}
+	if manifest.Name != "my-pack" {
+		t.Fatalf("unexpected pack manifest: %#v", manifest)
+	}
+	for _, p := range []string{
+		filepath.Join(target, "pack.json"),
+		filepath.Join(target, "profiles", "my-pack.json"),
+		filepath.Join(target, "capabilities", "my-pack.version.json"),
+		filepath.Join(target, "workflows", "my-pack-health-check.json"),
+	} {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("expected %s to exist: %v", p, err)
+		}
+	}
+	packs, err := loadPackManifests(state.PacksDir)
+	if err != nil {
+		t.Fatalf("load packs: %v", err)
+	}
+	if len(packs) == 0 {
+		t.Fatalf("expected builtin packs to remain available")
+	}
+}
