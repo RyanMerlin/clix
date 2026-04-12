@@ -26,3 +26,19 @@ my-pack/
 - Pack manifests are discovered from `pack.json`.
 - Profiles, capabilities, and workflows inside installed packs are automatically discovered by `clix`.
 - The core binary keeps policy and receipts as the enforcement boundary; packs only add capabilities and workflow bundles.
+
+## Built-in Packs
+
+The seeded install includes packs for:
+
+- `gcloud-readonly-planning`
+- `gcloud-vertex-ai-operator`
+- `kubectl-observe`
+- `kubectl-change-controlled`
+- `gh-readonly`
+- `git-observer`
+- `infisical-readonly`
+- `incus-readonly`
+- `argocd-observe`
+
+Each pack ships a profile, real command-backed capabilities, and at least one workflow playbook.

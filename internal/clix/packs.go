@@ -81,6 +81,657 @@ func seedBuiltinPacks(base State) error {
 			return err
 		}
 	}
+	for _, pack := range packs {
+		if err := seedBuiltinPackContents(base, pack); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func seedBuiltinPackContents(base State, pack PackManifest) error {
+	dir := filepath.Join(base.PacksDir, pack.Name)
+	switch pack.Name {
+	case "gcloud-readonly-planning":
+		return seedPackBundle(dir, pack, ProfileManifest{
+			Name:        "gcloud-readonly-planning",
+			Version:     1,
+			Description: "Read-only gcloud planning and inspection.",
+			Capabilities: []CapabilityManifest{
+				{
+					Name:            "gcloud.version",
+					Version:         1,
+					Description:     "Return gcloud version.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "gcloud", Args: []string{"version"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+				},
+				{
+					Name:            "gcloud.projects.list",
+					Version:         1,
+					Description:     "List Google Cloud projects.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "gcloud", Args: []string{"projects", "list", "--format=json"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+				},
+				{
+					Name:            "gcloud.config.list",
+					Version:         1,
+					Description:     "List Google Cloud configuration.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "gcloud", Args: []string{"config", "list", "--format=json"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+				},
+			},
+			Policy: &PolicyBundle{
+				SchemaVersion:   1,
+				DefaultDecision: "deny",
+				Rules: []PolicyRule{
+					{Effect: "allow", Match: PolicyMatch{Profiles: []string{"gcloud-readonly-planning"}, SideEffects: []string{"read_only"}}},
+				},
+			},
+		}, []WorkflowManifest{
+			{
+				Name:        "gcloud-readonly-inventory",
+				Version:     1,
+				Description: "Gather a basic read-only Google Cloud snapshot.",
+				Steps: []WorkflowStep{
+					{Name: "version", Capability: "gcloud.version"},
+					{Name: "projects", Capability: "gcloud.projects.list"},
+					{Name: "config", Capability: "gcloud.config.list"},
+				},
+			},
+		}, nil)
+	case "gcloud-vertex-ai-operator":
+		return seedPackBundle(dir, pack, ProfileManifest{
+			Name:        "gcloud-vertex-ai-operator",
+			Version:     1,
+			Description: "Vertex AI operations profile.",
+			Capabilities: []CapabilityManifest{
+				{
+					Name:            "gcloud.version",
+					Version:         1,
+					Description:     "Return gcloud version.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "gcloud", Args: []string{"version"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+				},
+				{
+					Name:            "gcloud.ai.models.list",
+					Version:         1,
+					Description:     "List Vertex AI models in a region.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "gcloud", Args: []string{"ai", "models", "list", "--region=${input.region}", "--format=json"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+					InputSchema: map[string]any{
+						"type":                 "object",
+						"required":             []any{"region"},
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"region": map[string]any{"type": "string"},
+						},
+					},
+					Validators: []Validator{{Type: "requiredInputKey", Key: "region"}},
+				},
+				{
+					Name:            "gcloud.ai.endpoints.list",
+					Version:         1,
+					Description:     "List Vertex AI endpoints in a region.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "gcloud", Args: []string{"ai", "endpoints", "list", "--region=${input.region}", "--format=json"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+					InputSchema: map[string]any{
+						"type":                 "object",
+						"required":             []any{"region"},
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"region": map[string]any{"type": "string"},
+						},
+					},
+					Validators: []Validator{{Type: "requiredInputKey", Key: "region"}},
+				},
+			},
+			Policy: &PolicyBundle{
+				SchemaVersion:   1,
+				DefaultDecision: "deny",
+				Rules: []PolicyRule{
+					{Effect: "allow", Match: PolicyMatch{Profiles: []string{"gcloud-vertex-ai-operator"}, SideEffects: []string{"read_only"}}},
+				},
+			},
+		}, []WorkflowManifest{
+			{
+				Name:        "vertex-ai-inventory",
+				Version:     1,
+				Description: "Inspect Vertex AI models and endpoints in a region.",
+				InputSchema: map[string]any{
+					"type":                 "object",
+					"required":             []any{"region"},
+					"additionalProperties": false,
+					"properties": map[string]any{
+						"region": map[string]any{"type": "string"},
+					},
+				},
+				Steps: []WorkflowStep{
+					{Name: "version", Capability: "gcloud.version"},
+					{Name: "models", Capability: "gcloud.ai.models.list", Input: map[string]any{"region": "${inputs.region}"}},
+					{Name: "endpoints", Capability: "gcloud.ai.endpoints.list", Input: map[string]any{"region": "${inputs.region}"}},
+				},
+			},
+		}, nil)
+	case "kubectl-observe":
+		return seedPackBundle(dir, pack, ProfileManifest{
+			Name:        "kubectl-observe",
+			Version:     1,
+			Description: "Read-only Kubernetes inspection.",
+			Capabilities: []CapabilityManifest{
+				{
+					Name:            "kubectl.version",
+					Version:         1,
+					Description:     "Return kubectl version.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "kubectl", Args: []string{"version", "--client=true"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+				},
+				{
+					Name:            "kubectl.get.pods",
+					Version:         1,
+					Description:     "List pods across all namespaces.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "kubectl", Args: []string{"get", "pods", "-A", "-o", "json"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+				},
+				{
+					Name:            "kubectl.get.deployments",
+					Version:         1,
+					Description:     "List deployments across all namespaces.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "kubectl", Args: []string{"get", "deployments", "-A", "-o", "json"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+				},
+				{
+					Name:            "kubectl.get.events",
+					Version:         1,
+					Description:     "List events across all namespaces.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "kubectl", Args: []string{"get", "events", "-A", "-o", "json"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+				},
+			},
+			Policy: &PolicyBundle{
+				SchemaVersion:   1,
+				DefaultDecision: "deny",
+				Rules: []PolicyRule{
+					{Effect: "allow", Match: PolicyMatch{Profiles: []string{"kubectl-observe"}, SideEffects: []string{"read_only"}}},
+				},
+			},
+		}, []WorkflowManifest{
+			{
+				Name:        "cluster-overview",
+				Version:     1,
+				Description: "Collect a basic cluster overview.",
+				Steps: []WorkflowStep{
+					{Name: "version", Capability: "kubectl.version"},
+					{Name: "pods", Capability: "kubectl.get.pods"},
+					{Name: "deployments", Capability: "kubectl.get.deployments"},
+				},
+			},
+		}, nil)
+	case "kubectl-change-controlled":
+		return seedPackBundle(dir, pack, ProfileManifest{
+			Name:        "kubectl-change-controlled",
+			Version:     1,
+			Description: "Guarded Kubernetes change operations.",
+			Capabilities: []CapabilityManifest{
+				{
+					Name:            "kubectl.version",
+					Version:         1,
+					Description:     "Return kubectl version.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "kubectl", Args: []string{"version", "--client=true"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+				},
+				{
+					Name:            "kubectl.diff",
+					Version:         1,
+					Description:     "Show diff for a manifest.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "kubectl", Args: []string{"diff", "-f", "${input.manifest}"}},
+					Risk:            "medium",
+					SideEffectClass: "read_only",
+					InputSchema: map[string]any{
+						"type":                 "object",
+						"required":             []any{"manifest"},
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"manifest": map[string]any{"type": "string"},
+						},
+					},
+					Validators: []Validator{{Type: "requiredInputKey", Key: "manifest"}},
+				},
+				{
+					Name:            "kubectl.apply",
+					Version:         1,
+					Description:     "Apply a manifest with guarded approval.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "kubectl", Args: []string{"apply", "-f", "${input.manifest}"}},
+					Risk:            "high",
+					SideEffectClass: "write_remote",
+					InputSchema: map[string]any{
+						"type":                 "object",
+						"required":             []any{"manifest"},
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"manifest": map[string]any{"type": "string"},
+						},
+					},
+					Validators: []Validator{{Type: "requiredInputKey", Key: "manifest"}},
+				},
+			},
+			Policy: &PolicyBundle{
+				SchemaVersion:   1,
+				DefaultDecision: "deny",
+				Rules: []PolicyRule{
+					{Effect: "require_approval", Match: PolicyMatch{Capabilities: []string{"kubectl.diff"}, Profiles: []string{"kubectl-change-controlled"}}},
+					{Effect: "require_approval", Match: PolicyMatch{Capabilities: []string{"kubectl.apply"}, Profiles: []string{"kubectl-change-controlled"}, Risk: []string{"high"}}},
+				},
+			},
+		}, []WorkflowManifest{
+			{
+				Name:        "change-review",
+				Version:     1,
+				Description: "Review a manifest change before apply.",
+				InputSchema: map[string]any{
+					"type":                 "object",
+					"required":             []any{"manifest"},
+					"additionalProperties": false,
+					"properties": map[string]any{
+						"manifest": map[string]any{"type": "string"},
+					},
+				},
+				Steps: []WorkflowStep{
+					{Name: "version", Capability: "kubectl.version"},
+					{Name: "diff", Capability: "kubectl.diff", Input: map[string]any{"manifest": "${inputs.manifest}"}},
+				},
+			},
+		}, nil)
+	case "gh-readonly":
+		return seedPackBundle(dir, pack, ProfileManifest{
+			Name:        "gh-readonly",
+			Version:     1,
+			Description: "GitHub CLI inspection.",
+			Capabilities: []CapabilityManifest{
+				{
+					Name:            "gh.version",
+					Version:         1,
+					Description:     "Return gh version.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "gh", Args: []string{"--version"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+				},
+				{
+					Name:            "gh.repo.view",
+					Version:         1,
+					Description:     "Inspect a repository.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "gh", Args: []string{"repo", "view", "${input.repo}", "--json", "name,description,defaultBranchRef,visibility"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+					InputSchema: map[string]any{
+						"type":                 "object",
+						"required":             []any{"repo"},
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"repo": map[string]any{"type": "string"},
+						},
+					},
+					Validators: []Validator{{Type: "requiredInputKey", Key: "repo"}},
+				},
+				{
+					Name:            "gh.issue.list",
+					Version:         1,
+					Description:     "List issues in a repository.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "gh", Args: []string{"issue", "list", "--repo", "${input.repo}", "--limit", "${input.limit}", "--json", "number,title,state"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+					InputSchema: map[string]any{
+						"type":                 "object",
+						"required":             []any{"repo"},
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"repo":  map[string]any{"type": "string"},
+							"limit": map[string]any{"type": "string"},
+						},
+					},
+					Validators: []Validator{{Type: "requiredInputKey", Key: "repo"}},
+				},
+				{
+					Name:            "gh.pr.list",
+					Version:         1,
+					Description:     "List pull requests in a repository.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "gh", Args: []string{"pr", "list", "--repo", "${input.repo}", "--limit", "${input.limit}", "--json", "number,title,state,headRefName,baseRefName"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+					InputSchema: map[string]any{
+						"type":                 "object",
+						"required":             []any{"repo"},
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"repo":  map[string]any{"type": "string"},
+							"limit": map[string]any{"type": "string"},
+						},
+					},
+					Validators: []Validator{{Type: "requiredInputKey", Key: "repo"}},
+				},
+			},
+			Policy: &PolicyBundle{
+				SchemaVersion:   1,
+				DefaultDecision: "deny",
+				Rules:           []PolicyRule{{Effect: "allow", Match: PolicyMatch{Profiles: []string{"gh-readonly"}, SideEffects: []string{"read_only"}}}},
+			},
+		}, []WorkflowManifest{
+			{
+				Name:        "repo-intel",
+				Version:     1,
+				Description: "Collect repository metadata and open work.",
+				InputSchema: map[string]any{
+					"type":                 "object",
+					"required":             []any{"repo"},
+					"additionalProperties": false,
+					"properties": map[string]any{
+						"repo":  map[string]any{"type": "string"},
+						"limit": map[string]any{"type": "string"},
+					},
+				},
+				Steps: []WorkflowStep{
+					{Name: "version", Capability: "gh.version"},
+					{Name: "repo", Capability: "gh.repo.view", Input: map[string]any{"repo": "${inputs.repo}"}},
+					{Name: "issues", Capability: "gh.issue.list", Input: map[string]any{"repo": "${inputs.repo}", "limit": "${inputs.limit}"}},
+				},
+			},
+		}, nil)
+	case "git-observer":
+		return seedPackBundle(dir, pack, ProfileManifest{
+			Name:        "git-observer",
+			Version:     1,
+			Description: "Git workspace inspection.",
+			Capabilities: []CapabilityManifest{
+				{
+					Name:            "git.status",
+					Version:         1,
+					Description:     "Run git status.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "git", Args: []string{"status", "--short", "--branch"}, CwdFromInput: "workingDir"},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+					SandboxProfile:  "workspace_read_only",
+					Validators:      []Validator{{Type: "requiredPath", Path: ".git"}},
+				},
+				{
+					Name:            "git.diff",
+					Version:         1,
+					Description:     "Show git diff.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "git", Args: []string{"diff"}, CwdFromInput: "workingDir"},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+					SandboxProfile:  "workspace_read_only",
+					Validators:      []Validator{{Type: "requiredPath", Path: ".git"}},
+				},
+				{
+					Name:            "git.log",
+					Version:         1,
+					Description:     "Show recent git history.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "git", Args: []string{"log", "--oneline", "--decorate", "-n", "${input.limit}"}, CwdFromInput: "workingDir"},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+					SandboxProfile:  "workspace_read_only",
+					InputSchema: map[string]any{
+						"type":                 "object",
+						"required":             []any{"workingDir"},
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"workingDir": map[string]any{"type": "string"},
+							"limit":      map[string]any{"type": "string"},
+						},
+					},
+					Validators: []Validator{{Type: "requiredPath", Path: ".git"}},
+				},
+			},
+			Policy: &PolicyBundle{
+				SchemaVersion:   1,
+				DefaultDecision: "deny",
+				Rules:           []PolicyRule{{Effect: "allow", Match: PolicyMatch{Profiles: []string{"git-observer"}, SideEffects: []string{"read_only"}}}},
+			},
+		}, []WorkflowManifest{
+			{
+				Name:        "workspace-overview",
+				Version:     1,
+				Description: "Gather a quick git workspace snapshot.",
+				InputSchema: map[string]any{
+					"type":                 "object",
+					"required":             []any{"workingDir"},
+					"additionalProperties": false,
+					"properties": map[string]any{
+						"workingDir": map[string]any{"type": "string"},
+						"limit":      map[string]any{"type": "string"},
+					},
+				},
+				Steps: []WorkflowStep{
+					{Name: "status", Capability: "git.status", Input: map[string]any{"workingDir": "${inputs.workingDir}"}},
+					{Name: "diff", Capability: "git.diff", Input: map[string]any{"workingDir": "${inputs.workingDir}"}},
+				},
+			},
+		}, nil)
+	case "infisical-readonly":
+		return seedPackBundle(dir, pack, ProfileManifest{
+			Name:        "infisical-readonly",
+			Version:     1,
+			Description: "Infisical inspection.",
+			Capabilities: []CapabilityManifest{
+				{
+					Name:            "infisical.version",
+					Version:         1,
+					Description:     "Return infisical version.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "infisical", Args: []string{"--version"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+				},
+				{
+					Name:            "infisical.secrets.list",
+					Version:         1,
+					Description:     "List secrets in an environment.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "infisical", Args: []string{"secrets", "list", "--projectId", "${input.projectId}", "--env", "${input.env}", "--format", "json"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+					InputSchema: map[string]any{
+						"type":                 "object",
+						"required":             []any{"projectId", "env"},
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"projectId": map[string]any{"type": "string"},
+							"env":       map[string]any{"type": "string"},
+						},
+					},
+					Validators: []Validator{{Type: "requiredInputKey", Key: "projectId"}, {Type: "requiredInputKey", Key: "env"}},
+				},
+			},
+			Policy: &PolicyBundle{
+				SchemaVersion:   1,
+				DefaultDecision: "deny",
+				Rules:           []PolicyRule{{Effect: "allow", Match: PolicyMatch{Profiles: []string{"infisical-readonly"}, SideEffects: []string{"read_only"}}}},
+			},
+		}, []WorkflowManifest{
+			{
+				Name:        "secret-inventory",
+				Version:     1,
+				Description: "Collect a secret inventory for a project and environment.",
+				InputSchema: map[string]any{
+					"type":                 "object",
+					"required":             []any{"projectId", "env"},
+					"additionalProperties": false,
+					"properties": map[string]any{
+						"projectId": map[string]any{"type": "string"},
+						"env":       map[string]any{"type": "string"},
+					},
+				},
+				Steps: []WorkflowStep{
+					{Name: "version", Capability: "infisical.version"},
+					{Name: "secrets", Capability: "infisical.secrets.list", Input: map[string]any{"projectId": "${inputs.projectId}", "env": "${inputs.env}"}},
+				},
+			},
+		}, nil)
+	case "incus-readonly":
+		return seedPackBundle(dir, pack, ProfileManifest{
+			Name:        "incus-readonly",
+			Version:     1,
+			Description: "Incus inspection.",
+			Capabilities: []CapabilityManifest{
+				{
+					Name:            "incus.version",
+					Version:         1,
+					Description:     "Return incus version.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "incus", Args: []string{"--version"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+				},
+				{
+					Name:            "incus.list",
+					Version:         1,
+					Description:     "List Incus instances.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "incus", Args: []string{"list", "--format=json"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+				},
+				{
+					Name:            "incus.info",
+					Version:         1,
+					Description:     "Show Incus instance info.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "incus", Args: []string{"info", "${input.name}", "--format=json"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+					InputSchema: map[string]any{
+						"type":                 "object",
+						"required":             []any{"name"},
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"name": map[string]any{"type": "string"},
+						},
+					},
+					Validators: []Validator{{Type: "requiredInputKey", Key: "name"}},
+				},
+			},
+			Policy: &PolicyBundle{
+				SchemaVersion:   1,
+				DefaultDecision: "deny",
+				Rules:           []PolicyRule{{Effect: "allow", Match: PolicyMatch{Profiles: []string{"incus-readonly"}, SideEffects: []string{"read_only"}}}},
+			},
+		}, []WorkflowManifest{
+			{
+				Name:        "instance-overview",
+				Version:     1,
+				Description: "Inspect Incus state.",
+				Steps: []WorkflowStep{
+					{Name: "version", Capability: "incus.version"},
+					{Name: "list", Capability: "incus.list"},
+				},
+			},
+		}, nil)
+	case "argocd-observe":
+		return seedPackBundle(dir, pack, ProfileManifest{
+			Name:        "argocd-observe",
+			Version:     1,
+			Description: "Argo CD inspection.",
+			Capabilities: []CapabilityManifest{
+				{
+					Name:            "argocd.version",
+					Version:         1,
+					Description:     "Return argocd version.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "argocd", Args: []string{"version", "--client"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+				},
+				{
+					Name:            "argocd.app.list",
+					Version:         1,
+					Description:     "List Argo CD applications.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "argocd", Args: []string{"app", "list", "-o", "json"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+				},
+				{
+					Name:            "argocd.app.get",
+					Version:         1,
+					Description:     "Inspect an Argo CD application.",
+					Backend:         CapabilityBackend{Type: "subprocess", Command: "argocd", Args: []string{"app", "get", "${input.app}", "-o", "json"}},
+					Risk:            "low",
+					SideEffectClass: "read_only",
+					InputSchema: map[string]any{
+						"type":                 "object",
+						"required":             []any{"app"},
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"app": map[string]any{"type": "string"},
+						},
+					},
+					Validators: []Validator{{Type: "requiredInputKey", Key: "app"}},
+				},
+			},
+			Policy: &PolicyBundle{
+				SchemaVersion:   1,
+				DefaultDecision: "deny",
+				Rules:           []PolicyRule{{Effect: "allow", Match: PolicyMatch{Profiles: []string{"argocd-observe"}, SideEffects: []string{"read_only"}}}},
+			},
+		}, []WorkflowManifest{
+			{
+				Name:        "application-overview",
+				Version:     1,
+				Description: "Collect a quick Argo CD application snapshot.",
+				InputSchema: map[string]any{
+					"type":                 "object",
+					"required":             []any{"app"},
+					"additionalProperties": false,
+					"properties": map[string]any{
+						"app": map[string]any{"type": "string"},
+					},
+				},
+				Steps: []WorkflowStep{
+					{Name: "version", Capability: "argocd.version"},
+					{Name: "apps", Capability: "argocd.app.list"},
+					{Name: "app", Capability: "argocd.app.get", Input: map[string]any{"app": "${inputs.app}"}},
+				},
+			},
+		}, nil)
+	default:
+		return nil
+	}
+}
+
+func seedPackBundle(dir string, pack PackManifest, profile ProfileManifest, workflows []WorkflowManifest, extras []CapabilityManifest) error {
+	if err := ensureDir(filepath.Join(dir, "profiles")); err != nil {
+		return err
+	}
+	if err := ensureDir(filepath.Join(dir, "capabilities")); err != nil {
+		return err
+	}
+	if err := ensureDir(filepath.Join(dir, "workflows")); err != nil {
+		return err
+	}
+	if err := writeJSON(filepath.Join(dir, "pack.json"), pack); err != nil {
+		return err
+	}
+	if err := writeJSON(filepath.Join(dir, "profiles", profile.Name+".json"), profile); err != nil {
+		return err
+	}
+	for _, cap := range profile.Capabilities {
+		if err := writeJSON(filepath.Join(dir, "capabilities", cap.Name+".json"), cap); err != nil {
+			return err
+		}
+	}
+	for _, cap := range extras {
+		if err := writeJSON(filepath.Join(dir, "capabilities", cap.Name+".json"), cap); err != nil {
+			return err
+		}
+	}
+	for _, wf := range workflows {
+		if err := writeJSON(filepath.Join(dir, "workflows", wf.Name+".json"), wf); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

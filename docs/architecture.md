@@ -19,4 +19,14 @@ The current Go implementation is the foundation for:
 - plugin-ready execution backends
 - optional bridge servers
 
+Seeded packs currently cover:
+
+- `gcloud`
+- `kubectl`
+- `gh`
+- `git`
+- `infisical`
+- `incus`
+- `argocd`
+
 The intended extension model is profile-first, not MCP-first.

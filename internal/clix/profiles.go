@@ -173,7 +173,7 @@ func writeBuiltinProfile(base State, profile ProfileManifest) error {
 }
 
 func LoadProfiles(dir string) ([]ProfileManifest, error) {
-	out, err := loadManifestsFromDir(dir, func(path string) (ProfileManifest, error) {
+	rootProfiles, err := loadManifestsFromDir(dir, func(path string) (ProfileManifest, error) {
 		var profile ProfileManifest
 		if err := readJSON(path, &profile); err != nil {
 			return ProfileManifest{}, err
@@ -187,7 +187,17 @@ func LoadProfiles(dir string) ([]ProfileManifest, error) {
 	if err != nil {
 		return nil, err
 	}
-	out = append(out, packProfiles...)
+	byName := map[string]ProfileManifest{}
+	for _, profile := range rootProfiles {
+		byName[profile.Name] = profile
+	}
+	for _, profile := range packProfiles {
+		byName[profile.Name] = profile
+	}
+	out := make([]ProfileManifest, 0, len(byName))
+	for _, profile := range byName {
+		out = append(out, profile)
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
 }
