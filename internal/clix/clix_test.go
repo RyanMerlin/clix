@@ -83,3 +83,62 @@ func TestGitStatusDeniedWithoutRepo(t *testing.T) {
 		t.Fatalf("expected denial, got %#v", outcome)
 	}
 }
+
+func TestPackInstallAndProfileDiscovery(t *testing.T) {
+	home := t.TempDir()
+	state, err := SeedState(home)
+	if err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+
+	source := filepath.Join(home, "source-pack")
+	if err := os.MkdirAll(filepath.Join(source, "profiles"), 0o755); err != nil {
+		t.Fatalf("source pack: %v", err)
+	}
+	pack := PackManifest{Name: "sample-pack", Version: 1, Description: "sample"}
+	if err := writeJSON(filepath.Join(source, "pack.json"), pack); err != nil {
+		t.Fatalf("write pack: %v", err)
+	}
+	profile := ProfileManifest{Name: "sample-profile", Version: 1, Description: "sample profile"}
+	if err := writeJSON(filepath.Join(source, "profiles", "sample-profile.json"), profile); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	installed, err := installPack(source, state.PacksDir, false)
+	if err != nil {
+		t.Fatalf("install pack: %v", err)
+	}
+	if installed.Name != "sample-pack" {
+		t.Fatalf("unexpected pack: %#v", installed)
+	}
+
+	packs, err := loadPackManifests(state.PacksDir)
+	if err != nil {
+		t.Fatalf("load packs: %v", err)
+	}
+	foundPack := false
+	for _, item := range packs {
+		if item.Name == "sample-pack" {
+			foundPack = true
+			break
+		}
+	}
+	if !foundPack {
+		t.Fatalf("installed pack not found: %#v", packs)
+	}
+
+	profiles, err := LoadProfiles(state.ProfilesDir)
+	if err != nil {
+		t.Fatalf("load profiles: %v", err)
+	}
+	foundProfile := false
+	for _, item := range profiles {
+		if item.Name == "sample-profile" {
+			foundProfile = true
+			break
+		}
+	}
+	if !foundProfile {
+		t.Fatalf("installed profile not found: %#v", profiles)
+	}
+}

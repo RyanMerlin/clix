@@ -12,10 +12,11 @@ import (
 
 func Run() error {
 	root := &cobra.Command{
-		Use:   "clix",
-		Short: "clix is a governed CLI gateway",
+		Use:     "clix",
+		Short:   "clix is a governed CLI gateway",
+		Version: VersionString(),
 	}
-	root.AddCommand(newInitCmd(), newCapabilitiesCmd(), newProfileCmd(), newWorkflowCmd(), newRunCmd(), newPolicyCmd(), newReceiptsCmd(), newDoctorCmd(), newServeCmd())
+	root.AddCommand(newInitCmd(), newCapabilitiesCmd(), newProfileCmd(), newPackCmd(), newWorkflowCmd(), newRunCmd(), newPolicyCmd(), newReceiptsCmd(), newDoctorCmd(), newServeCmd(), newVersionCmd())
 	return root.Execute()
 }
 
@@ -193,6 +194,76 @@ func newProfileCmd() *cobra.Command {
 	return cmd
 }
 
+func newPackCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "pack"}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "List installed packs",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			state, err := loadOrSeed()
+			if err != nil {
+				return err
+			}
+			packs, err := loadPackManifests(state.PacksDir)
+			if err != nil {
+				return err
+			}
+			return printJSON(packs)
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "discover <path>",
+		Short: "Inspect a pack at a source path",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			manifest, err := discoverPack(args[0])
+			if err != nil {
+				return err
+			}
+			return printJSON(manifest)
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "show <name>",
+		Short: "Show an installed pack",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			state, err := loadOrSeed()
+			if err != nil {
+				return err
+			}
+			packs, err := loadPackManifests(state.PacksDir)
+			if err != nil {
+				return err
+			}
+			for _, pack := range packs {
+				if pack.Name == args[0] {
+					return printJSON(pack)
+				}
+			}
+			return fmt.Errorf("unknown pack: %s", args[0])
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "install <path>",
+		Short: "Install a pack from a local directory",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			state, err := loadOrSeed()
+			if err != nil {
+				return err
+			}
+			manifest, err := installPack(args[0], state.PacksDir, boolFlag(cmd, "force"))
+			if err != nil {
+				return err
+			}
+			return printJSON(map[string]any{"ok": true, "pack": manifest})
+		},
+	})
+	cmd.Flags().Bool("force", false, "overwrite an existing pack")
+	return cmd
+}
+
 func newWorkflowCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "workflow"}
 	cmd.AddCommand(&cobra.Command{
@@ -359,9 +430,20 @@ func newDoctorCmd() *cobra.Command {
 				{"name": "home", "ok": fileExists(home), "path": home},
 				{"name": "config", "ok": fileExists(filepath.Join(home, "config.json")), "path": filepath.Join(home, "config.json")},
 				{"name": "policy", "ok": fileExists(filepath.Join(home, "policy.json")), "path": filepath.Join(home, "policy.json")},
+				{"name": "packs", "ok": fileExists(filepath.Join(home, "packs")), "path": filepath.Join(home, "packs")},
 				{"name": "profiles", "ok": fileExists(filepath.Join(home, "profiles")), "path": filepath.Join(home, "profiles")},
 			}
 			return printJSON(map[string]any{"ok": true, "checks": checks})
+		},
+	}
+}
+
+func newVersionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Show build information",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return printJSON(VersionInfo())
 		},
 	}
 }
@@ -400,7 +482,17 @@ func ctxFromState(state *State) map[string]string {
 	return map[string]string{
 		"env":     state.Config.DefaultEnv,
 		"cwd":     state.Config.WorkspaceRoot,
-		"user":    os.Getenv("USERNAME"),
+		"user":    currentUserName(),
 		"profile": strings.Join(state.ActiveProfiles(), ","),
 	}
+}
+
+func currentUserName() string {
+	if v := os.Getenv("USER"); v != "" {
+		return v
+	}
+	if v := os.Getenv("USERNAME"); v != "" {
+		return v
+	}
+	return "unknown"
 }

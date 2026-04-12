@@ -19,6 +19,7 @@ type State struct {
 	Home            string
 	ConfigPath      string
 	PolicyPath      string
+	PacksDir        string
 	ProfilesDir     string
 	CapabilitiesDir string
 	WorkflowsDir    string
@@ -46,6 +47,7 @@ func Paths(home string) State {
 		Home:            home,
 		ConfigPath:      filepath.Join(home, "config.json"),
 		PolicyPath:      filepath.Join(home, "policy.json"),
+		PacksDir:        filepath.Join(home, "packs"),
 		ProfilesDir:     filepath.Join(home, "profiles"),
 		CapabilitiesDir: filepath.Join(home, "capabilities"),
 		WorkflowsDir:    filepath.Join(home, "workflows"),
@@ -98,7 +100,7 @@ func LoadState(home string) (*State, error) {
 func SeedState(home string) (*State, error) {
 	base := Paths(home)
 	for _, dir := range []string{
-		base.Home, base.ProfilesDir, base.CapabilitiesDir, base.WorkflowsDir,
+		base.Home, base.PacksDir, base.ProfilesDir, base.CapabilitiesDir, base.WorkflowsDir,
 		base.ReceiptsDir, base.PluginsDir, base.ApprovalsDir, base.CacheDir,
 	} {
 		if err := ensureDir(dir); err != nil {
@@ -136,6 +138,9 @@ func SeedState(home string) (*State, error) {
 	}
 
 	if err := seedBuiltinProfiles(base); err != nil {
+		return nil, err
+	}
+	if err := seedBuiltinPacks(base); err != nil {
 		return nil, err
 	}
 

@@ -29,6 +29,27 @@ func loadDiskCapabilities(dir string) ([]CapabilityManifest, error) {
 	return out, nil
 }
 
+func loadPackCapabilities(packsDir string) ([]CapabilityManifest, error) {
+	packs, err := os.ReadDir(packsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out []CapabilityManifest
+	for _, pack := range packs {
+		if !pack.IsDir() {
+			continue
+		}
+		caps, err := loadDiskCapabilities(filepath.Join(packsDir, pack.Name(), "capabilities"))
+		if err == nil {
+			out = append(out, caps...)
+		}
+	}
+	return out, nil
+}
+
 func loadBuiltinCapabilities() []CapabilityManifest {
 	return []CapabilityManifest{
 		{Name: "system.date", Version: 1, Description: "Return current time.", Backend: CapabilityBackend{Type: "builtin", Name: "system.date"}, Risk: "low", SideEffectClass: "read_only", SandboxProfile: "none"},
@@ -77,7 +98,12 @@ func buildRegistry(state *State) (*CapabilityRegistry, error) {
 	if err != nil {
 		return nil, err
 	}
+	packCaps, err := loadPackCapabilities(state.PacksDir)
+	if err != nil {
+		return nil, err
+	}
 	caps = append(caps, disk...)
+	caps = append(caps, packCaps...)
 	return NewRegistry(caps), nil
 }
 

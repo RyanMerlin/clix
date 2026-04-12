@@ -77,3 +77,13 @@ type ProfileManifest struct {
 	Policy       *PolicyBundle        `json:"policy,omitempty"`
 	Settings     map[string]any       `json:"settings,omitempty"`
 }
+
+type PackManifest struct {
+	Name         string   `json:"name"`
+	Version      int      `json:"version"`
+	Description  string   `json:"description,omitempty"`
+	Profiles     []string `json:"profiles,omitempty"`
+	Capabilities []string `json:"capabilities,omitempty"`
+	Workflows    []string `json:"workflows,omitempty"`
+	Plugins      []string `json:"plugins,omitempty"`
+}

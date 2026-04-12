@@ -32,21 +32,50 @@ func seedBuiltinWorkflows(base State) error {
 }
 
 func loadWorkflows(dir string) ([]WorkflowManifest, error) {
-	entries, err := os.ReadDir(dir)
+	out, err := loadManifestsFromDir(dir, func(path string) (WorkflowManifest, error) {
+		var wf WorkflowManifest
+		if err := readJSON(path, &wf); err != nil {
+			return WorkflowManifest{}, err
+		}
+		return wf, nil
+	})
 	if err != nil {
+		return nil, err
+	}
+	packWorkflows, err := loadPackWorkflows(filepath.Dir(dir))
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, packWorkflows...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func loadPackWorkflows(packsDir string) ([]WorkflowManifest, error) {
+	entries, err := os.ReadDir(packsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	var out []WorkflowManifest
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+		if !entry.IsDir() {
 			continue
 		}
-		var wf WorkflowManifest
-		if err := readJSON(filepath.Join(dir, entry.Name()), &wf); err == nil {
-			out = append(out, wf)
+		workflowsDir := filepath.Join(packsDir, entry.Name(), "workflows")
+		workflows, err := loadManifestsFromDir(workflowsDir, func(path string) (WorkflowManifest, error) {
+			var wf WorkflowManifest
+			if err := readJSON(path, &wf); err != nil {
+				return WorkflowManifest{}, err
+			}
+			return wf, nil
+		})
+		if err == nil {
+			out = append(out, workflows...)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
 }
 

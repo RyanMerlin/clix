@@ -4,6 +4,7 @@
 
 Main pieces:
 
+- `packs`: installable bundles that package profiles, capabilities, workflows, and plugins
 - `profiles`: named bundles of capabilities, workflows, and policy
 - `capabilities`: typed execution units that wrap external CLIs or builtins
 - `policy`: allow, deny, or approval decisions for every run
@@ -13,6 +14,7 @@ Main pieces:
 The current Go implementation is the foundation for:
 
 - modular external CLI packs
+- pack discovery and installation from local directories
 - profile stacking
 - plugin-ready execution backends
 - optional bridge servers

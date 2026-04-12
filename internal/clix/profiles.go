@@ -63,6 +63,97 @@ func seedBuiltinProfiles(base State) error {
 				Rules:           []PolicyRule{{Effect: "allow", Match: PolicyMatch{Capabilities: []string{"gcloud.version"}, Profiles: []string{"gcloud-vertex-ai-operator"}, SideEffects: []string{"read_only"}}}},
 			},
 		},
+		{
+			Name:        "kubectl-observe",
+			Version:     1,
+			Description: "Read-only Kubernetes inspection.",
+			Capabilities: []CapabilityManifest{
+				{Name: "kubectl.version", Version: 1, Description: "Return kubectl version.", Backend: CapabilityBackend{Type: "subprocess", Command: "kubectl", Args: []string{"version", "--client=true"}}, Risk: "low", SideEffectClass: "read_only"},
+			},
+			Policy: &PolicyBundle{
+				SchemaVersion:   1,
+				DefaultDecision: "deny",
+				Rules:           []PolicyRule{{Effect: "allow", Match: PolicyMatch{Capabilities: []string{"kubectl.version"}, Profiles: []string{"kubectl-observe"}, SideEffects: []string{"read_only"}}}},
+			},
+		},
+		{
+			Name:        "kubectl-change-controlled",
+			Version:     1,
+			Description: "Guarded Kubernetes change operations.",
+			Capabilities: []CapabilityManifest{
+				{Name: "kubectl.version", Version: 1, Description: "Return kubectl version.", Backend: CapabilityBackend{Type: "subprocess", Command: "kubectl", Args: []string{"version", "--client=true"}}, Risk: "low", SideEffectClass: "read_only"},
+			},
+			Policy: &PolicyBundle{
+				SchemaVersion:   1,
+				DefaultDecision: "deny",
+				Rules:           []PolicyRule{{Effect: "allow", Match: PolicyMatch{Capabilities: []string{"kubectl.version"}, Profiles: []string{"kubectl-change-controlled"}, SideEffects: []string{"read_only"}}}},
+			},
+		},
+		{
+			Name:        "gh-readonly",
+			Version:     1,
+			Description: "GitHub CLI inspection.",
+			Capabilities: []CapabilityManifest{
+				{Name: "gh.version", Version: 1, Description: "Return gh version.", Backend: CapabilityBackend{Type: "subprocess", Command: "gh", Args: []string{"--version"}}, Risk: "low", SideEffectClass: "read_only"},
+			},
+			Policy: &PolicyBundle{
+				SchemaVersion:   1,
+				DefaultDecision: "deny",
+				Rules:           []PolicyRule{{Effect: "allow", Match: PolicyMatch{Capabilities: []string{"gh.version"}, Profiles: []string{"gh-readonly"}, SideEffects: []string{"read_only"}}}},
+			},
+		},
+		{
+			Name:        "git-observer",
+			Version:     1,
+			Description: "Git workspace inspection.",
+			Capabilities: []CapabilityManifest{
+				{Name: "git.status", Version: 1, Description: "Run git status.", Backend: CapabilityBackend{Type: "subprocess", Command: "git", Args: []string{"status", "--short", "--branch"}, CwdFromInput: "workingDir"}, Risk: "low", SideEffectClass: "read_only", SandboxProfile: "workspace_read_only", Validators: []Validator{{Type: "requiredPath", Path: ".git"}}},
+			},
+			Policy: &PolicyBundle{
+				SchemaVersion:   1,
+				DefaultDecision: "deny",
+				Rules:           []PolicyRule{{Effect: "allow", Match: PolicyMatch{Capabilities: []string{"git.status"}, Profiles: []string{"git-observer"}, SideEffects: []string{"read_only"}}}},
+			},
+		},
+		{
+			Name:        "infisical-readonly",
+			Version:     1,
+			Description: "Infisical inspection.",
+			Capabilities: []CapabilityManifest{
+				{Name: "infisical.version", Version: 1, Description: "Return infisical version.", Backend: CapabilityBackend{Type: "subprocess", Command: "infisical", Args: []string{"--version"}}, Risk: "low", SideEffectClass: "read_only"},
+			},
+			Policy: &PolicyBundle{
+				SchemaVersion:   1,
+				DefaultDecision: "deny",
+				Rules:           []PolicyRule{{Effect: "allow", Match: PolicyMatch{Capabilities: []string{"infisical.version"}, Profiles: []string{"infisical-readonly"}, SideEffects: []string{"read_only"}}}},
+			},
+		},
+		{
+			Name:        "incus-readonly",
+			Version:     1,
+			Description: "Incus inspection.",
+			Capabilities: []CapabilityManifest{
+				{Name: "incus.version", Version: 1, Description: "Return incus version.", Backend: CapabilityBackend{Type: "subprocess", Command: "incus", Args: []string{"--version"}}, Risk: "low", SideEffectClass: "read_only"},
+			},
+			Policy: &PolicyBundle{
+				SchemaVersion:   1,
+				DefaultDecision: "deny",
+				Rules:           []PolicyRule{{Effect: "allow", Match: PolicyMatch{Capabilities: []string{"incus.version"}, Profiles: []string{"incus-readonly"}, SideEffects: []string{"read_only"}}}},
+			},
+		},
+		{
+			Name:        "argocd-observe",
+			Version:     1,
+			Description: "Argo CD inspection.",
+			Capabilities: []CapabilityManifest{
+				{Name: "argocd.version", Version: 1, Description: "Return argocd version.", Backend: CapabilityBackend{Type: "subprocess", Command: "argocd", Args: []string{"version", "--client"}}, Risk: "low", SideEffectClass: "read_only"},
+			},
+			Policy: &PolicyBundle{
+				SchemaVersion:   1,
+				DefaultDecision: "deny",
+				Rules:           []PolicyRule{{Effect: "allow", Match: PolicyMatch{Capabilities: []string{"argocd.version"}, Profiles: []string{"argocd-observe"}, SideEffects: []string{"read_only"}}}},
+			},
+		},
 	}
 
 	for _, profile := range profiles {
@@ -82,21 +173,50 @@ func writeBuiltinProfile(base State, profile ProfileManifest) error {
 }
 
 func LoadProfiles(dir string) ([]ProfileManifest, error) {
-	entries, err := os.ReadDir(dir)
+	out, err := loadManifestsFromDir(dir, func(path string) (ProfileManifest, error) {
+		var profile ProfileManifest
+		if err := readJSON(path, &profile); err != nil {
+			return ProfileManifest{}, err
+		}
+		return profile, nil
+	})
 	if err != nil {
+		return nil, err
+	}
+	packProfiles, err := loadPackProfiles(filepath.Dir(dir))
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, packProfiles...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func loadPackProfiles(packsDir string) ([]ProfileManifest, error) {
+	entries, err := os.ReadDir(packsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	var out []ProfileManifest
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+		if !entry.IsDir() {
 			continue
 		}
-		var profile ProfileManifest
-		if err := readJSON(filepath.Join(dir, entry.Name()), &profile); err == nil {
-			out = append(out, profile)
+		profilesDir := filepath.Join(packsDir, entry.Name(), "profiles")
+		profiles, err := loadManifestsFromDir(profilesDir, func(path string) (ProfileManifest, error) {
+			var profile ProfileManifest
+			if err := readJSON(path, &profile); err != nil {
+				return ProfileManifest{}, err
+			}
+			return profile, nil
+		})
+		if err == nil {
+			out = append(out, profiles...)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
 }
 

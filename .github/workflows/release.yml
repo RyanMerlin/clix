@@ -1,0 +1,89 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.2"
+
+      - name: Test
+        run: go test ./...
+
+  build:
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: ""
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            ext: ""
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            ext: ""
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            ext: ""
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            ext: ".exe"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.2"
+
+      - name: Build
+        shell: bash
+        run: |
+          mkdir -p dist
+          VERSION="${GITHUB_REF_NAME#v}"
+          COMMIT="${GITHUB_SHA}"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          OUTPUT="dist/clix-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -trimpath \
+            -ldflags "-s -w -X github.com/RyanMerlin/clix/internal/clix.Version=${VERSION} -X github.com/RyanMerlin/clix/internal/clix.Commit=${COMMIT} -X github.com/RyanMerlin/clix/internal/clix.BuildDate=${BUILD_DATE}" \
+            -o "${OUTPUT}" ./cmd/clix
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clix-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**/*
