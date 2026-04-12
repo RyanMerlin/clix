@@ -807,17 +807,27 @@ func discoverPack(path string) (PackManifest, error) {
 }
 
 func scaffoldPack(targetDir, name, description string, force bool) (PackManifest, error) {
+	return scaffoldPackWithPreset(targetDir, name, description, "read-only", force)
+}
+
+func scaffoldPackWithPreset(targetDir, name, description, preset string, force bool) (PackManifest, error) {
 	if name == "" {
 		return PackManifest{}, fmt.Errorf("pack name is required")
 	}
 	if description == "" {
 		description = "Generated pack scaffold."
 	}
+	spec, err := packScaffoldSpec(name, description, preset)
+	if err != nil {
+		return PackManifest{}, err
+	}
 	manifest := PackManifest{
-		Name:        name,
-		Version:     1,
-		Description: description,
-		Profiles:    []string{name},
+		Name:         name,
+		Version:      1,
+		Description:  description,
+		Profiles:     []string{name},
+		Capabilities: spec.capabilityNames(),
+		Workflows:    spec.workflowNames(),
 	}
 
 	if fileExists(targetDir) {
@@ -843,57 +853,21 @@ func scaffoldPack(targetDir, name, description string, force bool) (PackManifest
 		return PackManifest{}, err
 	}
 
-	profile := ProfileManifest{
-		Name:        name,
-		Version:     1,
-		Description: description,
-		Capabilities: []CapabilityManifest{
-			{
-				Name:            name + ".version",
-				Version:         1,
-				Description:     "Return version information for the pack.",
-				Backend:         CapabilityBackend{Type: "builtin", Name: "node.version"},
-				Risk:            "low",
-				SideEffectClass: "read_only",
-			},
-		},
-		Policy: &PolicyBundle{
-			SchemaVersion:   1,
-			DefaultDecision: "deny",
-			Rules: []PolicyRule{
-				{Effect: "allow", Match: PolicyMatch{Profiles: []string{name}, SideEffects: []string{"read_only"}}},
-			},
-		},
-		Settings: map[string]any{
-			"packName": name,
-		},
-	}
+	profile := spec.profile
 	if err := writeJSON(filepath.Join(targetDir, "profiles", name+".json"), profile); err != nil {
 		return PackManifest{}, err
 	}
 
-	capability := CapabilityManifest{
-		Name:            name + ".version",
-		Version:         1,
-		Description:     "Return version information for the pack.",
-		Backend:         CapabilityBackend{Type: "builtin", Name: "node.version"},
-		Risk:            "low",
-		SideEffectClass: "read_only",
-	}
-	if err := writeJSON(filepath.Join(targetDir, "capabilities", capability.Name+".json"), capability); err != nil {
-		return PackManifest{}, err
+	for _, capability := range spec.capabilities {
+		if err := writeJSON(filepath.Join(targetDir, "capabilities", capability.Name+".json"), capability); err != nil {
+			return PackManifest{}, err
+		}
 	}
 
-	workflow := WorkflowManifest{
-		Name:        name + "-health-check",
-		Version:     1,
-		Description: "Basic scaffold workflow for this pack.",
-		Steps: []WorkflowStep{
-			{Name: "version", Capability: capability.Name},
-		},
-	}
-	if err := writeJSON(filepath.Join(targetDir, "workflows", workflow.Name+".json"), workflow); err != nil {
-		return PackManifest{}, err
+	for _, workflow := range spec.workflows {
+		if err := writeJSON(filepath.Join(targetDir, "workflows", workflow.Name+".json"), workflow); err != nil {
+			return PackManifest{}, err
+		}
 	}
 
 	readme := strings.TrimSpace(fmt.Sprintf(`# %s
@@ -904,12 +878,194 @@ func scaffoldPack(targetDir, name, description string, force bool) (PackManifest
 
 - pack manifest: %s
 - profile: profiles/%s.json
-- capability: capabilities/%s.json
-- workflow: workflows/%s.json
-`, name, description, "pack.json", name, capability.Name, workflow.Name))
+- capabilities:
+%s
+- workflows:
+%s
+`, name, description, "pack.json", name, indentBulletList(spec.capabilityNames()), indentBulletList(spec.workflowNames())))
 	if err := os.WriteFile(filepath.Join(targetDir, "README.md"), []byte(readme+"\n"), 0o644); err != nil {
 		return PackManifest{}, err
 	}
 
 	return manifest, nil
+}
+
+type packScaffoldTemplate struct {
+	profile      ProfileManifest
+	capabilities []CapabilityManifest
+	workflows    []WorkflowManifest
+}
+
+func (t packScaffoldTemplate) capabilityNames() []string {
+	names := make([]string, 0, len(t.capabilities))
+	for _, capability := range t.capabilities {
+		names = append(names, capability.Name)
+	}
+	return names
+}
+
+func (t packScaffoldTemplate) workflowNames() []string {
+	names := make([]string, 0, len(t.workflows))
+	for _, workflow := range t.workflows {
+		names = append(names, workflow.Name)
+	}
+	return names
+}
+
+func packScaffoldSpec(name, description, preset string) (packScaffoldTemplate, error) {
+	baseProfile := ProfileManifest{
+		Name:        name,
+		Version:     1,
+		Description: description,
+		Policy: &PolicyBundle{
+			SchemaVersion:   1,
+			DefaultDecision: "deny",
+			Rules: []PolicyRule{
+				{Effect: "allow", Match: PolicyMatch{Profiles: []string{name}, SideEffects: []string{"read_only"}}},
+			},
+		},
+		Settings: map[string]any{
+			"packName": name,
+			"preset":   preset,
+		},
+	}
+
+	switch preset {
+	case "read-only":
+		cap := CapabilityManifest{
+			Name:            name + ".version",
+			Version:         1,
+			Description:     "Return version information for the pack.",
+			Backend:         CapabilityBackend{Type: "builtin", Name: "node.version"},
+			Risk:            "low",
+			SideEffectClass: "read_only",
+		}
+		baseProfile.Capabilities = []CapabilityManifest{cap}
+		return packScaffoldTemplate{
+			profile:      baseProfile,
+			capabilities: []CapabilityManifest{cap},
+			workflows: []WorkflowManifest{
+				{
+					Name:        name + "-health-check",
+					Version:     1,
+					Description: "Basic read-only scaffold workflow.",
+					Steps:       []WorkflowStep{{Name: "version", Capability: cap.Name}},
+				},
+			},
+		}, nil
+	case "change-controlled":
+		plan := CapabilityManifest{
+			Name:            name + ".plan",
+			Version:         1,
+			Description:     "Plan a change without applying it.",
+			Backend:         CapabilityBackend{Type: "subprocess", Command: "replace-me", Args: []string{"plan"}},
+			Risk:            "medium",
+			SideEffectClass: "read_only",
+			Validators:      []Validator{{Type: "requiredInputKey", Key: "target"}},
+		}
+		apply := CapabilityManifest{
+			Name:            name + ".apply",
+			Version:         1,
+			Description:     "Apply a reviewed change.",
+			Backend:         CapabilityBackend{Type: "subprocess", Command: "replace-me", Args: []string{"apply"}},
+			Risk:            "high",
+			SideEffectClass: "write_remote",
+			Validators:      []Validator{{Type: "requiredInputKey", Key: "target"}},
+		}
+		baseProfile.Capabilities = []CapabilityManifest{plan, apply}
+		baseProfile.Policy.Rules = append(baseProfile.Policy.Rules,
+			PolicyRule{Effect: "require_approval", Match: PolicyMatch{Capabilities: []string{apply.Name}, Profiles: []string{name}, Risk: []string{"high"}}},
+		)
+		return packScaffoldTemplate{
+			profile:      baseProfile,
+			capabilities: []CapabilityManifest{plan, apply},
+			workflows: []WorkflowManifest{
+				{
+					Name:        name + "-review",
+					Version:     1,
+					Description: "Plan before apply.",
+					InputSchema: map[string]any{
+						"type":                 "object",
+						"required":             []any{"target"},
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"target": map[string]any{"type": "string"},
+						},
+					},
+					Steps: []WorkflowStep{
+						{Name: "plan", Capability: plan.Name, Input: map[string]any{"target": "${inputs.target}"}},
+					},
+				},
+			},
+		}, nil
+	case "operator":
+		status := CapabilityManifest{
+			Name:            name + ".status",
+			Version:         1,
+			Description:     "Inspect current pack state.",
+			Backend:         CapabilityBackend{Type: "builtin", Name: "system.date"},
+			Risk:            "low",
+			SideEffectClass: "read_only",
+		}
+		reconcile := CapabilityManifest{
+			Name:            name + ".reconcile",
+			Version:         1,
+			Description:     "Reconcile the pack's intended state.",
+			Backend:         CapabilityBackend{Type: "subprocess", Command: "replace-me", Args: []string{"reconcile"}},
+			Risk:            "medium",
+			SideEffectClass: "write_local",
+			Validators:      []Validator{{Type: "requiredInputKey", Key: "target"}},
+		}
+		confirm := CapabilityManifest{
+			Name:            name + ".verify",
+			Version:         1,
+			Description:     "Verify the pack state after reconcile.",
+			Backend:         CapabilityBackend{Type: "builtin", Name: "system.date"},
+			Risk:            "low",
+			SideEffectClass: "read_only",
+		}
+		baseProfile.Capabilities = []CapabilityManifest{status, reconcile, confirm}
+		baseProfile.Policy.Rules = append(baseProfile.Policy.Rules,
+			PolicyRule{Effect: "require_approval", Match: PolicyMatch{Capabilities: []string{reconcile.Name}, Profiles: []string{name}, SideEffects: []string{"write_local"}}},
+		)
+		return packScaffoldTemplate{
+			profile:      baseProfile,
+			capabilities: []CapabilityManifest{status, reconcile, confirm},
+			workflows: []WorkflowManifest{
+				{
+					Name:        name + "-reconcile",
+					Version:     1,
+					Description: "Inspect, reconcile, then verify.",
+					InputSchema: map[string]any{
+						"type":                 "object",
+						"required":             []any{"target"},
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"target": map[string]any{"type": "string"},
+						},
+					},
+					Steps: []WorkflowStep{
+						{Name: "status", Capability: status.Name},
+						{Name: "reconcile", Capability: reconcile.Name, Input: map[string]any{"target": "${inputs.target}"}},
+						{Name: "verify", Capability: confirm.Name},
+					},
+				},
+			},
+		}, nil
+	default:
+		return packScaffoldTemplate{}, fmt.Errorf("unknown preset: %s", preset)
+	}
+}
+
+func indentBulletList(items []string) string {
+	if len(items) == 0 {
+		return "  - none"
+	}
+	var b strings.Builder
+	for _, item := range items {
+		b.WriteString("  - ")
+		b.WriteString(item)
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }

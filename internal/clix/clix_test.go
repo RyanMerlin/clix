@@ -175,3 +175,39 @@ func TestPackScaffoldCreatesTemplate(t *testing.T) {
 		t.Fatalf("expected builtin packs to remain available")
 	}
 }
+
+func TestPackScaffoldPresets(t *testing.T) {
+	cases := []struct {
+		name     string
+		preset   string
+		caps     int
+		workflow string
+	}{
+		{name: "ro-pack", preset: "read-only", caps: 1, workflow: "ro-pack-health-check"},
+		{name: "cc-pack", preset: "change-controlled", caps: 2, workflow: "cc-pack-review"},
+		{name: "op-pack", preset: "operator", caps: 3, workflow: "op-pack-reconcile"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.preset, func(t *testing.T) {
+			home := t.TempDir()
+			target := filepath.Join(home, tc.name)
+			manifest, err := scaffoldPackWithPreset(target, tc.name, "desc", tc.preset, false)
+			if err != nil {
+				t.Fatalf("scaffold pack: %v", err)
+			}
+			if len(manifest.Capabilities) != tc.caps {
+				t.Fatalf("expected %d capabilities, got %#v", tc.caps, manifest.Capabilities)
+			}
+			found := false
+			for _, wf := range manifest.Workflows {
+				if wf == tc.workflow {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("expected workflow %s in %#v", tc.workflow, manifest.Workflows)
+			}
+		})
+	}
+}

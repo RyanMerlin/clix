@@ -269,7 +269,7 @@ func newPackCmd() *cobra.Command {
 			if targetDir == "" {
 				targetDir = filepath.Join(".", args[0])
 			}
-			manifest, err := scaffoldPack(targetDir, args[0], mustString(cmd, "description"), boolFlag(cmd, "force"))
+			manifest, err := scaffoldPackWithPreset(targetDir, args[0], mustString(cmd, "description"), mustString(cmd, "preset"), boolFlag(cmd, "force"))
 			if err != nil {
 				return err
 			}
@@ -279,6 +279,7 @@ func newPackCmd() *cobra.Command {
 	cmd.Flags().Bool("force", false, "overwrite an existing pack")
 	cmd.Flags().String("dir", "", "target directory for the scaffold")
 	cmd.Flags().String("description", "", "pack description")
+	cmd.Flags().String("preset", "read-only", "scaffold preset: read-only, change-controlled, or operator")
 	return cmd
 }
 
