@@ -247,7 +247,7 @@ Commands:
   status      Show state
   verify      Verify state
 `
-	preset := inferPackPreset(help)
+	preset := inferPackPreset(help, []string{"plan", "apply", "status", "verify"})
 	if preset != "operator" {
 		t.Fatalf("expected operator, got %s", preset)
 	}
@@ -264,5 +264,42 @@ Commands:
 	}
 	if !found {
 		t.Fatalf("expected plan in %#v", commands)
+	}
+}
+
+func TestPackBundleAndInstall(t *testing.T) {
+	home := t.TempDir()
+	state, err := SeedState(home)
+	if err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+	source := filepath.Join(home, "bundle-source")
+	if _, err := scaffoldPackWithPreset(source, "bundle-source", "desc", "read-only", "mycli", false); err != nil {
+		t.Fatalf("scaffold pack: %v", err)
+	}
+	bundlePath := filepath.Join(home, "bundle-source.clixpack.zip")
+	if _, _, err := bundlePack(source, bundlePath); err != nil {
+		t.Fatalf("bundle pack: %v", err)
+	}
+	installed, err := installPack(bundlePath, state.PacksDir, false)
+	if err != nil {
+		t.Fatalf("install bundle: %v", err)
+	}
+	if installed.Name != "bundle-source" {
+		t.Fatalf("unexpected installed pack: %#v", installed)
+	}
+	packs, err := loadPackManifests(state.PacksDir)
+	if err != nil {
+		t.Fatalf("load packs: %v", err)
+	}
+	found := false
+	for _, p := range packs {
+		if p.Name == "bundle-source" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected installed pack in %#v", packs)
 	}
 }

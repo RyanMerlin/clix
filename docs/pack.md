@@ -17,6 +17,8 @@ my-pack/
 
 - `clix pack discover <path>`: inspect a source directory without installing it
 - `clix pack install <path>`: copy a pack into the local packs directory
+- `clix pack bundle <path>`: create a distributable bundle archive
+- `clix pack publish <path>`: publish a bundle into a local registry directory
 - `clix pack scaffold <name>`: generate a new pack from a preset template
 - `clix pack onboard <name>`: probe a CLI and generate a first-pass pack scaffold
 - `clix pack list`: list installed packs
@@ -53,11 +55,13 @@ Recommended workflow for a new pack:
 2. Edit `pack.json` to describe the pack.
 3. Fill in `profiles/`, `capabilities/`, and `workflows/`.
 4. Run `clix pack discover ./my-pack` to validate the manifest.
-5. Run `clix pack install ./my-pack` to install it locally.
+5. Run `clix pack bundle ./my-pack` to create a distributable archive.
+6. Run `clix pack install ./my-pack-v1.clixpack.zip` to install it locally.
 
 The scaffold is intentionally minimal so authors can start simple and add only the pieces they need.
 When you supply `--command`, the generated pack binds the scaffold to that external CLI and records the binding in the profile settings and README.
 `clix pack onboard` runs a help/version probe sequence first, then chooses the closest preset and writes an `onboard.json` report with the observed sections and commands.
+`clix pack publish` copies the bundle archive into `~/.clix/bundles/published` by default and writes a small `index.json` for discovery.
 
 ## Presets
 
@@ -84,3 +88,9 @@ clix pack onboard my-tool --command mytool --runner docker --image ghcr.io/acme/
 ```
 
 The output includes a JSON report of the probe attempts so authors can inspect what the onboarding pass discovered.
+
+## Bundles
+
+Bundles are zip archives containing the pack tree plus a `bundle.json` manifest and a `.sha256` sidecar.
+
+Use bundles when you want to move packs between machines or share them with teammates without copying directories by hand.

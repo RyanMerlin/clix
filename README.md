@@ -11,6 +11,12 @@ go test ./...
 go build ./cmd/clix
 ```
 
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/RyanMerlin/clix/main/scripts/install.sh | sh
+```
+
 ## Releases
 
 Tagged releases are built by GitHub Actions for:

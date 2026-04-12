@@ -778,34 +778,6 @@ func copyDir(src, dst string) error {
 	return nil
 }
 
-func installPack(sourceDir, packsDir string, force bool) (PackManifest, error) {
-	var manifest PackManifest
-	if err := readJSON(filepath.Join(sourceDir, "pack.json"), &manifest); err != nil {
-		return PackManifest{}, fmt.Errorf("read pack manifest: %w", err)
-	}
-	dest := filepath.Join(packsDir, manifest.Name)
-	if fileExists(dest) {
-		if !force {
-			return PackManifest{}, fmt.Errorf("pack already installed: %s", manifest.Name)
-		}
-		if err := os.RemoveAll(dest); err != nil {
-			return PackManifest{}, err
-		}
-	}
-	if err := copyDir(sourceDir, dest); err != nil {
-		return PackManifest{}, err
-	}
-	return manifest, nil
-}
-
-func discoverPack(path string) (PackManifest, error) {
-	var manifest PackManifest
-	if err := readJSON(filepath.Join(path, "pack.json"), &manifest); err != nil {
-		return PackManifest{}, err
-	}
-	return manifest, nil
-}
-
 func scaffoldPack(targetDir, name, description string, force bool) (PackManifest, error) {
 	return scaffoldPackWithPreset(targetDir, name, description, "read-only", "", force)
 }

@@ -246,7 +246,7 @@ func newPackCmd() *cobra.Command {
 	})
 	cmd.AddCommand(&cobra.Command{
 		Use:   "install <path>",
-		Short: "Install a pack from a local directory",
+		Short: "Install a pack from a local directory or bundle",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			state, err := loadOrSeed()
@@ -258,6 +258,43 @@ func newPackCmd() *cobra.Command {
 				return err
 			}
 			return printJSON(map[string]any{"ok": true, "pack": manifest})
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "bundle <path>",
+		Short: "Create a distributable pack bundle",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, _ := cmd.Flags().GetString("out")
+			bundle, path, err := bundlePack(args[0], target)
+			if err != nil {
+				return err
+			}
+			sum, err := hashFile(path)
+			if err != nil {
+				return err
+			}
+			return printJSON(map[string]any{
+				"ok":         true,
+				"bundle":     bundle,
+				"archive":    path,
+				"sha256":     sum,
+				"sha256File": path + ".sha256",
+			})
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "publish <path>",
+		Short: "Publish a pack bundle to a local registry directory",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			outDir, _ := cmd.Flags().GetString("to")
+			force := boolFlag(cmd, "force")
+			returnValue, err := publishPack(args[0], outDir, force)
+			if err != nil {
+				return err
+			}
+			return printJSON(returnValue)
 		},
 	})
 	cmd.AddCommand(&cobra.Command{
@@ -304,6 +341,8 @@ func newPackCmd() *cobra.Command {
 	cmd.PersistentFlags().String("command", "", "external CLI command to bind to the scaffold")
 	cmd.PersistentFlags().String("runner", "auto", "onboard probe runner: local, docker, podman, or auto")
 	cmd.PersistentFlags().String("image", "", "container image for onboard probes")
+	cmd.PersistentFlags().String("out", "", "bundle output path")
+	cmd.PersistentFlags().String("to", "", "publish destination directory")
 	return cmd
 }
 

@@ -87,3 +87,16 @@ type PackManifest struct {
 	Workflows    []string `json:"workflows,omitempty"`
 	Plugins      []string `json:"plugins,omitempty"`
 }
+
+type PackBundleFile struct {
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
+}
+
+type PackBundleManifest struct {
+	SchemaVersion int              `json:"schemaVersion"`
+	CreatedAt     string           `json:"createdAt"`
+	Pack          PackManifest     `json:"pack"`
+	Files         []PackBundleFile `json:"files,omitempty"`
+}

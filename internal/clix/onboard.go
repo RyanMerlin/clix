@@ -41,7 +41,8 @@ func onboardPack(targetDir, name, description, command, runner, image string, fo
 		return PackManifest{}, OnboardReport{}, err
 	}
 	aggregate := aggregateProbeText(probes)
-	preset := inferPackPreset(aggregate)
+	commands := extractObservedCommands(aggregate)
+	preset := inferPackPreset(aggregate, commands)
 	if description == "" {
 		description = fmt.Sprintf("Generated from onboarding probes for %s.", command)
 	}
@@ -55,7 +56,7 @@ func onboardPack(targetDir, name, description, command, runner, image string, fo
 		Runner:           probes[0].Runner,
 		Image:            image,
 		Preset:           preset,
-		ObservedCommands: extractObservedCommands(aggregate),
+		ObservedCommands: commands,
 		Probes:           probes,
 	}
 	if err := writeJSON(filepath.Join(targetDir, "onboard.json"), report); err != nil {
@@ -186,7 +187,7 @@ func aggregateProbeText(probes []OnboardProbe) string {
 	return strings.Join(parts, "\n")
 }
 
-func inferPackPreset(text string) string {
+func inferPackPreset(text string, commands []string) string {
 	lower := strings.ToLower(text)
 	if containsAny(lower, []string{"reconcile", "verify", "sync", "apply", "operator"}) && containsAny(lower, []string{"status", "health", "rollout"}) {
 		return "operator"
@@ -194,7 +195,24 @@ func inferPackPreset(text string) string {
 	if containsAny(lower, []string{"plan", "apply", "diff", "dry run", "dry-run", "preview"}) {
 		return "change-controlled"
 	}
+	if preset := inferPackPresetFromCommands(commands); preset != "" {
+		return preset
+	}
 	return "read-only"
+}
+
+func inferPackPresetFromCommands(commands []string) string {
+	joined := strings.ToLower(strings.Join(commands, " "))
+	switch {
+	case containsAny(joined, []string{"reconcile", "verify", "status"}) && containsAny(joined, []string{"apply", "sync", "rollout"}):
+		return "operator"
+	case containsAny(joined, []string{"plan", "apply", "diff", "preview"}):
+		return "change-controlled"
+	case containsAny(joined, []string{"info", "version", "help", "list", "get", "show"}):
+		return "read-only"
+	default:
+		return ""
+	}
 }
 
 func containsAny(text string, needles []string) bool {
