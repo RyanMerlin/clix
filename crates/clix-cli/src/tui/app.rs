@@ -143,10 +143,30 @@ impl App {
                 }
             }
             Screen::Profiles => {
-                // Toggle handled in Task 3 (needs state save) — no-op here
+                if let Some(profile) = self.profiles.get(self.cursor) {
+                    let name = profile.name.clone();
+                    if let Err(e) = self.toggle_profile(&name) {
+                        self.last_error = Some(format!("Toggle failed: {e}"));
+                    } else {
+                        self.last_error = None;
+                    }
+                }
             }
             Screen::Packs => {}
         }
+    }
+
+    pub fn toggle_profile(&mut self, name: &str) -> Result<()> {
+        let mut state = ClixState::load(home_dir())?;
+        if state.config.active_profiles.contains(&name.to_string()) {
+            state.config.active_profiles.retain(|p| p != name);
+        } else {
+            state.config.active_profiles.push(name.to_string());
+        }
+        let yaml = serde_yaml::to_string(&state.config)?;
+        std::fs::write(&state.config_path, yaml)?;
+        self.active_profiles = state.config.active_profiles.clone();
+        Ok(())
     }
 
     fn handle_back(&mut self) {

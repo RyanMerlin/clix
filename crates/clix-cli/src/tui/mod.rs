@@ -7,7 +7,6 @@ use crossterm::{
 use ratatui::{prelude::*, widgets::*};
 use anyhow::Result;
 use crate::tui::app::{App, Screen};
-
 pub mod app;
 pub mod screens;
 
@@ -54,10 +53,10 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App
 }
 
 fn render(f: &mut Frame, app: &App) {
-    // Layout: 1-line tab bar at top, rest to content area
+    // Layout: 1-line tab bar, content area, 1-line status bar
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .constraints([Constraint::Length(1), Constraint::Min(0), Constraint::Length(1)])
         .split(f.area());
 
     // Tab bar
@@ -69,11 +68,24 @@ fn render(f: &mut Frame, app: &App) {
     };
     let tabs = Tabs::new(titles)
         .select(selected)
-        .highlight_style(Style::default().bold());
+        .highlight_style(Style::default().bold().fg(Color::Yellow));
     f.render_widget(tabs, chunks[0]);
 
-    // Content placeholder — replaced in Task 3
-    let placeholder = Paragraph::new("Press q to quit | r to reload | 1/2/3 to switch screens")
-        .alignment(Alignment::Center);
-    f.render_widget(placeholder, chunks[1]);
+    // Screen content
+    match app.screen {
+        Screen::Profiles => screens::profiles::render(f, app, chunks[1]),
+        Screen::Capabilities => screens::capabilities::render(f, app, chunks[1]),
+        Screen::Packs => screens::packs::render(f, app, chunks[1]),
+    }
+
+    // Status bar
+    let status = app.last_error.as_deref()
+        .unwrap_or("q:quit  r:reload  1/2/3:screens  j/k:navigate  Enter:select  Esc:back");
+    let style = if app.last_error.is_some() {
+        Style::default().fg(Color::Red)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let status_bar = Paragraph::new(status).style(style);
+    f.render_widget(status_bar, chunks[2]);
 }
