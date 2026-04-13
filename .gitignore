@@ -6,3 +6,4 @@ bin/
 clix.exe
 *.log
 .clix/
+.env
