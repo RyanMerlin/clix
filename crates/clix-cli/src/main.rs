@@ -2,6 +2,7 @@ mod cli;
 mod commands;
 mod dynamic_cli;
 mod output;
+mod tui;
 
 use anyhow::Result;
 use clap::FromArgMatches;
