@@ -1,5 +1,6 @@
 mod cli;
 mod commands;
+mod dynamic_cli;
 mod output;
 
 use anyhow::Result;
