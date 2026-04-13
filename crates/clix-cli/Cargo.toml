@@ -1,0 +1,20 @@
+[package]
+name    = "clix-cli"
+version = "0.2.0"
+edition = "2021"
+default-run = "clix"
+
+[[bin]]
+name = "clix"
+path = "src/main.rs"
+
+[dependencies]
+clix-core  = { path = "../clix-core" }
+clix-serve = { path = "../clix-serve" }
+clap       = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+serde      = { workspace = true }
+anyhow     = { workspace = true }
+tokio      = { workspace = true }
+whoami     = { workspace = true }

@@ -1,0 +1,57 @@
+use anyhow::{anyhow, Result};
+use clix_core::execution::run_capability;
+use clix_core::loader::{build_registry, load_policy};
+use clix_core::policy::evaluate::ExecutionContext;
+use clix_core::receipts::ReceiptStore;
+use clix_core::state::{home_dir, ClixState};
+use crate::output::print_json;
+
+pub fn run(capability: &str, input_pairs: &[String], json: bool) -> Result<()> {
+    let state = ClixState::load(home_dir())?;
+    let registry = build_registry(&state)?;
+    let policy = load_policy(&state)?;
+    let store = ReceiptStore::open(&state.receipts_db)?;
+    let input = parse_input_pairs(input_pairs)?;
+    let ctx = ExecutionContext {
+        env: state.config.default_env.clone(),
+        cwd: state.config.workspace_root.clone().unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        }),
+        user: whoami::username(),
+        profile: state.config.active_profiles.first().cloned().unwrap_or_else(|| "default".to_string()),
+        approver: None,
+    };
+    let outcome = run_capability(&registry, &policy, state.config.infisical.as_ref(), &store, capability, input, ctx)
+        .map_err(|e| anyhow!("{e}"))?;
+    if json {
+        print_json(&outcome);
+    } else if outcome.ok {
+        println!("ok — receipt {}", outcome.receipt_id);
+        if let Some(result) = &outcome.result {
+            if let Some(stdout) = result["stdout"].as_str() {
+                if !stdout.is_empty() { print!("{stdout}"); }
+            } else if let Some(date) = result["date"].as_str() {
+                println!("{date}");
+            } else if let Some(output) = result["output"].as_str() {
+                println!("{output}");
+            }
+        }
+    } else if outcome.approval_required {
+        eprintln!("approval required — receipt {}", outcome.receipt_id);
+        std::process::exit(2);
+    } else {
+        eprintln!("denied: {}", outcome.reason.unwrap_or_default());
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+pub fn parse_input_pairs(pairs: &[String]) -> Result<serde_json::Value> {
+    let mut map = serde_json::Map::new();
+    for pair in pairs {
+        let (key, value) = pair.split_once('=').ok_or_else(|| anyhow!("input must be key=value, got: {pair}"))?;
+        let v: serde_json::Value = serde_json::from_str(value).unwrap_or_else(|_| serde_json::Value::String(value.to_string()));
+        map.insert(key.to_string(), v);
+    }
+    Ok(serde_json::Value::Object(map))
+}

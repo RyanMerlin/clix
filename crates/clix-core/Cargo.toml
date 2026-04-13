@@ -1,0 +1,27 @@
+[package]
+name    = "clix-core"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+serde_yaml  = { workspace = true }
+thiserror   = { workspace = true }
+uuid        = { workspace = true }
+chrono      = { workspace = true }
+jsonschema  = { workspace = true }
+minijinja   = { workspace = true }
+reqwest     = { workspace = true }
+urlencoding = { workspace = true }
+rusqlite    = { workspace = true }
+dirs        = { workspace = true }
+sha2        = { workspace = true }
+hex         = { workspace = true }
+zip         = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"
+
+[dev-dependencies]
+tempfile = { workspace = true }

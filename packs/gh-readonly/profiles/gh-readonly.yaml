@@ -1,0 +1,4 @@
+name: gh-readonly
+version: 1
+capabilities:
+  - gh.list-repos

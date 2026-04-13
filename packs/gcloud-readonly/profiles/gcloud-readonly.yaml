@@ -1,0 +1,4 @@
+name: gcloud-readonly
+version: 1
+capabilities:
+  - gcloud.list-projects
