@@ -76,6 +76,7 @@ func seedBuiltinPacks(base State) error {
 		{Name: "infisical-readonly", Version: 1, Description: "Read-only Infisical inspection.", Profiles: []string{"infisical-readonly"}},
 		{Name: "incus-readonly", Version: 1, Description: "Read-only Incus inspection.", Profiles: []string{"incus-readonly"}},
 		{Name: "argocd-observe", Version: 1, Description: "Read-only Argo CD inspection.", Profiles: []string{"argocd-observe"}},
+		{Name: "agents", Version: 1, Description: "Agent credential-backed service capabilities (GitHub, Gemini, LiteLLM, Home Assistant, Telegram, Cloudflare, RustFS, Proton).", Profiles: []string{"agents"}},
 	}
 	for _, pack := range packs {
 		if err := seedBuiltinPack(base, pack); err != nil {
@@ -697,6 +698,377 @@ func seedBuiltinPackContents(base State, pack PackManifest) error {
 				},
 			},
 		}, nil)
+	case "agents":
+		// projectID and environment are resolved from env vars at runtime by the
+		// embedded Infisical client; we hard-code the secret names and path here
+		// so the manifest is self-describing.
+		infisicalCred := func(injectAs, secretName string) CredentialSource {
+			return CredentialSource{
+				InjectAs: injectAs,
+				Type:     "infisical",
+				Infisical: &InfisicalRef{
+					SecretName:  secretName,
+					Environment: "prod",
+					SecretPath:  "/agents",
+				},
+			}
+		}
+		agentPolicy := &PolicyBundle{
+			SchemaVersion:   1,
+			DefaultDecision: "deny",
+			Rules: []PolicyRule{
+				{Effect: "allow", Match: PolicyMatch{Profiles: []string{"agents"}, SideEffects: []string{"read_only"}}},
+				{Effect: "require_approval", Match: PolicyMatch{Profiles: []string{"agents"}, Risk: []string{"medium"}}},
+				{Effect: "require_approval", Match: PolicyMatch{Profiles: []string{"agents"}, Risk: []string{"high"}}},
+			},
+		}
+		caps := []CapabilityManifest{
+			// ── GitHub ───────────────────────────────────────────────────────────
+			{
+				Name:            "github.repo.list",
+				Version:         1,
+				Description:     "List repositories for the authenticated GitHub user.",
+				Risk:            "low",
+				SideEffectClass: "read_only",
+				Backend: CapabilityBackend{
+					Type:    "subprocess",
+					Command: "curl",
+					Args:    []string{"-sf", "-H", "Authorization: Bearer $GITHUB_TOKEN", "-H", "Accept: application/vnd.github+json", "https://api.github.com/user/repos?per_page=100&sort=updated"},
+					Credentials: []CredentialSource{
+						infisicalCred("GITHUB_TOKEN", "GITHUB_TOKEN"),
+					},
+				},
+			},
+			{
+				Name:            "github.repo.issues",
+				Version:         1,
+				Description:     "List open issues for a GitHub repo (owner/repo).",
+				Risk:            "low",
+				SideEffectClass: "read_only",
+				InputSchema: map[string]any{
+					"type": "object", "required": []any{"repo"}, "additionalProperties": false,
+					"properties": map[string]any{"repo": map[string]any{"type": "string", "description": "owner/repo"}},
+				},
+				Validators: []Validator{{Type: "requiredInputKey", Key: "repo"}},
+				Backend: CapabilityBackend{
+					Type:    "subprocess",
+					Command: "curl",
+					Args:    []string{"-sf", "-H", "Authorization: Bearer $GITHUB_TOKEN", "-H", "Accept: application/vnd.github+json", "https://api.github.com/repos/${input.repo}/issues?state=open&per_page=50"},
+					Credentials: []CredentialSource{
+						infisicalCred("GITHUB_TOKEN", "GITHUB_TOKEN"),
+					},
+				},
+			},
+			{
+				Name:            "github.issue.create",
+				Version:         1,
+				Description:     "Create a GitHub issue.",
+				Risk:            "medium",
+				SideEffectClass: "write_remote",
+				InputSchema: map[string]any{
+					"type": "object", "required": []any{"repo", "title"}, "additionalProperties": false,
+					"properties": map[string]any{
+						"repo":  map[string]any{"type": "string"},
+						"title": map[string]any{"type": "string"},
+						"body":  map[string]any{"type": "string"},
+					},
+				},
+				Validators: []Validator{{Type: "requiredInputKey", Key: "repo"}, {Type: "requiredInputKey", Key: "title"}},
+				Backend: CapabilityBackend{
+					Type:    "subprocess",
+					Command: "curl",
+					Args:    []string{"-sf", "-X", "POST", "-H", "Authorization: Bearer $GITHUB_TOKEN", "-H", "Accept: application/vnd.github+json", "-H", "Content-Type: application/json", "-d", `{"title":"${input.title}","body":"${input.body}"}`, "https://api.github.com/repos/${input.repo}/issues"},
+					Credentials: []CredentialSource{
+						infisicalCred("GITHUB_TOKEN", "GITHUB_TOKEN"),
+					},
+				},
+			},
+			// ── Gemini ───────────────────────────────────────────────────────────
+			{
+				Name:            "gemini.generate",
+				Version:         1,
+				Description:     "Generate text with the Gemini API (gemini-2.0-flash).",
+				Risk:            "low",
+				SideEffectClass: "read_only",
+				InputSchema: map[string]any{
+					"type": "object", "required": []any{"prompt"}, "additionalProperties": false,
+					"properties": map[string]any{"prompt": map[string]any{"type": "string"}},
+				},
+				Validators: []Validator{{Type: "requiredInputKey", Key: "prompt"}},
+				Backend: CapabilityBackend{
+					Type:    "subprocess",
+					Command: "curl",
+					Args:    []string{"-sf", "-X", "POST", "-H", "Content-Type: application/json", "-d", `{"contents":[{"parts":[{"text":"${input.prompt}"}]}]}`, "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$GEMINI_API_KEY_DEFAULT"},
+					Credentials: []CredentialSource{
+						infisicalCred("GEMINI_API_KEY_DEFAULT", "GEMINI_API_KEY_DEFAULT"),
+					},
+				},
+			},
+			// ── LiteLLM ──────────────────────────────────────────────────────────
+			{
+				Name:            "litellm.chat",
+				Version:         1,
+				Description:     "Send a chat completion request through the LiteLLM proxy.",
+				Risk:            "low",
+				SideEffectClass: "read_only",
+				InputSchema: map[string]any{
+					"type": "object", "required": []any{"message"}, "additionalProperties": false,
+					"properties": map[string]any{
+						"message": map[string]any{"type": "string"},
+						"model":   map[string]any{"type": "string", "description": "LiteLLM model name (default: gpt-4o)"},
+					},
+				},
+				Validators: []Validator{{Type: "requiredInputKey", Key: "message"}},
+				Backend: CapabilityBackend{
+					Type:    "subprocess",
+					Command: "curl",
+					Args:    []string{"-sf", "-X", "POST", "-H", "Authorization: Bearer $AGENT_LITELLM_API_KEY", "-H", "Content-Type: application/json", "-d", `{"model":"${input.model:-gpt-4o}","messages":[{"role":"user","content":"${input.message}"}]}`, "http://localhost:4000/v1/chat/completions"},
+					Credentials: []CredentialSource{
+						infisicalCred("AGENT_LITELLM_API_KEY", "AGENT_LITELLM_API_KEY"),
+					},
+				},
+			},
+			// ── Home Assistant ───────────────────────────────────────────────────
+			{
+				Name:            "ha.states.list",
+				Version:         1,
+				Description:     "List all Home Assistant entity states.",
+				Risk:            "low",
+				SideEffectClass: "read_only",
+				Backend: CapabilityBackend{
+					Type:    "subprocess",
+					Command: "curl",
+					Args:    []string{"-sf", "-H", "Authorization: Bearer $HA_LONG_TOKEN_OPENCLAW_MERLIN", "-H", "Content-Type: application/json", "http://homeassistant.local:8123/api/states"},
+					Credentials: []CredentialSource{
+						infisicalCred("HA_LONG_TOKEN_OPENCLAW_MERLIN", "HA_LONG_TOKEN_OPENCLAW_MERLIN"),
+					},
+				},
+			},
+			{
+				Name:            "ha.state.get",
+				Version:         1,
+				Description:     "Get the state of a specific Home Assistant entity.",
+				Risk:            "low",
+				SideEffectClass: "read_only",
+				InputSchema: map[string]any{
+					"type": "object", "required": []any{"entity_id"}, "additionalProperties": false,
+					"properties": map[string]any{"entity_id": map[string]any{"type": "string", "description": "e.g. light.living_room"}},
+				},
+				Validators: []Validator{{Type: "requiredInputKey", Key: "entity_id"}},
+				Backend: CapabilityBackend{
+					Type:    "subprocess",
+					Command: "curl",
+					Args:    []string{"-sf", "-H", "Authorization: Bearer $HA_LONG_TOKEN_OPENCLAW_MERLIN", "-H", "Content-Type: application/json", "http://homeassistant.local:8123/api/states/${input.entity_id}"},
+					Credentials: []CredentialSource{
+						infisicalCred("HA_LONG_TOKEN_OPENCLAW_MERLIN", "HA_LONG_TOKEN_OPENCLAW_MERLIN"),
+					},
+				},
+			},
+			{
+				Name:            "ha.service.call",
+				Version:         1,
+				Description:     "Call a Home Assistant service (e.g. light.turn_on).",
+				Risk:            "high",
+				SideEffectClass: "write_remote",
+				InputSchema: map[string]any{
+					"type": "object", "required": []any{"domain", "service"}, "additionalProperties": false,
+					"properties": map[string]any{
+						"domain":    map[string]any{"type": "string", "description": "e.g. light"},
+						"service":   map[string]any{"type": "string", "description": "e.g. turn_on"},
+						"entity_id": map[string]any{"type": "string"},
+					},
+				},
+				Validators: []Validator{{Type: "requiredInputKey", Key: "domain"}, {Type: "requiredInputKey", Key: "service"}},
+				Backend: CapabilityBackend{
+					Type:    "subprocess",
+					Command: "curl",
+					Args:    []string{"-sf", "-X", "POST", "-H", "Authorization: Bearer $HA_LONG_TOKEN_OPENCLAW_MERLIN", "-H", "Content-Type: application/json", "-d", `{"entity_id":"${input.entity_id}"}`, "http://homeassistant.local:8123/api/services/${input.domain}/${input.service}"},
+					Credentials: []CredentialSource{
+						infisicalCred("HA_LONG_TOKEN_OPENCLAW_MERLIN", "HA_LONG_TOKEN_OPENCLAW_MERLIN"),
+					},
+				},
+			},
+			// ── Telegram ─────────────────────────────────────────────────────────
+			{
+				Name:            "telegram.send",
+				Version:         1,
+				Description:     "Send a Telegram message to a chat.",
+				Risk:            "medium",
+				SideEffectClass: "write_remote",
+				InputSchema: map[string]any{
+					"type": "object", "required": []any{"chat_id", "text"}, "additionalProperties": false,
+					"properties": map[string]any{
+						"chat_id": map[string]any{"type": "string", "description": "Telegram chat ID or @username"},
+						"text":    map[string]any{"type": "string"},
+					},
+				},
+				Validators: []Validator{{Type: "requiredInputKey", Key: "chat_id"}, {Type: "requiredInputKey", Key: "text"}},
+				Backend: CapabilityBackend{
+					Type:    "subprocess",
+					Command: "curl",
+					Args:    []string{"-sf", "-X", "POST", "-H", "Content-Type: application/json", "-d", `{"chat_id":"${input.chat_id}","text":"${input.text}"}`, "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage"},
+					Credentials: []CredentialSource{
+						infisicalCred("TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_TOKEN"),
+					},
+				},
+			},
+			{
+				Name:            "telegram.updates.get",
+				Version:         1,
+				Description:     "Get recent Telegram bot updates.",
+				Risk:            "low",
+				SideEffectClass: "read_only",
+				Backend: CapabilityBackend{
+					Type:    "subprocess",
+					Command: "curl",
+					Args:    []string{"-sf", "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getUpdates"},
+					Credentials: []CredentialSource{
+						infisicalCred("TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_TOKEN"),
+					},
+				},
+			},
+			// ── Cloudflare (via Access service token) ────────────────────────────
+			{
+				Name:            "cloudflare.access.verify",
+				Version:         1,
+				Description:     "Verify Cloudflare Access service token by hitting a protected URL.",
+				Risk:            "low",
+				SideEffectClass: "read_only",
+				InputSchema: map[string]any{
+					"type": "object", "required": []any{"url"}, "additionalProperties": false,
+					"properties": map[string]any{"url": map[string]any{"type": "string", "description": "Cloudflare Access-protected URL to probe"}},
+				},
+				Validators: []Validator{{Type: "requiredInputKey", Key: "url"}},
+				Backend: CapabilityBackend{
+					Type:    "subprocess",
+					Command: "curl",
+					Args:    []string{"-sf", "-H", "$CLOUDFLARE_SA_TOKEN_CLIENT_ID", "-H", "$CLOUDFLARE_SA_TOKEN_CLIENT_SECRET_HEADER", "${input.url}"},
+					Credentials: []CredentialSource{
+						infisicalCred("CLOUDFLARE_SA_TOKEN_CLIENT_ID", "CLOUDFLARE_SA_TOKEN_CLIENT_ID"),
+						infisicalCred("CLOUDFLARE_SA_TOKEN_CLIENT_SECRET_HEADER", "CLOUDFLARE_SA_TOKEN_CLIENT_SECRET_HEADER"),
+					},
+				},
+			},
+			// ── RustFS (S3-compatible) ────────────────────────────────────────────
+			{
+				Name:            "rustfs.buckets.list",
+				Version:         1,
+				Description:     "List RustFS buckets using the S3 API via curl + AWS SigV4.",
+				Risk:            "low",
+				SideEffectClass: "read_only",
+				InputSchema: map[string]any{
+					"type": "object", "required": []any{"endpoint"}, "additionalProperties": false,
+					"properties": map[string]any{"endpoint": map[string]any{"type": "string", "description": "RustFS endpoint URL, e.g. http://rustfs.local:9000"}},
+				},
+				Validators: []Validator{{Type: "requiredInputKey", Key: "endpoint"}},
+				Backend: CapabilityBackend{
+					Type:    "subprocess",
+					Command: "curl",
+					Args:    []string{"-sf", "--aws-sigv4", "aws:amz:us-east-1:s3", "-u", "$RUSTFS_ACCESS_KEY:$RUSTFS_ACCESS_SECRET", "${input.endpoint}/"},
+					Credentials: []CredentialSource{
+						infisicalCred("RUSTFS_ACCESS_KEY", "RUSTFS_ACCESS_KEY"),
+						infisicalCred("RUSTFS_ACCESS_SECRET", "RUSTFS_ACCESS_SECRET"),
+					},
+				},
+			},
+			{
+				Name:            "rustfs.object.get",
+				Version:         1,
+				Description:     "Download an object from a RustFS bucket.",
+				Risk:            "low",
+				SideEffectClass: "read_only",
+				InputSchema: map[string]any{
+					"type": "object", "required": []any{"endpoint", "bucket", "key"}, "additionalProperties": false,
+					"properties": map[string]any{
+						"endpoint": map[string]any{"type": "string"},
+						"bucket":   map[string]any{"type": "string"},
+						"key":      map[string]any{"type": "string"},
+					},
+				},
+				Validators: []Validator{
+					{Type: "requiredInputKey", Key: "endpoint"},
+					{Type: "requiredInputKey", Key: "bucket"},
+					{Type: "requiredInputKey", Key: "key"},
+				},
+				Backend: CapabilityBackend{
+					Type:    "subprocess",
+					Command: "curl",
+					Args:    []string{"-sf", "--aws-sigv4", "aws:amz:us-east-1:s3", "-u", "$RUSTFS_ACCESS_KEY:$RUSTFS_ACCESS_SECRET", "${input.endpoint}/${input.bucket}/${input.key}"},
+					Credentials: []CredentialSource{
+						infisicalCred("RUSTFS_ACCESS_KEY", "RUSTFS_ACCESS_KEY"),
+						infisicalCred("RUSTFS_ACCESS_SECRET", "RUSTFS_ACCESS_SECRET"),
+					},
+				},
+			},
+			// ── Proton Bridge (SMTP via curl) ─────────────────────────────────────
+			{
+				Name:            "proton.mail.send",
+				Version:         1,
+				Description:     "Send an email via Proton Bridge SMTP using curl.",
+				Risk:            "high",
+				SideEffectClass: "write_remote",
+				InputSchema: map[string]any{
+					"type": "object", "required": []any{"to", "subject", "body", "from"}, "additionalProperties": false,
+					"properties": map[string]any{
+						"from":    map[string]any{"type": "string"},
+						"to":      map[string]any{"type": "string"},
+						"subject": map[string]any{"type": "string"},
+						"body":    map[string]any{"type": "string"},
+					},
+				},
+				Validators: []Validator{
+					{Type: "requiredInputKey", Key: "to"},
+					{Type: "requiredInputKey", Key: "subject"},
+					{Type: "requiredInputKey", Key: "body"},
+					{Type: "requiredInputKey", Key: "from"},
+				},
+				Backend: CapabilityBackend{
+					Type:    "subprocess",
+					Command: "curl",
+					Args: []string{
+						"-sf",
+						"--url", "smtp://127.0.0.1:1025",
+						"--mail-from", "${input.from}",
+						"--mail-rcpt", "${input.to}",
+						"--user", "${input.from}:$PROTON_BRIDGE_PASSWORD",
+						"-T", "-",
+						"--upload-file", "/dev/stdin",
+					},
+					Credentials: []CredentialSource{
+						infisicalCred("PROTON_BRIDGE_PASSWORD", "PROTON_BRIDGE_PASSWORD"),
+					},
+				},
+			},
+		}
+		workflows := []WorkflowManifest{
+			{
+				Name:        "agents-status",
+				Version:     1,
+				Description: "Quick health check: list GitHub repos and get Telegram updates.",
+				Steps: []WorkflowStep{
+					{Name: "github-repos", Capability: "github.repo.list"},
+					{Name: "telegram-updates", Capability: "telegram.updates.get"},
+				},
+			},
+			{
+				Name:        "ha-overview",
+				Version:     1,
+				Description: "Fetch all Home Assistant entity states.",
+				Steps: []WorkflowStep{
+					{Name: "states", Capability: "ha.states.list"},
+				},
+			},
+		}
+		profile := ProfileManifest{
+			Name:         "agents",
+			Version:      1,
+			Description:  "Credential-backed capabilities for agent services (GitHub, Gemini, LiteLLM, HA, Telegram, Cloudflare, RustFS, Proton).",
+			Capabilities: caps,
+			Workflows:    workflows,
+			Policy:       agentPolicy,
+		}
+		return seedPackBundle(dir, pack, profile, workflows, nil)
+
 	default:
 		return nil
 	}

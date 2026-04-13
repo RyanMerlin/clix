@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -177,6 +178,21 @@ func runSubprocess(cap CapabilityManifest, ctx map[string]string, resolvedArgs a
 		secrets, err = resolveCredentials(cap.Backend.Credentials, infisicalCfg)
 		if err != nil {
 			return nil, fmt.Errorf("credential resolution failed: %w", err)
+		}
+	}
+
+	// Expand $VAR and ${VAR} references in args against the resolved secrets.
+	// This allows capability manifests to embed credential references directly
+	// in arg strings (e.g. "Authorization: Bearer $GITHUB_TOKEN") without
+	// requiring a shell interpreter.
+	if len(secrets) > 0 {
+		for i, arg := range args {
+			args[i] = os.Expand(arg, func(key string) string {
+				if v, ok := secrets[key]; ok {
+					return v
+				}
+				return os.Getenv(key)
+			})
 		}
 	}
 

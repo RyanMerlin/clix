@@ -47,16 +47,34 @@ func getInfisicalClient(cfg InfisicalConfig) (*infisicalClient, error) {
 }
 
 // fetchInfisicalSecret retrieves a single secret value using the embedded client.
+// ProjectID and Environment fall back to INFISICAL_PROJECT_ID and
+// INFISICAL_ENVIRONMENT env vars when not set on the ref, so capability
+// manifests can omit them and pick them up from runtime configuration.
 func fetchInfisicalSecret(cfg InfisicalConfig, ref InfisicalRef) (string, error) {
 	client, err := getInfisicalClient(cfg)
 	if err != nil {
 		return "", err
 	}
+	projectID := ref.ProjectID
+	if projectID == "" {
+		projectID = os.Getenv("INFISICAL_PROJECT_ID")
+	}
+	environment := ref.Environment
+	if environment == "" {
+		environment = os.Getenv("INFISICAL_ENVIRONMENT")
+	}
+	if environment == "" {
+		environment = "prod"
+	}
+	secretPath := ref.SecretPath
+	if secretPath == "" {
+		secretPath = os.Getenv("INFISICAL_SECRET_PATH")
+	}
 	return client.RetrieveSecret(RetrieveSecretOptions{
 		SecretKey:              ref.SecretName,
-		ProjectID:              ref.ProjectID,
-		Environment:            ref.Environment,
-		SecretPath:             ref.SecretPath,
+		ProjectID:              projectID,
+		Environment:            environment,
+		SecretPath:             secretPath,
 		ExpandSecretReferences: true,
 	})
 }

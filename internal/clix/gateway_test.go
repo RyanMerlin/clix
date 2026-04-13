@@ -144,19 +144,19 @@ func newMockInfisicalServer(t *testing.T, secretValue string) (server *httptest.
 	authCalls = new(atomic.Int32)
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/v1/auth/universal-auth/login", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v1/auth/universal-auth/login", func(w http.ResponseWriter, r *http.Request) {
 		authCalls.Add(1)
 		json.NewEncoder(w).Encode(universalAuthLoginResponse{
 			AccessToken: "test-token", ExpiresIn: 3600, AccessTokenMaxTTL: 7200, TokenType: "Bearer",
 		})
 	})
-	mux.HandleFunc("/v1/auth/token/renew", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v1/auth/token/renew", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(tokenRenewResponse{
 			AccessToken: "renewed-token", ExpiresIn: 3600, AccessTokenMaxTTL: 7200, TokenType: "Bearer",
 		})
 	})
-	mux.HandleFunc("/v3/secrets/raw/", func(w http.ResponseWriter, r *http.Request) {
-		key := strings.TrimPrefix(r.URL.Path, "/v3/secrets/raw/")
+	mux.HandleFunc("/api/v3/secrets/raw/", func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimPrefix(r.URL.Path, "/api/v3/secrets/raw/")
 		json.NewEncoder(w).Encode(map[string]any{
 			"secret": map[string]any{"secretKey": key, "secretValue": secretValue},
 		})
@@ -192,12 +192,12 @@ func TestInfisicalClient_AuthAndRetrieve(t *testing.T) {
 func TestInfisicalClient_CacheHit(t *testing.T) {
 	retrieveCalls := new(atomic.Int32)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/auth/universal-auth/login", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v1/auth/universal-auth/login", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(universalAuthLoginResponse{
 			AccessToken: "tok", ExpiresIn: 3600, AccessTokenMaxTTL: 7200,
 		})
 	})
-	mux.HandleFunc("/v3/secrets/raw/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v3/secrets/raw/", func(w http.ResponseWriter, r *http.Request) {
 		retrieveCalls.Add(1)
 		json.NewEncoder(w).Encode(map[string]any{
 			"secret": map[string]any{"secretKey": "K", "secretValue": "cached-value"},
@@ -231,20 +231,20 @@ func TestInfisicalClient_CacheHit(t *testing.T) {
 func TestInfisicalClient_TokenRenewalOnExpiry(t *testing.T) {
 	renewCalls := new(atomic.Int32)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/auth/universal-auth/login", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v1/auth/universal-auth/login", func(w http.ResponseWriter, r *http.Request) {
 		// TTL of 1 second — isExpiringSoon fires immediately since buffer=5s > 1s.
 		json.NewEncoder(w).Encode(universalAuthLoginResponse{
 			AccessToken: "initial-token", ExpiresIn: 1, AccessTokenMaxTTL: 7200,
 		})
 	})
-	mux.HandleFunc("/v1/auth/token/renew", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v1/auth/token/renew", func(w http.ResponseWriter, r *http.Request) {
 		renewCalls.Add(1)
 		json.NewEncoder(w).Encode(tokenRenewResponse{
 			AccessToken: "renewed-token", ExpiresIn: 3600, AccessTokenMaxTTL: 7200,
 		})
 	})
 	// Echo back the token in use so we can verify renewal happened.
-	mux.HandleFunc("/v3/secrets/raw/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v3/secrets/raw/", func(w http.ResponseWriter, r *http.Request) {
 		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		json.NewEncoder(w).Encode(map[string]any{
 			"secret": map[string]any{"secretKey": "K", "secretValue": tok},
@@ -292,12 +292,12 @@ func TestInfisicalClient_BadCredentials(t *testing.T) {
 
 func TestInfisicalClient_SecretNotFound(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/auth/universal-auth/login", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v1/auth/universal-auth/login", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(universalAuthLoginResponse{
 			AccessToken: "tok", ExpiresIn: 3600, AccessTokenMaxTTL: 7200,
 		})
 	})
-	mux.HandleFunc("/v3/secrets/raw/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v3/secrets/raw/", func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	})
 	srv := httptest.NewServer(mux)
