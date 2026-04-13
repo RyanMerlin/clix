@@ -16,9 +16,9 @@
 //   - All cloud-provider auth methods (AWS IAM, GCP, OCI, K8s, Azure, LDAP)
 //
 // Infisical API surface used:
-//   POST /v1/auth/universal-auth/login   — initial auth
-//   POST /v1/auth/token/renew            — token renewal
-//   GET  /v3/secrets/raw/{key}           — single secret retrieval
+//   POST /api/v1/auth/universal-auth/login   — initial auth
+//   POST /api/v1/auth/token/renew            — token renewal
+//   GET  /api/v3/secrets/raw/{key}           — single secret retrieval
 package clix
 
 import (
@@ -139,6 +139,13 @@ type retrieveSecretResponse struct {
 		SecretKey   string `json:"secretKey"`
 		SecretValue string `json:"secretValue"`
 	} `json:"secret"`
+}
+
+type listSecretsResponse struct {
+	Secrets []struct {
+		SecretKey   string `json:"secretKey"`
+		SecretValue string `json:"secretValue"`
+	} `json:"secrets"`
 }
 
 // --- Client construction ---
@@ -306,7 +313,7 @@ func (c *infisicalClient) callUniversalAuthLogin() (*universalAuthLoginResponse,
 		ClientID:     c.clientID,
 		ClientSecret: c.clientSecret,
 	})
-	req, _ := http.NewRequestWithContext(c.ctx, http.MethodPost, c.siteURL+"/v1/auth/universal-auth/login", bytes.NewReader(body))
+	req, _ := http.NewRequestWithContext(c.ctx, http.MethodPost, c.siteURL+"/api/v1/auth/universal-auth/login", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	// Deliberately no Authorization header — auth endpoint must not loop.
 
@@ -327,7 +334,7 @@ func (c *infisicalClient) callUniversalAuthLogin() (*universalAuthLoginResponse,
 
 func (c *infisicalClient) callTokenRenew(accessToken string) (*tokenRenewResponse, error) {
 	body, _ := json.Marshal(tokenRenewRequest{AccessToken: accessToken})
-	req, _ := http.NewRequestWithContext(c.ctx, http.MethodPost, c.siteURL+"/v1/auth/token/renew", bytes.NewReader(body))
+	req, _ := http.NewRequestWithContext(c.ctx, http.MethodPost, c.siteURL+"/api/v1/auth/token/renew", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
@@ -382,7 +389,7 @@ func (c *infisicalClient) RetrieveSecret(opts RetrieveSecretOptions) (string, er
 		params.Set("workspaceId", opts.ProjectID)
 	}
 
-	endpoint := fmt.Sprintf("%s/v3/secrets/raw/%s?%s", c.siteURL, url.PathEscape(opts.SecretKey), params.Encode())
+	endpoint := fmt.Sprintf("%s/api/v3/secrets/raw/%s?%s", c.siteURL, url.PathEscape(opts.SecretKey), params.Encode())
 	req, _ := http.NewRequestWithContext(c.ctx, http.MethodGet, endpoint, nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
 
@@ -405,6 +412,73 @@ func (c *infisicalClient) RetrieveSecret(opts RetrieveSecretOptions) (string, er
 
 	c.cache.set(cacheKey, out.Secret.SecretValue)
 	return out.Secret.SecretValue, nil
+}
+
+// ListSecretsOptions mirrors RetrieveSecretOptions but for bulk listing.
+type ListSecretsOptions struct {
+	ProjectID              string
+	Environment            string
+	SecretPath             string
+	ExpandSecretReferences bool
+}
+
+// SecretKV is a key/value pair returned by ListSecrets.
+type SecretKV struct {
+	Key   string
+	Value string
+}
+
+// ListSecrets returns all secrets at the given path. Results are cached for 30s.
+func (c *infisicalClient) ListSecrets(opts ListSecretsOptions) ([]SecretKV, error) {
+	if opts.SecretPath == "" {
+		opts.SecretPath = "/"
+	}
+
+	cacheKey := c.cache.cacheKey(opts, "ListSecrets")
+	if cached, ok := c.cache.get(cacheKey); ok {
+		if kvs, ok := cached.([]SecretKV); ok {
+			return kvs, nil
+		}
+	}
+
+	tok, err := c.accessToken()
+	if err != nil {
+		return nil, err
+	}
+
+	params := url.Values{}
+	params.Set("environment", opts.Environment)
+	params.Set("secretPath", opts.SecretPath)
+	params.Set("expandSecretReferences", boolStr(opts.ExpandSecretReferences))
+	if opts.ProjectID != "" {
+		params.Set("workspaceId", opts.ProjectID)
+	}
+
+	endpoint := fmt.Sprintf("%s/api/v3/secrets/raw?%s", c.siteURL, params.Encode())
+	req, _ := http.NewRequestWithContext(c.ctx, http.MethodGet, endpoint, nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("infisical: list secrets request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("infisical: list secrets returned HTTP %d: %s", resp.StatusCode, string(b))
+	}
+
+	var out listSecretsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("infisical: list secrets response decode failed: %w", err)
+	}
+
+	kvs := make([]SecretKV, len(out.Secrets))
+	for i, s := range out.Secrets {
+		kvs[i] = SecretKV{Key: s.SecretKey, Value: s.SecretValue}
+	}
+	c.cache.set(cacheKey, kvs)
+	return kvs, nil
 }
 
 func boolStr(b bool) string {
