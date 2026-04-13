@@ -11,12 +11,13 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = app.packs.iter().map(|p| {
         ListItem::new(format!("{} v{}", p.name, p.version))
     }).collect();
+    let is_empty = items.is_empty();
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title("Packs"))
         .highlight_style(Style::default().bg(Color::DarkGray).bold())
         .highlight_symbol("> ");
     let mut state = ListState::default();
-    state.select(Some(app.cursor));
+    state.select(if is_empty { None } else { Some(app.cursor) });
     f.render_stateful_widget(list, chunks[0], &mut state);
 
     // Right: detail panel

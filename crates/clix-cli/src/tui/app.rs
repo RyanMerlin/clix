@@ -163,6 +163,8 @@ impl App {
         } else {
             state.config.active_profiles.push(name.to_string());
         }
+        // Note: re-serializes the full config, which will strip comments and any
+        // unknown keys not present in ClixConfig. Same trade-off as the CLI's profile activate/deactivate.
         let yaml = serde_yaml::to_string(&state.config)?;
         std::fs::write(&state.config_path, yaml)?;
         self.active_profiles = state.config.active_profiles.clone();
@@ -173,7 +175,11 @@ impl App {
         match self.screen {
             Screen::Capabilities => {
                 match self.cap_view.clone() {
-                    CapView::Detail(_) => { self.cap_view = CapView::Namespaces; self.cursor = 0; }
+                    CapView::Detail(ref name) => {
+                        let ns = CapabilityRegistry::group_key(name);
+                        self.cap_view = CapView::Listing(ns);
+                        self.cursor = 0;
+                    }
                     CapView::Listing(_) => { self.cap_view = CapView::Namespaces; self.cursor = 0; }
                     CapView::Namespaces => self.should_quit = true,
                 }
