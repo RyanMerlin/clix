@@ -6,24 +6,45 @@ use crate::dispatch::ServeState;
 
 type MethodResult = std::result::Result<serde_json::Value, String>;
 
-pub fn initialize(serve: &Arc<ServeState>) -> MethodResult {
+pub fn initialize(_serve: &Arc<ServeState>) -> MethodResult {
     Ok(serde_json::json!({
         "serverInfo": {"name":"clix","version":env!("CARGO_PKG_VERSION")},
         "protocolVersion": "2024-11-05",
         "capabilities": {
             "tools": {"listChanged": false},
             "resources": {"listChanged": false},
-            "extensions": {"clix": {"workflows": true,"onboard": true}}
+            "extensions": {"clix": {"namespaces": true, "workflows": true, "onboard": true}}
         },
         "sandboxEnforced": sandbox_enforced()
     }))
 }
 
-pub fn tools_list(serve: &Arc<ServeState>) -> MethodResult {
-    let tools: Vec<serde_json::Value> = serve.cap_registry.all().into_iter().map(|cap| serde_json::json!({
-        "name": cap.name,
-        "description": cap.description.as_deref().unwrap_or(""),
-        "inputSchema": cap.input_schema
+pub fn tools_list(serve: &Arc<ServeState>, params: &serde_json::Value) -> MethodResult {
+    // "all: true" → flat list (backward compat)
+    if params.get("all").and_then(|v| v.as_bool()).unwrap_or(false) {
+        let tools: Vec<serde_json::Value> = serve.cap_registry.all().iter().map(|cap| serde_json::json!({
+            "name": cap.name,
+            "description": cap.description.as_deref().unwrap_or(""),
+            "inputSchema": cap.input_schema
+        })).collect();
+        return Ok(serde_json::json!({"tools": tools}));
+    }
+
+    // "namespace: X" → drill-in: return full tool descriptors for that namespace group
+    if let Some(ns) = params.get("namespace").and_then(|v| v.as_str()) {
+        let tools: Vec<serde_json::Value> = serve.cap_registry.by_namespace(ns).iter().map(|cap| serde_json::json!({
+            "name": cap.name,
+            "description": cap.description.as_deref().unwrap_or(""),
+            "inputSchema": cap.input_schema
+        })).collect();
+        return Ok(serde_json::json!({"tools": tools}));
+    }
+
+    // Default → namespace stub view
+    let tools: Vec<serde_json::Value> = serve.cap_registry.namespaces().iter().map(|stub| serde_json::json!({
+        "name": stub.key,
+        "type": "namespace",
+        "count": stub.count
     })).collect();
     Ok(serde_json::json!({"tools": tools}))
 }
