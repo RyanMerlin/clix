@@ -1,6 +1,6 @@
 use std::io;
 use crossterm::{
-    event::{self, Event},
+    event::{self, Event, KeyEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -12,6 +12,9 @@ pub mod app;
 pub mod screens;
 
 pub fn run() -> Result<()> {
+    // Load app data BEFORE touching terminal
+    let mut app = App::new()?;
+
     // terminal setup
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -19,13 +22,20 @@ pub fn run() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new()?;
+    // Restore terminal on panic
+    let orig_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        orig_hook(info);
+    }));
+
     let result = run_loop(&mut terminal, &mut app);
 
-    // cleanup (always runs)
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
+    // cleanup (always runs, ignore errors to ensure cleanup proceeds)
+    let _ = disable_raw_mode();
+    let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
+    let _ = terminal.show_cursor();
 
     result
 }
@@ -34,7 +44,9 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App
     loop {
         terminal.draw(|f| render(f, app))?;
         if let Event::Key(key) = event::read()? {
-            app.handle_key(key);
+            if key.kind == KeyEventKind::Press {
+                app.handle_key(key);
+            }
         }
         if app.should_quit { break; }
     }

@@ -30,6 +30,7 @@ pub struct App {
     pub packs: Vec<PackManifest>,
     pub cursor: usize,
     pub should_quit: bool,
+    pub last_error: Option<String>,
 }
 
 impl App {
@@ -48,6 +49,7 @@ impl App {
             packs,
             cursor: 0,
             should_quit: false,
+            last_error: None,
         })
     }
 
@@ -69,7 +71,13 @@ impl App {
         }
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Char('r') => { let _ = self.reload(); }
+            KeyCode::Char('r') => {
+                if let Err(e) = self.reload() {
+                    self.last_error = Some(format!("Reload failed: {e}"));
+                } else {
+                    self.last_error = None;
+                }
+            }
             KeyCode::Char('1') => { self.screen = Screen::Profiles; self.cursor = 0; }
             KeyCode::Char('2') => { self.screen = Screen::Capabilities; self.cursor = 0; self.cap_view = CapView::Namespaces; }
             KeyCode::Char('3') => { self.screen = Screen::Packs; self.cursor = 0; }
