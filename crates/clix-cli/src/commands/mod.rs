@@ -6,4 +6,5 @@ pub mod receipts;
 pub mod run;
 pub mod serve;
 pub mod status;
+pub mod tui;
 pub mod workflow;

@@ -16,7 +16,22 @@ pub fn run_subprocess(command: &str, args: &[String], cwd: &PathBuf, secrets: &H
     for (k, v) in secrets { env.insert(k.clone(), v.clone()); }
     cmd.env_clear();
     for (k, v) in &env { cmd.env(k, v); }
-    let output = cmd.output().map_err(|e| ClixError::Backend(format!("failed to spawn `{command}`: {e}")))?;
+    let output = cmd.output()
+        .or_else(|e| {
+            // On Windows, many CLIs ship as .cmd wrappers; retry with that extension.
+            #[cfg(target_os = "windows")]
+            if e.kind() == std::io::ErrorKind::NotFound && !command.ends_with(".cmd") {
+                let cmd_name = format!("{command}.cmd");
+                let mut cmd2 = std::process::Command::new(&cmd_name);
+                cmd2.args(args).current_dir(cwd);
+                for (k, v) in &env { cmd2.env(k, v); }
+                cmd2.env_clear();
+                for (k, v) in &env { cmd2.env(k, v); }
+                return cmd2.output().map_err(|_| e);
+            }
+            Err(e)
+        })
+        .map_err(|e| ClixError::Backend(format!("failed to spawn `{command}`: {e}")))?;
     Ok(SubprocessResult {
         exit_code: output.status.code().unwrap_or(1),
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),

@@ -110,6 +110,7 @@ async fn dispatch_static(cli: Cli) -> Result<()> {
             ReceiptsCmd::Tail => commands::receipts::tail()?,
         },
         Commands::Serve { socket, http } => commands::serve::run(socket, http).await?,
+        Commands::Tui => commands::tui::run()?,
         Commands::Pack(sub) => match sub {
             PackCmd::List { json } => commands::pack::list(json)?,
             PackCmd::Show { name, json } => commands::pack::show(&name, json)?,

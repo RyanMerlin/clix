@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 /// All static top-level subcommand names. Dynamic capability subcommands must not use these.
 pub const STATIC_COMMANDS: &[&str] = &[
     "init", "status", "version", "run", "capabilities",
-    "workflow", "profile", "receipts", "serve", "pack",
+    "workflow", "profile", "receipts", "serve", "pack", "tui",
 ];
 
 #[derive(Parser)]
@@ -62,6 +62,8 @@ pub enum Commands {
     /// Manage packs
     #[command(subcommand)]
     Pack(PackCmd),
+    /// Launch interactive TUI
+    Tui,
 }
 
 #[derive(Subcommand)]

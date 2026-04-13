@@ -18,3 +18,5 @@ serde      = { workspace = true }
 anyhow     = { workspace = true }
 tokio      = { workspace = true }
 whoami     = { workspace = true }
+ratatui    = "0.29"
+crossterm  = "0.28"
