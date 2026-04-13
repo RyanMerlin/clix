@@ -60,6 +60,7 @@ impl App {
         self.registry = new.registry;
         self.packs = new.packs;
         self.cursor = 0;
+        self.cap_view = CapView::Namespaces;
         Ok(())
     }
 

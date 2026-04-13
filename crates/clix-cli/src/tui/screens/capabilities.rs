@@ -1,6 +1,7 @@
 use ratatui::{prelude::*, widgets::*};
 use clix_core::manifest::capability::{Backend, RiskLevel};
 use crate::tui::app::{App, CapView};
+use serde_json;
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
     match &app.cap_view {
@@ -61,7 +62,7 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect, name: &str) {
             RiskLevel::High => "high",
             RiskLevel::Critical => "critical",
         };
-        let lines = vec![
+        let mut lines = vec![
             Line::from(vec![
                 Span::styled("Name:    ", Style::default().bold()),
                 Span::raw(cap.name.as_str()),
@@ -79,9 +80,16 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect, name: &str) {
                 Span::raw(risk_str),
             ]),
         ];
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![Span::styled("Inputs:", Style::default().bold())]));
+        lines.push(Line::from(serde_json::to_string_pretty(&cap.input_schema).unwrap_or_else(|_| "(none)".into())));
         let para = Paragraph::new(lines)
             .block(Block::default().borders(Borders::ALL).title(format!("{} | Esc to go back", name)))
             .wrap(Wrap { trim: false });
+        f.render_widget(para, area);
+    } else {
+        let para = Paragraph::new("Capability not found")
+            .block(Block::default().borders(Borders::ALL).title(name));
         f.render_widget(para, area);
     }
 }

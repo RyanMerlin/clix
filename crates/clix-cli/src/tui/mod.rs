@@ -80,7 +80,7 @@ fn render(f: &mut Frame, app: &App) {
 
     // Status bar
     let status = app.last_error.as_deref()
-        .unwrap_or("q:quit  r:reload  1/2/3:screens  j/k:navigate  Enter:select  Esc:back");
+        .unwrap_or("q:quit  r:reload  1/2/3/Tab:screens  j/k:navigate  Enter:select  Esc:back");
     let style = if app.last_error.is_some() {
         Style::default().fg(Color::Red)
     } else {
