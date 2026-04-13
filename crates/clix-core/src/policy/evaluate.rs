@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
-use crate::manifest::capability::{CapabilityManifest, RiskLevel, SideEffectClass};
+use crate::manifest::capability::{CapabilityManifest, RiskLevel};
 use super::{PolicyAction, PolicyBundle, PolicyRule};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,7 +55,7 @@ fn risk_label(r: &RiskLevel) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manifest::capability::{Backend, CapabilityManifest};
+    use crate::manifest::capability::{Backend, CapabilityManifest, SideEffectClass};
     use crate::policy::{PolicyBundle, PolicyRule, PolicyAction};
 
     fn stub_cap(name: &str, risk: RiskLevel) -> CapabilityManifest {

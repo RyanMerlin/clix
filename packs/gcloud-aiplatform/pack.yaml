@@ -1,0 +1,5 @@
+name: gcloud-aiplatform
+version: "1.0.0"
+description: "Google Cloud AI Platform (Vertex AI) read-only capabilities"
+author: "clix"
+license: "Apache-2.0"

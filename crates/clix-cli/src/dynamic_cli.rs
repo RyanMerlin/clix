@@ -58,6 +58,9 @@ fn build_command(name: &'static str, node: &TrieNode) -> Option<Command> {
             .leak();
         let mut c = Command::new(name).about(about);
 
+        // Add --json flag on all leaf commands for machine-readable output
+        c = c.arg(Arg::new("json").long("json").action(clap::ArgAction::SetTrue).help("Output as JSON"));
+
         if let Some(props) = cap.input_schema.get("properties").and_then(|p| p.as_object()) {
             let required_set: std::collections::HashSet<String> = cap.input_schema
                 .get("required").and_then(|r| r.as_array())

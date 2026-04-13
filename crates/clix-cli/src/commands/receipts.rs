@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use clix_core::receipts::ReceiptStore;
 use clix_core::state::{home_dir, ClixState};
 use crate::output::print_json;

@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use crate::dispatch::{dispatch, ServeState};
 
@@ -35,6 +35,7 @@ pub async fn serve_stdio(serve: Arc<ServeState>) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use clix_core::policy::PolicyBundle;
     use clix_core::receipts::ReceiptStore;
     use clix_core::registry::{CapabilityRegistry, WorkflowRegistry};

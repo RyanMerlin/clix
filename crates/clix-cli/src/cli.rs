@@ -1,10 +1,30 @@
 use clap::{Parser, Subcommand};
 
+/// All static top-level subcommand names. Dynamic capability subcommands must not use these.
+pub const STATIC_COMMANDS: &[&str] = &[
+    "init", "status", "version", "run", "capabilities",
+    "workflow", "profile", "receipts", "serve", "pack",
+];
+
 #[derive(Parser)]
 #[command(name = "clix", version, about = "Policy-first CLI control plane for agentic tool use")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
+}
+
+/// Returns the static clap `Command` built from the derive macros, in builder form.
+/// Call `dynamic_cli::augment_with_capabilities()` on the result to append dynamic subcommands.
+pub fn base_command() -> clap::Command {
+    use clap::CommandFactory;
+    // Add a global --format flag so dynamic leaf commands inherit it.
+    Cli::command().arg(
+        clap::Arg::new("format")
+            .long("format")
+            .global(true)
+            .value_name("FORMAT")
+            .help("Output format: json (default), table, yaml, csv"),
+    )
 }
 
 #[derive(Subcommand)]
