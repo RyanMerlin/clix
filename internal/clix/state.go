@@ -7,12 +7,22 @@ import (
 	"path/filepath"
 )
 
+// InfisicalConfig holds connection and auth settings for the Infisical secrets backend.
+// ClientID and ClientSecret are resolved at runtime: explicit values here take precedence,
+// then INFISICAL_UNIVERSAL_AUTH_CLIENT_ID / INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET env vars.
+type InfisicalConfig struct {
+	SiteURL      string `json:"siteUrl,omitempty"`
+	ClientID     string `json:"clientId,omitempty"`
+	ClientSecret string `json:"clientSecret,omitempty"`
+}
+
 type Config struct {
-	SchemaVersion  int      `json:"schemaVersion"`
-	ApprovalMode   string   `json:"approvalMode"`
-	DefaultEnv     string   `json:"defaultEnv"`
-	WorkspaceRoot  string   `json:"workspaceRoot"`
-	ActiveProfiles []string `json:"activeProfiles"`
+	SchemaVersion  int             `json:"schemaVersion"`
+	ApprovalMode   string          `json:"approvalMode"`
+	DefaultEnv     string          `json:"defaultEnv"`
+	WorkspaceRoot  string          `json:"workspaceRoot"`
+	ActiveProfiles []string        `json:"activeProfiles"`
+	Infisical      InfisicalConfig `json:"infisical,omitempty"`
 }
 
 type State struct {

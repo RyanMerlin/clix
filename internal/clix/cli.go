@@ -16,7 +16,7 @@ func Run() error {
 		Short:   "clix is a governed CLI gateway",
 		Version: VersionString(),
 	}
-	root.AddCommand(newInitCmd(), newCapabilitiesCmd(), newProfileCmd(), newPackCmd(), newWorkflowCmd(), newRunCmd(), newPolicyCmd(), newReceiptsCmd(), newDoctorCmd(), newServeCmd(), newVersionCmd())
+	root.AddCommand(newInitCmd(), newCapabilitiesCmd(), newProfileCmd(), newPackCmd(), newWorkflowCmd(), newRunCmd(), newPolicyCmd(), newReceiptsCmd(), newDoctorCmd(), newServeCmd(), newClientCmd(), newVersionCmd())
 	return root.Execute()
 }
 
@@ -528,6 +528,60 @@ func newVersionCmd() *cobra.Command {
 			return printJSON(VersionInfo())
 		},
 	}
+}
+
+func newClientCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "client <capability>",
+		Short: "Forward a capability call to a running clix daemon",
+		Long: `Connects to a clix daemon over a Unix socket or HTTP and invokes a capability.
+The daemon address is resolved in order:
+  1. --socket flag (Unix socket path)
+  2. CLIX_SOCKET environment variable
+  3. --http flag (HTTP address)`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			socketFlag, _ := cmd.Flags().GetString("socket")
+			httpFlag, _ := cmd.Flags().GetString("http")
+			addr := daemonSocket(socketFlag)
+
+			var input map[string]any
+			if raw, _ := cmd.Flags().GetString("input"); raw != "" {
+				if err := json.Unmarshal([]byte(raw), &input); err != nil {
+					return fmt.Errorf("invalid --input JSON: %w", err)
+				}
+			}
+			if input == nil {
+				input = map[string]any{}
+			}
+			params := map[string]any{
+				"name":      args[0],
+				"arguments": input,
+			}
+
+			var (
+				result map[string]any
+				err    error
+			)
+			switch {
+			case addr != "":
+				path := strings.TrimPrefix(addr, "unix://")
+				result, err = callDaemonSocket(path, "tools/call", params)
+			case httpFlag != "":
+				result, err = callDaemonHTTP(httpFlag, "tools/call", params)
+			default:
+				return fmt.Errorf("no daemon address: set --socket, CLIX_SOCKET, or --http")
+			}
+			if err != nil {
+				return err
+			}
+			return printJSON(result)
+		},
+	}
+	cmd.Flags().String("socket", "", "Unix socket path of the clix daemon")
+	cmd.Flags().String("http", "", "HTTP address of the clix daemon (e.g. localhost:8080)")
+	cmd.Flags().String("input", "", "capability input JSON")
+	return cmd
 }
 
 func printJSON(v any) error {

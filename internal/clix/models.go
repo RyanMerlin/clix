@@ -1,12 +1,35 @@
 package clix
 
+// CredentialSource describes a single credential to inject into a subprocess environment.
+type CredentialSource struct {
+	// InjectAs is the env var name set in the subprocess (e.g. "AWS_ACCESS_KEY_ID").
+	InjectAs string `json:"injectAs"`
+	// Type is one of: "env", "literal", "infisical".
+	Type string `json:"type"`
+	// EnvVar is the source env var name when Type is "env".
+	EnvVar string `json:"envVar,omitempty"`
+	// Value is the literal credential value when Type is "literal" (dev/test only).
+	Value string `json:"value,omitempty"`
+	// Infisical specifies a secret reference when Type is "infisical".
+	Infisical *InfisicalRef `json:"infisical,omitempty"`
+}
+
+// InfisicalRef identifies a secret in Infisical.
+type InfisicalRef struct {
+	SecretName  string `json:"secretName"`
+	ProjectID   string `json:"projectId,omitempty"`
+	Environment string `json:"environment"`
+	SecretPath  string `json:"secretPath,omitempty"` // defaults to "/"
+}
+
 type CapabilityBackend struct {
-	Type         string   `json:"type"`
-	Name         string   `json:"name,omitempty"`
-	Command      string   `json:"command,omitempty"`
-	Args         []string `json:"args,omitempty"`
-	CwdFromInput string   `json:"cwdFromInput,omitempty"`
-	URL          string   `json:"url,omitempty"`
+	Type         string             `json:"type"`
+	Name         string             `json:"name,omitempty"`
+	Command      string             `json:"command,omitempty"`
+	Args         []string           `json:"args,omitempty"`
+	CwdFromInput string             `json:"cwdFromInput,omitempty"`
+	URL          string             `json:"url,omitempty"`
+	Credentials  []CredentialSource `json:"credentials,omitempty"`
 }
 
 type Schema map[string]any

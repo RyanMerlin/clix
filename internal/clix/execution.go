@@ -3,7 +3,6 @@ package clix
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -77,9 +76,9 @@ func runCapability(state *State, registry *CapabilityRegistry, policy PolicyBund
 	case "builtin":
 		execResult, err = builtinHandler(cap.Backend.Name, input)
 	case "subprocess":
-		execResult, err = runSubprocess(cap, execCtx, resolvedArgs)
+		execResult, err = runSubprocess(cap, execCtx, resolvedArgs, state.Config.Infisical)
 	case "remote":
-		err = errors.New("remote backend not implemented")
+		execResult, err = runRemote(cap, input)
 	default:
 		err = fmt.Errorf("unsupported backend type: %s", cap.Backend.Type)
 	}
@@ -127,7 +126,7 @@ func capabilityValidatorErrors(cap CapabilityManifest, input map[string]any, ctx
 	return errs
 }
 
-func runSubprocess(cap CapabilityManifest, ctx map[string]string, resolvedArgs any) (map[string]any, error) {
+func runSubprocess(cap CapabilityManifest, ctx map[string]string, resolvedArgs any, infisicalCfg InfisicalConfig) (map[string]any, error) {
 	args := []string{}
 	if list, ok := resolvedArgs.([]any); ok {
 		for _, item := range list {
@@ -140,17 +139,36 @@ func runSubprocess(cap CapabilityManifest, ctx map[string]string, resolvedArgs a
 	if cap.Backend.CwdFromInput != "" {
 		cwd = ctx[cap.Backend.CwdFromInput]
 	}
+
+	// Resolve credentials before launching the subprocess.
+	var secrets map[string]string
+	if len(cap.Backend.Credentials) > 0 {
+		var err error
+		secrets, err = resolveCredentials(cap.Backend.Credentials, infisicalCfg)
+		if err != nil {
+			return nil, fmt.Errorf("credential resolution failed: %w", err)
+		}
+	}
+
 	cmd := exec.Command(cap.Backend.Command, args...)
 	cmd.Dir = cwd
+	cmd.Env = buildSubprocessEnv(secrets)
 	out, err := cmd.CombinedOutput()
+
+	// Redact credential values from output before they can leak into receipts.
+	safeOut := redactSecrets(string(out), secrets)
+
 	result := map[string]any{
 		"command":  cap.Backend.Command,
 		"args":     args,
 		"cwd":      cwd,
-		"stdout":   string(out),
+		"stdout":   safeOut,
 		"stderr":   "",
-		"payload":  string(out),
+		"payload":  safeOut,
 		"exitCode": 0,
+	}
+	if len(cap.Backend.Credentials) > 0 {
+		result["credentialsUsed"] = credentialSources(cap.Backend.Credentials)
 	}
 	if err != nil {
 		exitCode := 1
@@ -159,6 +177,40 @@ func runSubprocess(cap CapabilityManifest, ctx map[string]string, resolvedArgs a
 		}
 		result["exitCode"] = exitCode
 		result["error"] = err.Error()
+	}
+	return result, nil
+}
+
+// runRemote forwards a capability invocation to a clix daemon via Unix socket or HTTP.
+// The capability's backend.url field specifies the daemon address:
+//   - "unix:///path/to/sock" or "/path/to/sock" — Unix socket
+//   - "http://host:port" or "host:port" — HTTP
+//
+// If backend.url is empty, CLIX_SOCKET env var is consulted.
+func runRemote(cap CapabilityManifest, input map[string]any) (map[string]any, error) {
+	addr := cap.Backend.URL
+	if addr == "" {
+		addr = daemonSocket("")
+	}
+	if addr == "" {
+		return nil, fmt.Errorf("remote backend: no daemon address configured (set backend.url or CLIX_SOCKET)")
+	}
+	params := map[string]any{
+		"name":      cap.Name,
+		"arguments": input,
+	}
+	isSocket := strings.HasPrefix(addr, "unix://") || (!strings.HasPrefix(addr, "http://") && !strings.HasPrefix(addr, "https://"))
+	if isSocket {
+		path := strings.TrimPrefix(addr, "unix://")
+		result, err := callDaemonSocket(path, "tools/call", params)
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+	result, err := callDaemonHTTP(addr, "tools/call", params)
+	if err != nil {
+		return nil, err
 	}
 	return result, nil
 }

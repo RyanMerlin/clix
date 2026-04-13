@@ -5,22 +5,37 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 
 	"github.com/spf13/cobra"
 )
 
 func newServeCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Run a local JSON-RPC bridge",
+		Short: "Run a JSON-RPC gateway (stdin/stdout, Unix socket, or HTTP)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return serve(os.Stdin, os.Stdout)
+			socket, _ := cmd.Flags().GetString("socket")
+			httpAddr, _ := cmd.Flags().GetString("http")
+			switch {
+			case socket != "":
+				return serveSocket(socket)
+			case httpAddr != "":
+				return serveHTTP(httpAddr)
+			default:
+				return serveStream(os.Stdin, os.Stdout)
+			}
 		},
 	}
+	cmd.Flags().String("socket", "", "Unix socket path to listen on (e.g. /var/run/clix.sock). Also reads CLIX_SOCKET env var.")
+	cmd.Flags().String("http", "", "TCP address to listen on for HTTP (e.g. :8080)")
+	return cmd
 }
 
-func serve(in io.Reader, out io.Writer) error {
+// serveStream handles the original newline-delimited JSON-RPC over an io.Reader/Writer pair.
+func serveStream(in io.Reader, out io.Writer) error {
 	state, err := loadOrSeed()
 	if err != nil {
 		return err
@@ -33,6 +48,77 @@ func serve(in io.Reader, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	return dispatchRPC(state, registry, workflows, in, out)
+}
+
+// serveSocket listens on a Unix socket. Each accepted connection is handled in its own goroutine.
+func serveSocket(path string) error {
+	// Remove a stale socket file if present.
+	_ = os.Remove(path)
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return fmt.Errorf("clix: socket listen %s: %w", path, err)
+	}
+	defer func() {
+		ln.Close()
+		os.Remove(path)
+	}()
+	fmt.Fprintf(os.Stderr, "clix daemon listening on %s\n", path)
+
+	state, err := loadOrSeed()
+	if err != nil {
+		return err
+	}
+	registry, err := buildRegistry(state)
+	if err != nil {
+		return err
+	}
+	workflows, err := buildWorkflowRegistry(state)
+	if err != nil {
+		return err
+	}
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return err
+		}
+		go func(c net.Conn) {
+			defer c.Close()
+			_ = dispatchRPC(state, registry, workflows, c, c)
+		}(conn)
+	}
+}
+
+// serveHTTP listens on a TCP address and handles single JSON-RPC requests over HTTP POST.
+func serveHTTP(addr string) error {
+	state, err := loadOrSeed()
+	if err != nil {
+		return err
+	}
+	registry, err := buildRegistry(state)
+	if err != nil {
+		return err
+	}
+	workflows, err := buildWorkflowRegistry(state)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "clix daemon listening on http://%s\n", addr)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = dispatchRPC(state, registry, workflows, r.Body, w)
+	})
+	return http.ListenAndServe(addr, mux)
+}
+
+// dispatchRPC is the core newline-delimited JSON-RPC loop shared by all transports.
+func dispatchRPC(state *State, registry *CapabilityRegistry, workflows *WorkflowRegistry, in io.Reader, out io.Writer) error {
 	scanner := bufio.NewScanner(in)
 	enc := json.NewEncoder(out)
 	for scanner.Scan() {
