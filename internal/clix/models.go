@@ -83,6 +83,29 @@ type PolicyMatch struct {
 	Backends     []string `json:"backends,omitempty"`
 }
 
+// ApprovalGateConfig configures the human-in-the-loop webhook for require_approval decisions.
+// When WebhookURL is set, clix POSTs an approval request and waits for the response instead
+// of immediately returning approvalRequired:true to the caller.
+//
+// Webhook contract:
+//
+//	POST webhookUrl
+//	  Body: ApprovalRequest JSON
+//	  Response 200: ApprovalResponse JSON  (approved: true/false)
+//	  Response non-200: treated as deny
+//	  Timeout (TimeoutSeconds): treated as deny (fail-safe)
+type ApprovalGateConfig struct {
+	// WebhookURL is the endpoint that receives approval requests.
+	// Leave empty to use the legacy behaviour (return approvalRequired:true immediately).
+	WebhookURL string `json:"webhookUrl,omitempty"`
+	// TimeoutSeconds is how long to wait for a human response before auto-denying.
+	// Defaults to 300 (5 minutes).
+	TimeoutSeconds int `json:"timeoutSeconds,omitempty"`
+	// Headers are additional HTTP headers sent with every approval request
+	// (e.g. {"Authorization": "Bearer ..."}).
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
 type Validator struct {
 	Type   string   `json:"type"`
 	Path   string   `json:"path,omitempty"`

@@ -51,12 +51,37 @@ func runCapability(state *State, registry *CapabilityRegistry, policy PolicyBund
 		return map[string]any{"ok": false, "approvalRequired": false, "receipt": receipt, "reason": decision["reason"], "policy": decision}, nil
 	}
 	if decision["decision"] == "require_approval" && approval != "auto" {
-		receipt := map[string]any{
-			"id": newID(), "kind": "capability", "capability": cap.Name, "createdAt": currentISO(),
-			"status": "pending_approval", "decision": "require_approval", "reason": decision["reason"], "input": input, "context": execCtx, "policy": decision,
+		// If an approval gate webhook is configured, call it and wait for a human decision.
+		// Otherwise fall through to the legacy behaviour: return approvalRequired:true immediately.
+		if state.Config.ApprovalGate.WebhookURL != "" {
+			approved, approver, reason, err := requestApproval(state.Config.ApprovalGate, cap, input, execCtx, decision)
+			if err != nil {
+				return nil, fmt.Errorf("approval gate: %w", err)
+			}
+			if !approved {
+				if reason == "" {
+					reason = decision["reason"].(string)
+				}
+				receipt := map[string]any{
+					"id": newID(), "kind": "capability", "capability": cap.Name, "createdAt": currentISO(),
+					"status": "denied", "decision": "require_approval", "reason": reason, "input": input, "context": execCtx, "policy": decision,
+					"approval": map[string]any{"approved": false, "approver": approver, "reason": reason},
+				}
+				_ = appendReceipt(state.ReceiptsDir, receipt)
+				return map[string]any{"ok": false, "approvalRequired": false, "receipt": receipt, "reason": reason, "policy": decision}, nil
+			}
+			// Approved — fall through to execution, annotating the receipt below.
+			execCtx["approver"] = approver
+			execCtx["approvalReason"] = reason
+		} else {
+			// No webhook configured: return pending status for an external system to handle.
+			receipt := map[string]any{
+				"id": newID(), "kind": "capability", "capability": cap.Name, "createdAt": currentISO(),
+				"status": "pending_approval", "decision": "require_approval", "reason": decision["reason"], "input": input, "context": execCtx, "policy": decision,
+			}
+			_ = appendReceipt(state.ReceiptsDir, receipt)
+			return map[string]any{"ok": false, "approvalRequired": true, "receipt": receipt, "reason": decision["reason"], "policy": decision}, nil
 		}
-		_ = appendReceipt(state.ReceiptsDir, receipt)
-		return map[string]any{"ok": false, "approvalRequired": true, "receipt": receipt, "reason": decision["reason"], "policy": decision}, nil
 	}
 
 	resolvedArgs := RenderTemplate(cap.Backend.Args, map[string]any{"input": input, "context": execCtx})
@@ -96,6 +121,11 @@ func runCapability(state *State, registry *CapabilityRegistry, policy PolicyBund
 		"id": newID(), "kind": "capability", "capability": cap.Name, "createdAt": currentISO(),
 		"status": map[bool]string{true: "succeeded", false: "failed"}[success], "decision": decision["decision"], "reason": decision["reason"],
 		"input": input, "context": execCtx, "policy": decision, "execution": map[string]any{"backend": cap.Backend, "resolvedArgs": resolvedArgs, "result": execResult},
+	}
+	if approver := execCtx["approver"]; approver != "" {
+		receipt["approval"] = map[string]any{
+			"approved": true, "approver": approver, "reason": execCtx["approvalReason"],
+		}
 	}
 	_ = appendReceipt(state.ReceiptsDir, receipt)
 	return map[string]any{"ok": success, "approvalRequired": false, "receipt": receipt, "policy": decision, "result": execResult}, nil

@@ -17,12 +17,13 @@ type InfisicalConfig struct {
 }
 
 type Config struct {
-	SchemaVersion  int             `json:"schemaVersion"`
-	ApprovalMode   string          `json:"approvalMode"`
-	DefaultEnv     string          `json:"defaultEnv"`
-	WorkspaceRoot  string          `json:"workspaceRoot"`
-	ActiveProfiles []string        `json:"activeProfiles"`
-	Infisical      InfisicalConfig `json:"infisical,omitempty"`
+	SchemaVersion  int                `json:"schemaVersion"`
+	ApprovalMode   string             `json:"approvalMode"`
+	DefaultEnv     string             `json:"defaultEnv"`
+	WorkspaceRoot  string             `json:"workspaceRoot"`
+	ActiveProfiles []string           `json:"activeProfiles"`
+	Infisical      InfisicalConfig    `json:"infisical,omitempty"`
+	ApprovalGate   ApprovalGateConfig `json:"approvalGate,omitempty"`
 }
 
 type State struct {

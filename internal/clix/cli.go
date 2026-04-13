@@ -16,7 +16,7 @@ func Run() error {
 		Short:   "clix is a governed CLI gateway",
 		Version: VersionString(),
 	}
-	root.AddCommand(newInitCmd(), newCapabilitiesCmd(), newProfileCmd(), newPackCmd(), newWorkflowCmd(), newRunCmd(), newPolicyCmd(), newReceiptsCmd(), newDoctorCmd(), newServeCmd(), newClientCmd(), newVersionCmd())
+	root.AddCommand(newInitCmd(), newCapabilitiesCmd(), newProfileCmd(), newPackCmd(), newWorkflowCmd(), newRunCmd(), newPolicyCmd(), newReceiptsCmd(), newDoctorCmd(), newServeCmd(), newClientCmd(), newApprovalCmd(), newVersionCmd())
 	return root.Execute()
 }
 
@@ -528,6 +528,80 @@ func newVersionCmd() *cobra.Command {
 			return printJSON(VersionInfo())
 		},
 	}
+}
+
+func newApprovalCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "approval",
+		Short: "Manage the approval gate",
+	}
+
+	// clix approval test — sends a synthetic approval request to the configured webhook.
+	cmd.AddCommand(&cobra.Command{
+		Use:   "test",
+		Short: "Send a test approval request to the configured webhook",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			state, err := loadOrSeed()
+			if err != nil {
+				return err
+			}
+			if state.Config.ApprovalGate.WebhookURL == "" {
+				return fmt.Errorf("no approvalGate.webhookUrl configured in config.json")
+			}
+			approved, approver, reason, err := requestApproval(
+				state.Config.ApprovalGate,
+				CapabilityManifest{Name: "test.approval-ping", Risk: "low", Description: "Synthetic test request from clix approval test"},
+				map[string]any{"test": true},
+				ctxFromState(state),
+				map[string]any{"decision": "require_approval", "reason": "test ping"},
+			)
+			if err != nil {
+				return err
+			}
+			return printJSON(map[string]any{
+				"ok":       approved,
+				"approved": approved,
+				"approver": approver,
+				"reason":   reason,
+				"webhook":  state.Config.ApprovalGate.WebhookURL,
+			})
+		},
+	})
+
+	// clix approval show — display current approval gate config (no secrets).
+	cmd.AddCommand(&cobra.Command{
+		Use:   "show",
+		Short: "Show the current approval gate configuration",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			state, err := loadOrSeed()
+			if err != nil {
+				return err
+			}
+			cfg := state.Config.ApprovalGate
+			configured := cfg.WebhookURL != ""
+			timeout := cfg.TimeoutSeconds
+			if timeout <= 0 {
+				timeout = defaultApprovalTimeoutSeconds
+			}
+			return printJSON(map[string]any{
+				"configured":     configured,
+				"webhookUrl":     cfg.WebhookURL,
+				"timeoutSeconds": timeout,
+				"headers":        headerKeys(cfg.Headers),
+			})
+		},
+	})
+
+	return cmd
+}
+
+// headerKeys returns just the header key names (not values) for safe display.
+func headerKeys(h map[string]string) []string {
+	keys := make([]string, 0, len(h))
+	for k := range h {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 func newClientCmd() *cobra.Command {

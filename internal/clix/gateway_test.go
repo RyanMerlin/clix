@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // ── Credential resolution ────────────────────────────────────────────────────
@@ -490,5 +491,194 @@ func TestSubprocess_CredentialInjectionAndRedaction(t *testing.T) {
 	used, _ := result["credentialsUsed"].([]map[string]string)
 	if len(used) == 0 {
 		t.Error("expected credentialsUsed in result")
+	}
+}
+
+// ── Approval gate ─────────────────────────────────────────────────────────────
+
+func TestApprovalGate_Approved(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify the request shape.
+		var req ApprovalRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode approval request: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if req.Capability == "" || req.RequestID == "" {
+			t.Errorf("expected capability and requestId in payload, got %+v", req)
+		}
+		// Approve.
+		json.NewEncoder(w).Encode(ApprovalResponse{
+			Approved: true,
+			Approver: "alice",
+			Reason:   "looks good",
+		})
+	}))
+	defer srv.Close()
+
+	cfg := ApprovalGateConfig{WebhookURL: srv.URL, TimeoutSeconds: 5}
+	cap := CapabilityManifest{Name: "kubectl.delete", Risk: "high"}
+	approved, approver, reason, err := requestApproval(cfg, cap, map[string]any{}, map[string]string{}, map[string]any{"decision": "require_approval", "reason": "high risk"})
+	if err != nil {
+		t.Fatalf("requestApproval: %v", err)
+	}
+	if !approved {
+		t.Errorf("expected approved=true")
+	}
+	if approver != "alice" {
+		t.Errorf("expected approver=alice, got %q", approver)
+	}
+	if reason != "looks good" {
+		t.Errorf("expected reason='looks good', got %q", reason)
+	}
+}
+
+func TestApprovalGate_Denied(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(ApprovalResponse{
+			Approved: false,
+			Approver: "bob",
+			Reason:   "too risky",
+		})
+	}))
+	defer srv.Close()
+
+	cfg := ApprovalGateConfig{WebhookURL: srv.URL, TimeoutSeconds: 5}
+	cap := CapabilityManifest{Name: "kubectl.delete", Risk: "high"}
+	approved, _, reason, err := requestApproval(cfg, cap, map[string]any{}, map[string]string{}, map[string]any{})
+	if err != nil {
+		t.Fatalf("requestApproval: %v", err)
+	}
+	if approved {
+		t.Errorf("expected approved=false")
+	}
+	if reason != "too risky" {
+		t.Errorf("expected reason='too risky', got %q", reason)
+	}
+}
+
+func TestApprovalGate_WebhookTimeout(t *testing.T) {
+	// Server that responds only after the client has timed out and disconnected.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Wait for client to disconnect (timeout) rather than blocking forever,
+		// so httptest.Server.Close() can drain connections cleanly.
+		select {
+		case <-r.Context().Done():
+		case <-time.After(10 * time.Second):
+		}
+	}))
+	defer srv.Close()
+
+	cfg := ApprovalGateConfig{WebhookURL: srv.URL, TimeoutSeconds: 1}
+	cap := CapabilityManifest{Name: "test.cap"}
+	approved, _, reason, err := requestApproval(cfg, cap, map[string]any{}, map[string]string{}, map[string]any{})
+	if err != nil {
+		t.Fatalf("unexpected hard error: %v", err)
+	}
+	// Timeout must be a soft denial, not a hard error.
+	if approved {
+		t.Error("timed-out approval should deny, not approve")
+	}
+	if reason == "" {
+		t.Error("expected a reason for timeout denial")
+	}
+}
+
+func TestApprovalGate_Non200Response(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	cfg := ApprovalGateConfig{WebhookURL: srv.URL, TimeoutSeconds: 5}
+	cap := CapabilityManifest{Name: "test.cap"}
+	approved, _, _, err := requestApproval(cfg, cap, map[string]any{}, map[string]string{}, map[string]any{})
+	if err != nil {
+		t.Fatalf("unexpected hard error: %v", err)
+	}
+	if approved {
+		t.Error("non-200 webhook response should deny")
+	}
+}
+
+func TestApprovalGate_CustomHeaders(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		json.NewEncoder(w).Encode(ApprovalResponse{Approved: true})
+	}))
+	defer srv.Close()
+
+	cfg := ApprovalGateConfig{
+		WebhookURL:     srv.URL,
+		TimeoutSeconds: 5,
+		Headers:        map[string]string{"Authorization": "Bearer test-token"},
+	}
+	cap := CapabilityManifest{Name: "test.cap"}
+	_, _, _, err := requestApproval(cfg, cap, map[string]any{}, map[string]string{}, map[string]any{})
+	if err != nil {
+		t.Fatalf("requestApproval: %v", err)
+	}
+	if gotAuth != "Bearer test-token" {
+		t.Errorf("expected Authorization header, got %q", gotAuth)
+	}
+}
+
+// TestApprovalGate_EndToEnd verifies that runCapability executes after webhook approval
+// and is denied (without execution) when the webhook rejects.
+func TestApprovalGate_EndToEnd_ApprovedThenDenied(t *testing.T) {
+	home := t.TempDir()
+	state, err := SeedState(home)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	var webhookResponse ApprovalResponse
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(webhookResponse)
+	}))
+	defer srv.Close()
+
+	state.Config.ApprovalGate = ApprovalGateConfig{WebhookURL: srv.URL, TimeoutSeconds: 5}
+	// Force require_approval for system.date by overriding the policy.
+	state.Policy = PolicyBundle{
+		DefaultDecision: "deny",
+		Rules: []PolicyRule{
+			{Effect: "require_approval", Match: PolicyMatch{Capabilities: []string{"system.date"}}},
+		},
+	}
+
+	registry, err := buildRegistry(state)
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+
+	// Case 1: webhook approves — capability must execute and receipt must show approval.
+	webhookResponse = ApprovalResponse{Approved: true, Approver: "alice", Reason: "ok"}
+	outcome, err := runCapability(state, registry, state.Policy, "system.date", map[string]any{}, ctxFromState(state), "interactive")
+	if err != nil {
+		t.Fatalf("run (approved): %v", err)
+	}
+	if ok, _ := outcome["ok"].(bool); !ok {
+		t.Errorf("approved: expected ok=true, got %#v", outcome)
+	}
+	receipt, _ := outcome["receipt"].(map[string]any)
+	approval, _ := receipt["approval"].(map[string]any)
+	if approval["approver"] != "alice" {
+		t.Errorf("expected approver=alice in receipt, got %#v", approval)
+	}
+
+	// Case 2: webhook denies — capability must not execute.
+	webhookResponse = ApprovalResponse{Approved: false, Approver: "bob", Reason: "denied"}
+	outcome, err = runCapability(state, registry, state.Policy, "system.date", map[string]any{}, ctxFromState(state), "interactive")
+	if err != nil {
+		t.Fatalf("run (denied): %v", err)
+	}
+	if ok, _ := outcome["ok"].(bool); ok {
+		t.Errorf("denied: expected ok=false, got %#v", outcome)
+	}
+	if outcome["approvalRequired"] == true {
+		t.Error("denied: approvalRequired should be false when webhook denied")
 	}
 }
