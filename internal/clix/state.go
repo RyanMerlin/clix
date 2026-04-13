@@ -24,6 +24,7 @@ type Config struct {
 	ActiveProfiles []string           `json:"activeProfiles"`
 	Infisical      InfisicalConfig    `json:"infisical,omitempty"`
 	ApprovalGate   ApprovalGateConfig `json:"approvalGate,omitempty"`
+	Sandbox        SandboxConfig      `json:"sandbox,omitempty"`
 }
 
 type State struct {

@@ -83,6 +83,17 @@ type PolicyMatch struct {
 	Backends     []string `json:"backends,omitempty"`
 }
 
+// SandboxConfig configures OS-level exec enforcement for `clix sandbox run`.
+type SandboxConfig struct {
+	// ExecAllowlist is the list of file or directory paths whose executables
+	// may be exec'd by the sandboxed process. The clix binary is always added
+	// automatically. Paths that don't exist are skipped with a warning.
+	ExecAllowlist []string `json:"execAllowlist,omitempty"`
+	// RequireLandlock causes `clix sandbox run` to fail hard if Landlock is
+	// unavailable on the kernel, rather than warning and running unsandboxed.
+	RequireLandlock bool `json:"requireLandlock,omitempty"`
+}
+
 // ApprovalGateConfig configures the human-in-the-loop webhook for require_approval decisions.
 // When WebhookURL is set, clix POSTs an approval request and waits for the response instead
 // of immediately returning approvalRequired:true to the caller.

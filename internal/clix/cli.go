@@ -4,11 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
+
+// execCommand and execLookPath are thin wrappers so sandbox_test.go can swap them out.
+var execCommand = exec.Command
+var execLookPath = exec.LookPath
 
 func Run() error {
 	root := &cobra.Command{
@@ -16,7 +21,7 @@ func Run() error {
 		Short:   "clix is a governed CLI gateway",
 		Version: VersionString(),
 	}
-	root.AddCommand(newInitCmd(), newCapabilitiesCmd(), newProfileCmd(), newPackCmd(), newWorkflowCmd(), newRunCmd(), newPolicyCmd(), newReceiptsCmd(), newDoctorCmd(), newServeCmd(), newClientCmd(), newApprovalCmd(), newVersionCmd())
+	root.AddCommand(newInitCmd(), newCapabilitiesCmd(), newProfileCmd(), newPackCmd(), newWorkflowCmd(), newRunCmd(), newPolicyCmd(), newReceiptsCmd(), newDoctorCmd(), newServeCmd(), newClientCmd(), newApprovalCmd(), newSandboxCmd(), newVersionCmd())
 	return root.Execute()
 }
 
@@ -528,6 +533,161 @@ func newVersionCmd() *cobra.Command {
 			return printJSON(VersionInfo())
 		},
 	}
+}
+
+// runUnsandboxed runs the agent without any Landlock restriction.
+// Used when Landlock is unavailable and --require-landlock is not set.
+func runUnsandboxed(argv0 string, args []string) error {
+	c := execCommand(argv0, args[1:]...)
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	return c.Run()
+}
+
+func newSandboxCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sandbox",
+		Short: "Run a process inside a Landlock exec sandbox",
+		Long: `Sandbox wraps a process with a Linux Landlock exec restriction.
+The sandboxed process (and any child it spawns) can only exec binaries listed
+in the sandbox.execAllowlist config plus the clix binary itself.
+
+Requires Linux kernel 5.13+ (Landlock ABI v1).`,
+	}
+
+	// clix sandbox status — report Landlock availability.
+	cmd.AddCommand(&cobra.Command{
+		Use:   "status",
+		Short: "Report Landlock availability on this kernel",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			abi := LandlockStatus()
+			available := abi >= 1
+			return printJSON(map[string]any{
+				"available":  available,
+				"abiVersion": abi,
+				"minRequired": 1,
+			})
+		},
+	})
+
+	// clix sandbox run -- <cmd> [args...]
+	runCmd := &cobra.Command{
+		Use:   "run -- <command> [args...]",
+		Short: "Run a command inside a Landlock exec sandbox",
+		Long: `Launches <command> inside a Landlock sandbox that restricts exec to an
+allowlist. The allowlist always includes the clix binary; additional paths
+come from sandbox.execAllowlist in config.json or --allow flags.
+
+Example:
+  clix sandbox run -- python3 agent.py
+  clix sandbox run --allow /usr/bin/node -- node agent.js`,
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			state, err := loadOrSeed()
+			if err != nil {
+				return err
+			}
+			extraAllowlist, _ := cmd.Flags().GetStringSlice("allow")
+			requireLandlock := boolFlag(cmd, "require-landlock") || state.Config.Sandbox.RequireLandlock
+
+			// Resolve the clix binary path — always in the allowlist.
+			self, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("sandbox: cannot determine clix binary path: %w", err)
+			}
+
+			// Build the full allowlist: clix + config + --allow flags.
+			allowlist := dedupStrings(append(
+				append([]string{self}, state.Config.Sandbox.ExecAllowlist...),
+				extraAllowlist...,
+			))
+
+			// Resolve the agent executable.
+			agentExe, err := lookPath(args[0])
+			if err != nil {
+				return fmt.Errorf("sandbox: cannot find %q: %w", args[0], err)
+			}
+			// The agent executable itself must be in the allowlist so it can start.
+			allowlist = dedupStrings(append(allowlist, agentExe))
+
+			// Check Landlock availability before launching the subprocess.
+			if LandlockStatus() < 1 {
+				if requireLandlock {
+					return fmt.Errorf("sandbox: Landlock unavailable on this kernel (requires Linux 5.13+); refusing to run without enforcement (--require-landlock is set)")
+				}
+				fmt.Fprintf(os.Stderr, "clix sandbox: WARNING — Landlock unavailable on this kernel; running %s WITHOUT exec restriction\n", args[0])
+				// Run the command directly without sandboxing.
+				return runUnsandboxed(agentExe, args)
+			}
+
+			// Re-exec via the hidden `_exec` subcommand so that Landlock is applied
+			// in a fresh process before execing the agent.
+			// We pass the allowlist and agent command via args to _exec.
+			clixArgs := []string{self, "sandbox", "_exec"}
+			for _, p := range allowlist {
+				clixArgs = append(clixArgs, "--allow", p)
+			}
+			clixArgs = append(clixArgs, "--")
+			clixArgs = append(clixArgs, agentExe)
+			clixArgs = append(clixArgs, args[1:]...)
+
+			execCmd := execCommand(self, clixArgs[1:]...)
+			execCmd.Stdin = os.Stdin
+			execCmd.Stdout = os.Stdout
+			execCmd.Stderr = os.Stderr
+			return execCmd.Run()
+		},
+	}
+	runCmd.Flags().StringSlice("allow", nil, "additional executable path to allow (may be repeated)")
+	runCmd.Flags().Bool("require-landlock", false, "fail if Landlock is unavailable instead of running unsandboxed")
+	cmd.AddCommand(runCmd)
+
+	// clix sandbox _exec — hidden internal subcommand used by `sandbox run`.
+	// Applies Landlock to the current process and exec's the target command.
+	execInternalCmd := &cobra.Command{
+		Use:    "_exec",
+		Hidden: true,
+		Args:   cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			allowlist, _ := cmd.Flags().GetStringSlice("allow")
+
+			// Resolve the target executable (first non-flag arg).
+			argv0, err := lookPath(args[0])
+			if err != nil {
+				return fmt.Errorf("sandbox _exec: cannot find %q: %w", args[0], err)
+			}
+			argv := append([]string{argv0}, args[1:]...)
+
+			// Apply Landlock and exec. SandboxExec calls LockOSThread internally.
+			if err := SandboxExec(allowlist, argv0, argv, os.Environ()); err != nil {
+				return fmt.Errorf("sandbox _exec: %w", err)
+			}
+			return nil // unreachable on success
+		},
+	}
+	execInternalCmd.Flags().StringSlice("allow", nil, "allowed executable path")
+	cmd.AddCommand(execInternalCmd)
+
+	return cmd
+}
+
+// dedupStrings returns a slice with duplicates removed, preserving order.
+func dedupStrings(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s != "" && !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// lookPath wraps exec.LookPath for use in cli.go.
+func lookPath(name string) (string, error) {
+	return execLookPath(name)
 }
 
 func newApprovalCmd() *cobra.Command {
