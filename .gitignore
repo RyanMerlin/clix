@@ -7,3 +7,5 @@ clix.exe
 *.log
 .clix/
 .env
+.worktrees/
+target/
