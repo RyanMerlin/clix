@@ -1,0 +1,149 @@
+pub mod approval;
+pub mod backends;
+pub mod validators;
+
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+use chrono::Utc;
+use crate::error::{ClixError, Result};
+use crate::manifest::capability::Backend;
+use crate::manifest::workflow::StepFailurePolicy;
+use crate::policy::{evaluate_policy, evaluate::ExecutionContext, Decision, PolicyBundle};
+use crate::receipts::{Receipt, ReceiptKind, ReceiptStatus, ReceiptStore};
+use crate::registry::{CapabilityRegistry, WorkflowRegistry};
+use crate::sandbox::sandbox_enforced;
+use crate::schema::validate_input;
+use crate::secrets::{resolve_credentials, SecretRedactor};
+use crate::state::InfisicalConfig;
+use crate::template::render_args;
+use backends::{builtin_handler, expand_secret_refs, run_remote, run_subprocess};
+use validators::run_validators;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionOutcome {
+    pub ok: bool,
+    pub approval_required: bool,
+    pub receipt_id: Uuid,
+    pub result: Option<serde_json::Value>,
+    pub reason: Option<String>,
+}
+
+pub fn run_capability(registry: &CapabilityRegistry, policy: &PolicyBundle, infisical: Option<&InfisicalConfig>, store: &ReceiptStore, name: &str, input: serde_json::Value, ctx: ExecutionContext) -> Result<ExecutionOutcome> {
+    let cap = registry.get(name).ok_or_else(|| ClixError::CapabilityNotFound(name.to_string()))?.clone();
+    validate_input(&cap.input_schema, &input)?;
+    let decision = evaluate_policy(policy, &ctx, &cap);
+    let receipt_id = Uuid::new_v4();
+
+    match &decision {
+        Decision::Deny { reason } => {
+            store.write(&Receipt { id: receipt_id, kind: ReceiptKind::Capability, capability: cap.name.clone(), created_at: Utc::now(), status: ReceiptStatus::Denied, decision: "deny".to_string(), reason: Some(reason.clone()), input: input.clone(), context: serde_json::to_value(&ctx).unwrap_or_default(), execution: None, approval: None, sandbox_enforced: sandbox_enforced() })?;
+            return Ok(ExecutionOutcome { ok: false, approval_required: false, receipt_id, result: None, reason: Some(reason.clone()) });
+        }
+        Decision::RequireApproval { reason } => {
+            store.write(&Receipt { id: receipt_id, kind: ReceiptKind::Capability, capability: cap.name.clone(), created_at: Utc::now(), status: ReceiptStatus::PendingApproval, decision: "require_approval".to_string(), reason: Some(reason.clone()), input: input.clone(), context: serde_json::to_value(&ctx).unwrap_or_default(), execution: None, approval: None, sandbox_enforced: sandbox_enforced() })?;
+            return Ok(ExecutionOutcome { ok: false, approval_required: true, receipt_id, result: None, reason: Some(reason.clone()) });
+        }
+        Decision::Allow => {}
+    }
+
+    let template_ctx = serde_json::json!({"input": &input, "context": {"env": &ctx.env, "cwd": ctx.cwd.to_string_lossy(), "user": &ctx.user}});
+    let rendered_args = match &cap.backend {
+        Backend::Subprocess { args, .. } => render_args(args, &template_ctx)?,
+        _ => vec![],
+    };
+    let val_errors = run_validators(&cap.validators, &input, &ctx.cwd, &rendered_args);
+    if !val_errors.is_empty() {
+        let reason = val_errors[0].clone();
+        store.write(&Receipt { id: receipt_id, kind: ReceiptKind::Capability, capability: cap.name.clone(), created_at: Utc::now(), status: ReceiptStatus::Denied, decision: "deny".to_string(), reason: Some(reason.clone()), input: input.clone(), context: serde_json::to_value(&ctx).unwrap_or_default(), execution: None, approval: None, sandbox_enforced: sandbox_enforced() })?;
+        return Ok(ExecutionOutcome { ok: false, approval_required: false, receipt_id, result: None, reason: Some(reason) });
+    }
+    let secrets = resolve_credentials(&cap.credentials, infisical)?;
+    let redactor = SecretRedactor::new(secrets.clone());
+    let exec_result = match &cap.backend {
+        Backend::Builtin { name } => builtin_handler(name, &input)?,
+        Backend::Subprocess { command, cwd_from_input, .. } => {
+            let cwd = if let Some(key) = cwd_from_input {
+                input[key].as_str().map(std::path::PathBuf::from).unwrap_or_else(|| ctx.cwd.clone())
+            } else { ctx.cwd.clone() };
+            let expanded = expand_secret_refs(&rendered_args, &secrets);
+            let sub = run_subprocess(command, &expanded, &cwd, &secrets)?;
+            serde_json::json!({"exitCode": sub.exit_code, "stdout": redactor.redact(&sub.stdout), "stderr": redactor.redact(&sub.stderr)})
+        }
+        Backend::Remote { url } => {
+            let addr = if url.is_empty() { std::env::var("CLIX_SOCKET").unwrap_or_default() } else { url.clone() };
+            run_remote(&addr, &cap.name, &input)?
+        }
+    };
+    let ok = exec_result["exitCode"].as_i64().unwrap_or(0) == 0;
+    let status = if ok { ReceiptStatus::Succeeded } else { ReceiptStatus::Failed };
+    store.write(&Receipt { id: receipt_id, kind: ReceiptKind::Capability, capability: cap.name.clone(), created_at: Utc::now(), status, decision: "allow".to_string(), reason: None, input: input.clone(), context: serde_json::to_value(&ctx).unwrap_or_default(), execution: Some(exec_result.clone()), approval: None, sandbox_enforced: sandbox_enforced() })?;
+    Ok(ExecutionOutcome { ok, approval_required: false, receipt_id, result: Some(exec_result), reason: None })
+}
+
+pub fn run_workflow(cap_registry: &CapabilityRegistry, wf_registry: &WorkflowRegistry, policy: &PolicyBundle, infisical: Option<&InfisicalConfig>, store: &ReceiptStore, name: &str, input: serde_json::Value, ctx: ExecutionContext) -> Result<Vec<ExecutionOutcome>> {
+    let wf = wf_registry.get(name).ok_or_else(|| ClixError::WorkflowNotFound(name.to_string()))?.clone();
+    let mut outcomes = vec![];
+    for step in &wf.steps {
+        let step_input = merge_inputs(&input, &step.input);
+        let outcome = run_capability(cap_registry, policy, infisical, store, &step.capability, step_input, ctx.clone())?;
+        let failed = !outcome.ok;
+        outcomes.push(outcome);
+        if failed { match step.on_failure { StepFailurePolicy::Abort => break, StepFailurePolicy::Continue => {} } }
+    }
+    Ok(outcomes)
+}
+
+fn merge_inputs(base: &serde_json::Value, step: &serde_json::Value) -> serde_json::Value {
+    match (base, step) {
+        (serde_json::Value::Object(b), serde_json::Value::Object(s)) => {
+            let mut merged = b.clone();
+            for (k, v) in s { merged.insert(k.clone(), v.clone()); }
+            serde_json::Value::Object(merged)
+        }
+        (_, s) if !s.is_null() => s.clone(),
+        (b, _) => b.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::manifest::capability::{Backend, CapabilityManifest, RiskLevel, SideEffectClass};
+    use crate::policy::{PolicyAction, PolicyBundle, PolicyRule};
+    use std::path::PathBuf;
+
+    fn store() -> ReceiptStore { ReceiptStore::open(std::path::Path::new(":memory:")).unwrap() }
+
+    fn ctx() -> ExecutionContext {
+        ExecutionContext { env: "test".to_string(), cwd: PathBuf::from("."), user: "tester".to_string(), profile: "base".to_string(), approver: None }
+    }
+
+    fn date_cap() -> CapabilityManifest {
+        CapabilityManifest { name: "sys.date".to_string(), version: 1, description: None, backend: Backend::Builtin { name: "date".to_string() }, risk: RiskLevel::Low, side_effect_class: SideEffectClass::None, sandbox_profile: None, approval_policy: None, input_schema: serde_json::json!({"type":"object","properties":{}}), validators: vec![], credentials: vec![] }
+    }
+
+    #[test]
+    fn test_run_builtin() {
+        let reg = CapabilityRegistry::from_vec(vec![date_cap()]);
+        let outcome = run_capability(&reg, &PolicyBundle::default(), None, &store(), "sys.date", serde_json::json!({}), ctx()).unwrap();
+        assert!(outcome.ok);
+    }
+
+    #[test]
+    fn test_unknown_capability_errors() {
+        let reg = CapabilityRegistry::from_vec(vec![]);
+        assert!(run_capability(&reg, &PolicyBundle::default(), None, &store(), "nope", serde_json::json!({}), ctx()).is_err());
+    }
+
+    #[test]
+    fn test_denied_writes_receipt() {
+        let reg = CapabilityRegistry::from_vec(vec![date_cap()]);
+        let mut policy = PolicyBundle::default();
+        policy.rules.push(PolicyRule { capability: Some("sys.date".to_string()), action: PolicyAction::Deny, reason: Some("test".to_string()), ..Default::default() });
+        let store = store();
+        let outcome = run_capability(&reg, &policy, None, &store, "sys.date", serde_json::json!({}), ctx()).unwrap();
+        assert!(!outcome.ok);
+        assert_eq!(store.list(10, Some("denied")).unwrap().len(), 1);
+    }
+}

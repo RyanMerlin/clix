@@ -11,11 +11,9 @@ The project uses GitHub Actions to build tagged releases.
 
 The release pipeline builds:
 
-- Linux `amd64`
-- Linux `arm64`
-- macOS `amd64`
-- macOS `arm64`
-- Windows `amd64`
+- Linux `x86_64` and `aarch64`
+- macOS `x86_64` and `aarch64`
+- Windows `x86_64`
 
 The binaries are stamped with:
 
@@ -43,13 +41,13 @@ Set `CLIX_STRICT_VERIFY=1` to also verify the SBOM asset and GitHub attestations
 
 ## Local build
 
-```powershell
-go test ./...
-go build ./cmd/clix
+```sh
+cargo test
+cargo build -p clix-cli
 ```
 
-To embed release metadata locally:
+To produce a release binary with LTO:
 
-```powershell
-go build -trimpath -ldflags "-X github.com/RyanMerlin/clix/internal/clix.Version=1.0.0 -X github.com/RyanMerlin/clix/internal/clix.Commit=local -X github.com/RyanMerlin/clix/internal/clix.BuildDate=now" ./cmd/clix
+```sh
+cargo build -p clix-cli --release
 ```
