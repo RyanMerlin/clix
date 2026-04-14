@@ -21,7 +21,7 @@ pub enum CapView {
     Detail(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ModalKind {
     CreateProfile,
     CreateCapability,
@@ -82,6 +82,14 @@ pub struct App {
 }
 
 impl App {
+    fn validate_name(name: &str) -> Option<&'static str> {
+        if name.is_empty() { return Some("Name is required"); }
+        if name.contains('/') || name.contains('\\') || name.contains("..") {
+            return Some("Name must not contain path separators");
+        }
+        None
+    }
+
     pub fn new() -> Result<Self> {
         let mut state = ClixState::load(home_dir())?;
         if state.config.active_profiles.is_empty() {
@@ -147,6 +155,7 @@ impl App {
             KeyCode::Char('n') => self.open_create_modal(),
             KeyCode::Char('i') if self.screen == Screen::Packs => {
                 self.modal.open(ModalKind::InstallPack, 1);
+                self.last_error = None;
             }
             KeyCode::Tab => self.next_screen(),
             KeyCode::Left => self.prev_screen(),
@@ -163,7 +172,12 @@ impl App {
         match key.code {
             KeyCode::Esc => self.modal.close(),
             KeyCode::Tab => {
-                self.modal.next_field();
+                if !self.modal.next_field() {
+                    // Last field — wrap back to first
+                    self.modal.commit_field();
+                    self.modal.field_idx = 0;
+                    self.modal.input_buf = self.modal.fields.get(0).cloned().unwrap_or_default();
+                }
             }
             KeyCode::Enter => self.modal_confirm(),
             KeyCode::Backspace => {
@@ -182,45 +196,73 @@ impl App {
             Some(ModalKind::CreateProfile) => {
                 let name = self.modal.fields.get(0).cloned().unwrap_or_default();
                 let desc = self.modal.fields.get(1).cloned().unwrap_or_default();
-                if name.is_empty() { return; }
+                if let Some(err) = Self::validate_name(&name) {
+                    self.last_error = Some(err.to_string());
+                    return;
+                }
                 if let Err(e) = self.create_profile(&name, &desc) {
                     self.last_error = Some(format!("Create failed: {e}"));
                 } else {
                     self.modal.close();
-                    let _ = self.reload();
+                    self.last_error = None;
+                    if let Err(e) = self.reload() {
+                        self.last_error = Some(format!("Reload failed: {e}"));
+                    }
                 }
             }
             Some(ModalKind::CreateCapability) => {
                 let name = self.modal.fields.get(0).cloned().unwrap_or_default();
                 let desc = self.modal.fields.get(1).cloned().unwrap_or_default();
                 let command = self.modal.fields.get(2).cloned().unwrap_or_default();
-                if name.is_empty() || command.is_empty() { return; }
+                if let Some(err) = Self::validate_name(&name) {
+                    self.last_error = Some(err.to_string());
+                    return;
+                }
+                if command.is_empty() {
+                    self.last_error = Some("Command is required".to_string());
+                    return;
+                }
                 if let Err(e) = self.create_capability(&name, &desc, &command) {
                     self.last_error = Some(format!("Create failed: {e}"));
                 } else {
                     self.modal.close();
-                    let _ = self.reload();
+                    self.last_error = None;
+                    if let Err(e) = self.reload() {
+                        self.last_error = Some(format!("Reload failed: {e}"));
+                    }
                 }
             }
             Some(ModalKind::CreatePack) => {
                 let name = self.modal.fields.get(0).cloned().unwrap_or_default();
                 let desc = self.modal.fields.get(1).cloned().unwrap_or_default();
-                if name.is_empty() { return; }
+                if let Some(err) = Self::validate_name(&name) {
+                    self.last_error = Some(err.to_string());
+                    return;
+                }
                 if let Err(e) = self.create_pack(&name, &desc) {
                     self.last_error = Some(format!("Create failed: {e}"));
                 } else {
                     self.modal.close();
-                    let _ = self.reload();
+                    self.last_error = None;
+                    if let Err(e) = self.reload() {
+                        self.last_error = Some(format!("Reload failed: {e}"));
+                    }
                 }
             }
             Some(ModalKind::InstallPack) => {
                 let path = self.modal.fields.get(0).cloned().unwrap_or_default();
-                if path.is_empty() { return; }
+                if path.is_empty() {
+                    self.last_error = Some("Path is required".to_string());
+                    return;
+                }
                 if let Err(e) = self.install_pack(&path) {
                     self.last_error = Some(format!("Install failed: {e}"));
                 } else {
                     self.modal.close();
-                    let _ = self.reload();
+                    self.last_error = None;
+                    if let Err(e) = self.reload() {
+                        self.last_error = Some(format!("Reload failed: {e}"));
+                    }
                 }
             }
             None => {}
@@ -233,6 +275,7 @@ impl App {
             Screen::Capabilities => self.modal.open(ModalKind::CreateCapability, 3),
             Screen::Packs => self.modal.open(ModalKind::CreatePack, 2),
         }
+        self.last_error = None;
     }
 
     fn create_profile(&self, name: &str, description: &str) -> anyhow::Result<()> {

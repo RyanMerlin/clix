@@ -103,8 +103,10 @@ fn render_modal(f: &mut Frame, app: &App) {
         ModalKind::CreatePack => ("Create Pack", &["Name", "Description (optional)"]),
         ModalKind::InstallPack => ("Install Pack", &["Path to directory or .clixpack.zip"]),
     };
-    let height = (field_labels.len() as u16) * 3 + 4;
-    let width = area.width * 6 / 10;
+    let mut height = (field_labels.len() as u16) * 3 + 4;
+    let mut width = area.width * 6 / 10;
+    height = height.min(area.height);
+    width = width.min(area.width);
     let x = (area.width.saturating_sub(width)) / 2;
     let y = (area.height.saturating_sub(height)) / 2;
     let modal_area = ratatui::layout::Rect::new(x, y, width, height);
