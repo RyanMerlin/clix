@@ -44,6 +44,13 @@ fn install_from_zip(zip_path: &Path, packs_dir: &Path) -> Result<PathBuf> {
         let mut file = archive.by_index(i)
             .map_err(|e| ClixError::Pack(format!("zip entry: {e}")))?;
         let out_path = dest.join(file.name());
+        // Guard against zip slip: reject paths that escape the destination directory
+        if !out_path.starts_with(&dest) {
+            return Err(ClixError::Pack(format!(
+                "unsafe path in archive: {}",
+                file.name()
+            )));
+        }
         if file.name().ends_with('/') {
             std::fs::create_dir_all(&out_path)?;
         } else {

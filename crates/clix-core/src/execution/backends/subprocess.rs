@@ -24,7 +24,6 @@ pub fn run_subprocess(command: &str, args: &[String], cwd: &PathBuf, secrets: &H
                 let cmd_name = format!("{command}.cmd");
                 let mut cmd2 = std::process::Command::new(&cmd_name);
                 cmd2.args(args).current_dir(cwd);
-                for (k, v) in &env { cmd2.env(k, v); }
                 cmd2.env_clear();
                 for (k, v) in &env { cmd2.env(k, v); }
                 return cmd2.output().map_err(|_| e);

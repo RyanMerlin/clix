@@ -450,10 +450,10 @@ impl App {
                         self.cursor = 0;
                     }
                     CapView::Listing(_) => { self.cap_view = CapView::Namespaces; self.cursor = 0; }
-                    CapView::Namespaces => self.should_quit = true,
+                    CapView::Namespaces => {} // already at top level, no-op
                 }
             }
-            _ => self.should_quit = true,
+            _ => {} // Esc/Backspace is a no-op on non-drill-down screens; use q to quit
         }
     }
 }
