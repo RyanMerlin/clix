@@ -141,6 +141,41 @@ Built-in packs: `base` (system utilities), `kubectl-observe`, `gcloud-readonly`,
 
 ---
 
+## AI integrations
+
+### Claude Code / Cursor (MCP, project-scoped)
+
+```sh
+# Run from your project root:
+clix init --claude-code   # writes .mcp.json + CLAUDE.md integration block
+clix init --cursor        # writes .cursor/mcp.json
+```
+
+Restart the editor to load the MCP server. clix's `tools/list` returns namespace stubs by default, keeping registered-tool count low.
+
+### Claude API / OpenAI-compatible APIs
+
+```sh
+# Two-tool pattern — ~400 tokens regardless of catalogue size (recommended)
+clix tools export --format two-tool
+
+# Full capability registration for a specific namespace
+clix tools export --format claude --namespace git
+clix tools export --format openai --namespace kubectl
+```
+
+See [docs/integration-claude.md](docs/integration-claude.md) for Python and TypeScript examples with the full `tool_use` loop.
+
+### Gemini API
+
+```sh
+clix tools export --format gemini --namespace gcloud.aiplatform
+```
+
+See [docs/integration-gemini.md](docs/integration-gemini.md) for google-generativeai and google-genai SDK examples.
+
+---
+
 ## MCP server (for editor integrations)
 
 For Claude Desktop, Cursor, and other MCP-compatible editors:
@@ -228,6 +263,9 @@ Set `CLIX_STRICT_VERIFY=1` to verify the SBOM and attestations during install (r
 ## Docs
 
 - [Agent quickstart](docs/agent-quickstart.md) — paste-into-prompt CLI reference for agents
+- [Claude integration](docs/integration-claude.md) — direct CLI, two-tool API, Claude Code MCP setup
+- [Gemini integration](docs/integration-gemini.md) — function declarations, google-generativeai SDK
+- [Cursor integration](docs/integration-cursor.md) — MCP setup, profiles, troubleshooting
 - [Architecture](docs/architecture.md) — system design, trust model, isolation tiers
 - [Packs](docs/pack.md) — pack format reference
 - [Release process](docs/release.md)

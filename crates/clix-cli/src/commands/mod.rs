@@ -9,5 +9,6 @@ pub mod run;
 pub mod serve;
 pub mod shim;
 pub mod status;
+pub mod tools;
 pub mod tui;
 pub mod workflow;

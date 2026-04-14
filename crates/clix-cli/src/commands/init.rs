@@ -3,6 +3,122 @@ use std::path::{Path, PathBuf};
 use clix_core::state::{ClixConfig, ClixState, home_dir};
 use clix_core::packs::seed::seed_builtin_packs;
 
+/// Write a `.mcp.json` at `project_dir` (defaults to cwd) for Claude Code.
+///
+/// Claude Code reads `.mcp.json` in the project root as a project-scoped MCP server
+/// configuration. This writes a minimal entry that starts `clix serve` as a stdio
+/// MCP server when Claude Code opens the project.
+pub fn setup_claude_code(project_dir: Option<&Path>) -> Result<()> {
+    let dir = project_dir.map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+    let mcp_json_path = dir.join(".mcp.json");
+
+    // Read existing .mcp.json if present so we can merge rather than overwrite.
+    let mut root: serde_json::Value = if mcp_json_path.exists() {
+        let text = std::fs::read_to_string(&mcp_json_path)?;
+        serde_json::from_str(&text).unwrap_or(serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    if root.get("mcpServers").is_none() {
+        root["mcpServers"] = serde_json::json!({});
+    }
+    root["mcpServers"]["clix"] = serde_json::json!({
+        "command": "clix",
+        "args": ["serve"],
+        "description": "clix — policy-enforced, sandboxed CLI gateway"
+    });
+
+    let json = serde_json::to_string_pretty(&root)?;
+    std::fs::write(&mcp_json_path, json)?;
+    println!("wrote {}", mcp_json_path.display());
+
+    // Write CLAUDE.md integration block
+    let claude_md_path = dir.join("CLAUDE.md");
+    let clix_block = claude_md_snippet();
+    if claude_md_path.exists() {
+        let existing = std::fs::read_to_string(&claude_md_path)?;
+        if existing.contains("<!-- clix-integration -->") {
+            println!("{} already has clix integration block — skipped", claude_md_path.display());
+        } else {
+            let updated = format!("{}\n\n{}", existing.trim_end(), clix_block);
+            std::fs::write(&claude_md_path, updated)?;
+            println!("appended clix block to {}", claude_md_path.display());
+        }
+    } else {
+        std::fs::write(&claude_md_path, clix_block)?;
+        println!("wrote {}", claude_md_path.display());
+    }
+
+    println!();
+    println!("Claude Code will now start clix as an MCP server for this project.");
+    println!("Restart Claude Code (or reload MCP servers) to apply.");
+    Ok(())
+}
+
+/// Write `.cursor/mcp.json` at `project_dir` for Cursor.
+pub fn setup_cursor(project_dir: Option<&Path>) -> Result<()> {
+    let dir = project_dir.map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+    let cursor_dir = dir.join(".cursor");
+    std::fs::create_dir_all(&cursor_dir)?;
+    let mcp_path = cursor_dir.join("mcp.json");
+
+    let mut root: serde_json::Value = if mcp_path.exists() {
+        let text = std::fs::read_to_string(&mcp_path)?;
+        serde_json::from_str(&text).unwrap_or(serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    if root.get("mcpServers").is_none() {
+        root["mcpServers"] = serde_json::json!({});
+    }
+    root["mcpServers"]["clix"] = serde_json::json!({
+        "command": "clix",
+        "args": ["serve"],
+        "description": "clix — policy-enforced, sandboxed CLI gateway"
+    });
+
+    let json = serde_json::to_string_pretty(&root)?;
+    std::fs::write(&mcp_path, json)?;
+    println!("wrote {}", mcp_path.display());
+    println!();
+    println!("Cursor will use clix as an MCP tool server for this project.");
+    println!("Restart Cursor (or reload MCP servers in Settings → MCP) to apply.");
+    Ok(())
+}
+
+fn claude_md_snippet() -> String {
+    r#"<!-- clix-integration -->
+## clix — sandboxed CLI gateway
+
+clix gates CLI tools (git, kubectl, gcloud, etc.) behind policy and OS-level isolation.
+It is available as an MCP server (configured in `.mcp.json`) and directly via CLI.
+
+### Direct CLI usage (preferred for scripted tasks)
+```
+clix capabilities list --json        # browse tools
+clix capabilities search <query> --json
+clix capabilities show <name> --json # get input schema
+clix run <name> -i key=val --json    # execute → {ok, result, receipt_id}
+clix run <name> --dry-run --json     # policy preview, no execution
+clix doctor --json                   # health
+```
+
+Exit codes: 0 ok · 1 denied · 2 needs approval
+
+### MCP usage (automatic via `.mcp.json`)
+Use the `tools/list` MCP method to discover capabilities. Prefer the namespace
+drill-in pattern: call `tools/list` with no params to get namespace stubs, then
+`tools/list` with `{"namespace": "git"}` to get capabilities for that group.
+<!-- end clix-integration -->
+"#.to_string()
+}
+
 pub fn run() -> Result<()> {
     let home = home_dir();
     let state = ClixState::from_home(home.clone());

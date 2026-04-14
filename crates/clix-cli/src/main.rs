@@ -6,7 +6,7 @@ mod tui;
 
 use anyhow::Result;
 use clap::FromArgMatches;
-use cli::{Cli, Commands, CapabilitiesCmd, WorkflowCmd, ProfileCmd, ReceiptsCmd, PackCmd, ShimCmd, McpCmd};
+use cli::{Cli, Commands, CapabilitiesCmd, WorkflowCmd, ProfileCmd, ReceiptsCmd, PackCmd, ShimCmd, McpCmd, ToolsCmd};
 use clix_core::execution::run_capability;
 use clix_core::loader::{build_registry, load_policy};
 use clix_core::policy::evaluate::ExecutionContext;
@@ -87,7 +87,7 @@ async fn main() -> Result<()> {
 
 async fn dispatch_static(cli: Cli) -> Result<()> {
     match cli.command {
-        Commands::Init { install_shims, adopt_creds } => {
+        Commands::Init { install_shims, adopt_creds, claude_code, cursor } => {
             commands::init::run()?;
             if !install_shims.is_empty() {
                 let cmds: Vec<&str> = install_shims.iter().map(String::as_str).collect();
@@ -95,6 +95,12 @@ async fn dispatch_static(cli: Cli) -> Result<()> {
             }
             for cli in &adopt_creds {
                 commands::init::adopt_creds(cli)?;
+            }
+            if claude_code {
+                commands::init::setup_claude_code(None)?;
+            }
+            if cursor {
+                commands::init::setup_cursor(None)?;
             }
         }
         Commands::Status { json } => commands::status::run(json)?,
@@ -123,6 +129,10 @@ async fn dispatch_static(cli: Cli) -> Result<()> {
         Commands::Serve { socket, http } => commands::serve::run(socket, http).await?,
         Commands::Tui => commands::tui::run()?,
         Commands::Doctor { json } => commands::doctor::run(json)?,
+        Commands::Tools(sub) => match sub {
+            ToolsCmd::Export { format, namespace, all } =>
+                commands::tools::export(&format, namespace.as_deref(), all)?,
+        },
         Commands::Shim(sub) => match sub {
             ShimCmd::List { json } => commands::shim::list(json)?,
             ShimCmd::Uninstall { command } => commands::shim::uninstall(&command)?,

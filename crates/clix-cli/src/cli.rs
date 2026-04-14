@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 pub const STATIC_COMMANDS: &[&str] = &[
     "init", "status", "version", "run", "capabilities",
     "workflow", "profile", "receipts", "serve", "pack", "tui",
-    "doctor", "shim", "mcp",
+    "doctor", "shim", "mcp", "tools",
 ];
 
 #[derive(Parser)]
@@ -40,6 +40,14 @@ pub enum Commands {
         /// (e.g. --adopt-creds gcloud kubectl). This moves the creds out of the agent's reach.
         #[arg(long = "adopt-creds", value_name = "CLI", num_args = 0..)]
         adopt_creds: Vec<String>,
+        /// Write .mcp.json and CLAUDE.md integration block for Claude Code (project-scoped).
+        /// Run from the project root. Merges with existing .mcp.json if present.
+        #[arg(long = "claude-code")]
+        claude_code: bool,
+        /// Write .cursor/mcp.json for Cursor (project-scoped).
+        /// Run from the project root. Merges with existing .cursor/mcp.json if present.
+        #[arg(long = "cursor")]
+        cursor: bool,
     },
     /// Show clix status and configuration
     Status { #[arg(long)] json: bool },
@@ -78,6 +86,9 @@ pub enum Commands {
     Tui,
     /// Gateway health check for agents
     Doctor { #[arg(long)] json: bool },
+    /// Export capability definitions in AI SDK formats for Claude, Gemini, or OpenAI
+    #[command(subcommand)]
+    Tools(ToolsCmd),
     /// Manage PATH shims
     #[command(subcommand)]
     Shim(ShimCmd),
@@ -122,6 +133,22 @@ pub enum ReceiptsCmd {
     },
     Show { id: String, #[arg(long)] json: bool },
     Tail,
+}
+
+#[derive(Subcommand)]
+pub enum ToolsCmd {
+    /// Export capability definitions as an AI SDK tools/functions array
+    Export {
+        /// Output format: claude, gemini, openai, two-tool
+        #[arg(long, short, default_value = "claude")]
+        format: String,
+        /// Limit to capabilities in this namespace (e.g. git, gcloud)
+        #[arg(long)]
+        namespace: Option<String>,
+        /// Include all capabilities (flat list, no namespace filtering)
+        #[arg(long)]
+        all: bool,
+    },
 }
 
 #[derive(Subcommand)]
