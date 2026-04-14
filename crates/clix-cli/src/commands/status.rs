@@ -29,7 +29,7 @@ pub fn run(json: bool) -> Result<()> {
         print_kv(&[
             ("home",            state.home.display().to_string()),
             ("config",          state.config_path.display().to_string()),
-            ("active profiles", state.config.active_profiles.len().to_string()),
+            ("active profiles", state.config.active_profiles.join(", ")),
             ("packs",           packs.len().to_string()),
             ("capabilities",    registry.all().len().to_string()),
             ("default env",     state.config.default_env.clone()),
