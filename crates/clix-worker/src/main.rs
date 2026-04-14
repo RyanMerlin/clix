@@ -74,8 +74,12 @@ fn worker_loop(socket: UnixStream, config: &JailConfig) -> std::io::Result<()> {
         }
     };
 
-    // Verify binary integrity
-    if let Err(e) = verify_binary_hash(&config.pinned_binary, &handshake.binary_sha256) {
+    // Verify binary integrity using the in-jail path (/bin/<name>), since we are now
+    // inside the mount namespace where the host path no longer exists.
+    let bin_name = config.pinned_binary.file_name()
+        .map(|n| std::path::PathBuf::from("/bin").join(n))
+        .unwrap_or_else(|| config.pinned_binary.clone());
+    if let Err(e) = verify_binary_hash(&bin_name, &handshake.binary_sha256) {
         let ready = WorkerReady { ok: false, error: Some(e.to_string()) };
         let _ = write_json(&mut writer, &ready);
         return Ok(());
@@ -131,10 +135,17 @@ fn execute_request(request: &WorkerRequest, config: &JailConfig) -> WorkerEvent 
         vec![]
     };
 
+    // Use the requested cwd if it exists inside the jail; fall back to /home/clix.
+    // The jail has a tmpfs root so host paths (e.g. /mnt/...) don't exist inside.
+    let effective_cwd = {
+        let p = std::path::Path::new(&request.cwd);
+        if p.exists() { p.to_path_buf() } else { std::path::PathBuf::from("/home/clix") }
+    };
+
     // Build a clean environment: only what the gateway provided (ephemeral creds + minimal vars)
     let mut cmd = std::process::Command::new(&jail_binary);
     cmd.args(&args)
-        .current_dir(&request.cwd)
+        .current_dir(&effective_cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

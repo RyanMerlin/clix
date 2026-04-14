@@ -54,7 +54,8 @@ pub async fn tools_call(serve: &Arc<ServeState>, params: &serde_json::Value) -> 
     let arguments = params.get("arguments").cloned().unwrap_or(serde_json::json!({}));
     let ctx = ExecutionContext {
         env:     serve.state.config.default_env.clone(),
-        cwd:     serve.state.config.workspace_root.clone().unwrap_or_else(|| std::path::PathBuf::from(".")),
+        cwd:     serve.state.config.workspace_root.clone()
+                     .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"))),
         user:    "agent".to_string(),
         profile: serve.state.config.active_profiles.first().cloned().unwrap_or_else(|| "default".to_string()),
         approver: None,

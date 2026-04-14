@@ -203,13 +203,26 @@ impl WorkerRegistry {
         let (binary_path, binary_sha256) = resolve_and_hash_binary(&key.binary)?;
         let lib_deps = discover_lib_deps(&binary_path);
 
-        // Build jail config
+        // Build jail config, merging in the sandbox profile's extra bind mounts.
+        // We also add the current working directory as a read-write extra mount so that
+        // commands like `git status` can operate on the actual workspace.
         let sp = sandbox_profile.cloned().unwrap_or_default();
+        let mut extra_rw_bind = sp.fs.extra_rw_bind.clone();
+        if let Ok(cwd) = std::env::current_dir() {
+            let cwd_str = cwd.to_string_lossy().to_string();
+            if !extra_rw_bind.contains(&cwd_str) {
+                extra_rw_bind.push(cwd_str);
+            }
+        }
         let jail_config = JailConfig {
             pinned_binary: binary_path.clone(),
             binary_sha256: binary_sha256.clone(),
             lib_paths: lib_deps,
-            fs_policy: sp.fs.clone(),
+            fs_policy: crate::manifest::capability::FsPolicy {
+                extra_ro_bind: sp.fs.extra_ro_bind.clone(),
+                extra_rw_bind,
+                share_host_tmp: sp.fs.share_host_tmp,
+            },
             network_policy: sp.network.clone(),
             limits: sp.limits.clone(),
             extra_deny_syscalls: sp.extra_syscalls.clone(),
@@ -226,18 +239,31 @@ impl WorkerRegistry {
         let mut env_vars = jail_config.to_env();
         env_vars.push((crate::sandbox::jail::env_keys::WORKER_SOCKET_FD.to_string(), worker_fd.to_string()));
 
-        // Spawn the worker binary
-        let child = std::process::Command::new(&self.worker_binary)
-            .env_clear()
+        // Spawn the worker binary.
+        // IMPORTANT: UnixStream::pair() creates sockets with SOCK_CLOEXEC, meaning the
+        // worker-side fd would be automatically closed on exec before the worker could use it.
+        // We clear O_CLOEXEC on the worker fd in a pre_exec hook so it survives the exec.
+        use std::os::unix::process::CommandExt;
+        let mut cmd = std::process::Command::new(&self.worker_binary);
+        cmd.env_clear()
             .envs(env_vars)
-            // Pass the socket fd through to the child (unsafe_fd)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::inherit())
-            .spawn()
+            .stderr(std::process::Stdio::inherit());
+        unsafe {
+            cmd.pre_exec(move || {
+                // Clear CLOEXEC so the socket fd is inherited across exec into clix-worker
+                let ret = libc::fcntl(worker_fd, libc::F_SETFD, 0);
+                if ret < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let child = cmd.spawn()
             .map_err(|e| ClixError::Worker(format!("spawn worker {}: {e}", self.worker_binary.display())))?;
 
-        // Close our copy of the worker-side fd
+        // Close our copy of the worker-side fd (gateway side no longer needs it)
         unsafe { libc::close(worker_fd) };
 
         // Perform the handshake: send WorkerHandshake, expect WorkerReady

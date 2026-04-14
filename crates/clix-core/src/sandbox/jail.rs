@@ -392,6 +392,15 @@ fn setup_mount_namespace(root: &Path, config: &JailConfig) -> Result<()> {
             .map_err(|e| ClixError::Isolation(format!("mkdir {dir}: {e}")))?;
     }
 
+    // Bind-mount /dev/null from the host — many CLI tools open it directly.
+    // We bind rather than mknod because mknod for device files requires CAP_MKNOD.
+    let dev_null_dest = root.join("dev/null");
+    fs::write(&dev_null_dest, "")
+        .map_err(|e| ClixError::Isolation(format!("create dev/null target: {e}")))?;
+    // Best-effort: bind mount of /dev/null may fail on some kernels/configs, but most CLI
+    // tools will still work (only those that explicitly open /dev/null directly will fail).
+    bind_mount(Path::new("/dev/null"), &dev_null_dest, false).ok();
+
     // Mount a fresh procfs — best-effort (WSL2 and some hardened kernels deny this in user ns)
     let proc_dest_c = CString::new(root.join("proc").to_string_lossy().as_bytes()).unwrap();
     let proc_str = CString::new("proc").unwrap();
