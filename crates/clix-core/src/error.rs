@@ -20,6 +20,14 @@ pub enum ClixError {
     TemplateRender(String),
     #[error("sandbox error: {0}")]
     Sandbox(String),
+    #[error("isolation error: {0}")]
+    Isolation(String),
+    #[error("worker error: {0}")]
+    Worker(String),
+    #[error("broker error: {0}")]
+    Broker(String),
+    #[error("integrity failure: {0}")]
+    IntegrityFailure(String),
     #[error("backend error: {0}")]
     Backend(String),
     #[error("pack error: {0}")]

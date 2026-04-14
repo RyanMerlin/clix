@@ -63,7 +63,7 @@ pub async fn tools_call(serve: &Arc<ServeState>, params: &serde_json::Value) -> 
     let name = name.to_string();
     let outcome = tokio::task::spawn_blocking(move || {
         let store = serve_clone.store.lock().unwrap();
-        run_capability(&serve_clone.cap_registry, &serve_clone.policy, serve_clone.state.config.infisical.as_ref(), &store, &name, arguments, ctx)
+        run_capability(&serve_clone.cap_registry, &serve_clone.policy, serve_clone.state.config.infisical.as_ref(), &store, serve_clone.worker_registry.as_ref(), &name, arguments, ctx)
     }).await.map_err(|e| format!("task join: {e}"))?.map_err(|e| e.to_string())?;
     let content = if let Some(result) = &outcome.result {
         if let Some(stdout) = result["stdout"].as_str() {

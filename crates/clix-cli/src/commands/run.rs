@@ -21,7 +21,7 @@ pub fn run(capability: &str, input_pairs: &[String], json: bool) -> Result<()> {
         profile: state.config.active_profiles.first().cloned().unwrap_or_else(|| "default".to_string()),
         approver: None,
     };
-    let outcome = run_capability(&registry, &policy, state.config.infisical.as_ref(), &store, capability, input, ctx)
+    let outcome = run_capability(&registry, &policy, state.config.infisical.as_ref(), &store, None, capability, input, ctx)
         .map_err(|e| anyhow!("{e}"))?;
     if json {
         print_json(&outcome);

@@ -1,15 +1,19 @@
 use std::sync::{Arc, Mutex};
+use clix_core::execution::worker_registry::WorkerRegistry;
 use clix_core::policy::PolicyBundle;
 use clix_core::receipts::ReceiptStore;
 use clix_core::registry::{CapabilityRegistry, WorkflowRegistry};
 use clix_core::state::ClixState;
 
 pub struct ServeState {
-    pub cap_registry: CapabilityRegistry,
-    pub wf_registry:  WorkflowRegistry,
-    pub policy:       PolicyBundle,
-    pub store:        Mutex<ReceiptStore>,
-    pub state:        ClixState,
+    pub cap_registry:    CapabilityRegistry,
+    pub wf_registry:     WorkflowRegistry,
+    pub policy:          PolicyBundle,
+    pub store:           Mutex<ReceiptStore>,
+    pub state:           ClixState,
+    /// Warm worker pool for jailed subprocess execution. `None` if the clix-worker binary
+    /// is not available (falls back to direct spawn with a loud warning).
+    pub worker_registry: Option<Arc<WorkerRegistry>>,
 }
 
 pub async fn dispatch(serve: Arc<ServeState>, req: serde_json::Value) -> serde_json::Value {
@@ -59,7 +63,7 @@ mod tests {
             name: name.to_string(), version: 1, description: Some(desc.to_string()),
             backend: Backend::Builtin { name: "date".to_string() },
             risk: RiskLevel::Low, side_effect_class: SideEffectClass::ReadOnly,
-            sandbox_profile: None, approval_policy: None,
+            sandbox_profile: None, isolation: Default::default(), approval_policy: None,
             input_schema: serde_json::json!({}), validators: vec![], credentials: vec![],
         }
     }
@@ -68,11 +72,12 @@ mod tests {
         let home = std::env::temp_dir().join("clix-test-serve");
         std::fs::create_dir_all(&home).unwrap();
         Arc::new(ServeState {
-            cap_registry: CapabilityRegistry::from_vec(vec![]),
-            wf_registry:  WorkflowRegistry::from_vec(vec![]),
-            policy:       PolicyBundle::default(),
-            store:        Mutex::new(ReceiptStore::open(&home.join("receipts.db")).unwrap()),
-            state:        ClixState::from_home(home),
+            cap_registry:    CapabilityRegistry::from_vec(vec![]),
+            wf_registry:     WorkflowRegistry::from_vec(vec![]),
+            policy:          PolicyBundle::default(),
+            store:           Mutex::new(ReceiptStore::open(&home.join("receipts.db")).unwrap()),
+            state:           ClixState::from_home(home),
+            worker_registry: None,
         })
     }
 
@@ -84,11 +89,12 @@ mod tests {
         reg.insert(make_cap("gcloud.aiplatform.endpoints.list", "List Vertex AI endpoints"));
         reg.insert(make_cap("system.date", "Return UTC date"));
         Arc::new(ServeState {
-            cap_registry: reg,
-            wf_registry:  WorkflowRegistry::from_vec(vec![]),
-            policy:       PolicyBundle::default(),
-            store:        Mutex::new(ReceiptStore::open(&home.join("receipts.db")).unwrap()),
-            state:        ClixState::from_home(home),
+            cap_registry:    reg,
+            wf_registry:     WorkflowRegistry::from_vec(vec![]),
+            policy:          PolicyBundle::default(),
+            store:           Mutex::new(ReceiptStore::open(&home.join("receipts.db")).unwrap()),
+            state:           ClixState::from_home(home),
+            worker_registry: None,
         })
     }
 

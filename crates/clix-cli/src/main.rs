@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
         } else {
             output::OutputFormat::from_str(format_str)
         };
-        let outcome = run_capability(&registry, &policy, state.config.infisical.as_ref(), &store, &cap_name, inputs, ctx)?;
+        let outcome = run_capability(&registry, &policy, state.config.infisical.as_ref(), &store, None, &cap_name, inputs, ctx)?;
         if format != output::OutputFormat::Json && outcome.result.is_some() {
             let result = outcome.result.as_ref().unwrap();
             print!("{}", output::format_value(result, &format));
@@ -87,7 +87,16 @@ async fn main() -> Result<()> {
 
 async fn dispatch_static(cli: Cli) -> Result<()> {
     match cli.command {
-        Commands::Init => commands::init::run()?,
+        Commands::Init { install_shims, adopt_creds } => {
+            commands::init::run()?;
+            if !install_shims.is_empty() {
+                let cmds: Vec<&str> = install_shims.iter().map(String::as_str).collect();
+                commands::init::install_shims(&cmds)?;
+            }
+            for cli in &adopt_creds {
+                commands::init::adopt_creds(cli)?;
+            }
+        }
         Commands::Status { json } => commands::status::run(json)?,
         Commands::Version => println!("clix {}", env!("CARGO_PKG_VERSION")),
         Commands::Run { capability, input, json } => commands::run::run(&capability, &input, json)?,

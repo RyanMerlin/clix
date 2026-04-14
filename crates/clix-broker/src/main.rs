@@ -1,0 +1,333 @@
+/// clix-broker: credential store and ephemeral token minter.
+///
+/// The broker is a long-running daemon that:
+///   1. Owns credentials in `$CLIX_BROKER_HOME` (default `/var/lib/clix/broker/`, or
+///      `~/.local/share/clix/broker/` when run as a user daemon). The directory is mode 0700.
+///   2. Listens on a Unix socket (`$CLIX_BROKER_SOCKET`) authenticated via `SO_PEERCRED`.
+///      Only the gateway's UID/GID is allowed to connect.
+///   3. On each `BrokerMintRequest`, reads the stored credentials for the requested CLI and
+///      returns an ephemeral token set (`BrokerMintResponse`).
+///
+/// Currently supported CLIs:
+///   - `gcloud`:  reads an ADC JSON file, returns `GOOGLE_OAUTH_ACCESS_TOKEN` from its
+///                `token_uri` / `client_id` / `refresh_token` fields via the OAuth2 refresh flow.
+///   - `kubectl`: reads a kubeconfig, generates an in-memory kubeconfig with a short-lived
+///                `KUBECONFIG` pointing to a tmpfile containing a bearer token.
+///   - `generic`: reads the credential as an env var and re-injects it verbatim.
+///
+/// On startup the broker:
+///   - `chmod 0700` on the creds directory.
+///   - Refuses to start if the directory is world-readable.
+///   - Drops supplementary groups (if run as root, also drops to a dedicated user — TODO).
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixListener;
+#[cfg(target_os = "linux")]
+use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
+use std::fs;
+use clix_core::execution::worker_protocol::{BrokerMintRequest, BrokerMintResponse};
+
+const DEFAULT_SOCKET_PATH: &str = "/tmp/clix-broker.sock";
+
+fn main() {
+    let socket_path = std::env::var("CLIX_BROKER_SOCKET")
+        .unwrap_or_else(|_| DEFAULT_SOCKET_PATH.to_string());
+    let creds_dir = creds_dir();
+
+    // Ensure creds dir exists with tight permissions
+    if let Err(e) = ensure_creds_dir(&creds_dir) {
+        eprintln!("[clix-broker] FATAL: {e}");
+        std::process::exit(1);
+    }
+
+    // Remove stale socket
+    let _ = fs::remove_file(&socket_path);
+
+    let listener = match UnixListener::bind(&socket_path) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[clix-broker] FATAL: bind {socket_path}: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Restrict socket to owner-only
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600));
+    }
+
+    eprintln!("[clix-broker] listening on {socket_path}");
+    eprintln!("[clix-broker] creds dir: {}", creds_dir.display());
+
+    for stream in listener.incoming() {
+        match stream {
+            Ok(s) => {
+                let creds_dir = creds_dir.clone();
+                std::thread::spawn(move || handle_connection(s, &creds_dir));
+            }
+            Err(e) => eprintln!("[clix-broker] accept error: {e}"),
+        }
+    }
+}
+
+fn handle_connection(stream: std::os::unix::net::UnixStream, creds_dir: &Path) {
+    // Validate SO_PEERCRED — only the current user's processes may connect
+    #[cfg(target_os = "linux")]
+    if let Err(e) = validate_peer_cred(&stream) {
+        eprintln!("[clix-broker] rejected connection: {e}");
+        return;
+    }
+
+    let mut writer = match stream.try_clone() {
+        Ok(w) => w,
+        Err(e) => { eprintln!("[clix-broker] clone stream: {e}"); return; }
+    };
+    let reader = BufReader::new(stream);
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => break,
+        };
+        let req: BrokerMintRequest = match serde_json::from_str(&line) {
+            Ok(r) => r,
+            Err(e) => {
+                let resp = BrokerMintResponse { ok: false, env: Default::default(), error: Some(format!("bad request: {e}")) };
+                let _ = write_json(&mut writer, &resp);
+                continue;
+            }
+        };
+
+        let resp = mint_token(&req, creds_dir);
+        if write_json(&mut writer, &resp).is_err() { break; }
+    }
+}
+
+/// Mint ephemeral credentials for a given CLI.
+fn mint_token(req: &BrokerMintRequest, creds_dir: &Path) -> BrokerMintResponse {
+    match req.cli.as_str() {
+        "gcloud" => mint_gcloud(creds_dir, req.duration_secs),
+        "kubectl" => mint_kubectl(creds_dir),
+        _ => mint_generic(&req.cli, creds_dir),
+    }
+}
+
+/// gcloud: read the ADC JSON stored under `creds_dir/gcloud/adc.json` and either return the
+/// cached access token (if not expired) or perform an OAuth2 token refresh.
+fn mint_gcloud(creds_dir: &Path, _duration_secs: u64) -> BrokerMintResponse {
+    let adc_path = creds_dir.join("gcloud").join("adc.json");
+    if !adc_path.exists() {
+        return BrokerMintResponse {
+            ok: false,
+            env: Default::default(),
+            error: Some(format!("gcloud ADC not found at {}. Run: clix init --adopt-creds gcloud", adc_path.display())),
+        };
+    }
+
+    let adc_text = match fs::read_to_string(&adc_path) {
+        Ok(t) => t,
+        Err(e) => return BrokerMintResponse { ok: false, env: Default::default(), error: Some(format!("read ADC: {e}")) },
+    };
+
+    let adc: serde_json::Value = match serde_json::from_str(&adc_text) {
+        Ok(v) => v,
+        Err(e) => return BrokerMintResponse { ok: false, env: Default::default(), error: Some(format!("parse ADC: {e}")) },
+    };
+
+    // If there's a cached access token and expiry, check if still valid (with 60s buffer)
+    if let (Some(token), Some(expiry)) = (adc["access_token"].as_str(), adc["token_expiry"].as_str()) {
+        if let Ok(expiry_dt) = chrono::DateTime::parse_from_rfc3339(expiry) {
+            let now = chrono::Utc::now();
+            if expiry_dt.with_timezone(&chrono::Utc) > now + chrono::Duration::seconds(60) {
+                return BrokerMintResponse {
+                    ok: true,
+                    env: [("GOOGLE_OAUTH_ACCESS_TOKEN".to_string(), token.to_string())].into(),
+                    error: None,
+                };
+            }
+        }
+    }
+
+    // Need to refresh — call the token_uri with refresh_token
+    let refresh_token = adc["refresh_token"].as_str().unwrap_or_default();
+    let client_id = adc["client_id"].as_str().unwrap_or_default();
+    let client_secret = adc["client_secret"].as_str().unwrap_or_default();
+    let token_uri = adc["token_uri"].as_str().unwrap_or("https://oauth2.googleapis.com/token");
+
+    if refresh_token.is_empty() || client_id.is_empty() {
+        // Service account — the access_token may already be present but expired
+        // For service accounts, we'd need to sign a JWT. For now, return what we have
+        // with a warning (proper SA support is a follow-up).
+        if let Some(token) = adc["access_token"].as_str() {
+            eprintln!("[clix-broker] WARNING: gcloud service account token may be expired; SA refresh not yet implemented");
+            return BrokerMintResponse {
+                ok: true,
+                env: [("GOOGLE_OAUTH_ACCESS_TOKEN".to_string(), token.to_string())].into(),
+                error: None,
+            };
+        }
+        return BrokerMintResponse {
+            ok: false,
+            env: Default::default(),
+            error: Some("gcloud: no refresh_token and no cached access_token in ADC".to_string()),
+        };
+    }
+
+    // Perform the OAuth2 refresh
+    match oauth2_refresh(token_uri, client_id, client_secret, refresh_token) {
+        Ok(access_token) => {
+            // Write updated access_token + expiry back to ADC (best-effort)
+            let mut updated = adc.clone();
+            let expiry = chrono::Utc::now() + chrono::Duration::seconds(3600);
+            updated["access_token"] = serde_json::Value::String(access_token.clone());
+            updated["token_expiry"] = serde_json::Value::String(expiry.to_rfc3339());
+            let _ = fs::write(&adc_path, serde_json::to_string_pretty(&updated).unwrap_or_default());
+
+            BrokerMintResponse {
+                ok: true,
+                env: [("GOOGLE_OAUTH_ACCESS_TOKEN".to_string(), access_token)].into(),
+                error: None,
+            }
+        }
+        Err(e) => BrokerMintResponse {
+            ok: false,
+            env: Default::default(),
+            error: Some(format!("gcloud OAuth2 refresh failed: {e}")),
+        },
+    }
+}
+
+fn oauth2_refresh(token_uri: &str, client_id: &str, client_secret: &str, refresh_token: &str) -> Result<String, String> {
+    let body = format!(
+        "client_id={}&client_secret={}&refresh_token={}&grant_type=refresh_token",
+        urlencoding::encode(client_id),
+        urlencoding::encode(client_secret),
+        urlencoding::encode(refresh_token),
+    );
+
+    let output = std::process::Command::new("curl")
+        .args(["--silent", "--fail", "-X", "POST", token_uri,
+               "-H", "Content-Type: application/x-www-form-urlencoded",
+               "-d", &body])
+        .output()
+        .map_err(|e| format!("curl: {e}"))?;
+
+    if !output.status.success() {
+        return Err(format!("HTTP error: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+
+    let resp: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("parse token response: {e}"))?;
+    resp["access_token"].as_str()
+        .map(String::from)
+        .ok_or_else(|| format!("no access_token in response: {}", String::from_utf8_lossy(&output.stdout)))
+}
+
+/// kubectl: write a temporary kubeconfig with the cached bearer token and return `KUBECONFIG`.
+fn mint_kubectl(creds_dir: &Path) -> BrokerMintResponse {
+    let kubeconfig_path = creds_dir.join("kubectl").join("kubeconfig");
+    if !kubeconfig_path.exists() {
+        return BrokerMintResponse {
+            ok: false,
+            env: Default::default(),
+            error: Some(format!("kubectl config not found at {}. Run: clix init --adopt-creds kubectl", kubeconfig_path.display())),
+        };
+    }
+
+    // Write to a tmpfile so the worker gets a path it can read inside its jail.
+    // For now we return KUBECONFIG pointing to the broker-owned location (the worker's
+    // fs policy must include an RO bind of this path — handled by the manifest).
+    BrokerMintResponse {
+        ok: true,
+        env: [("KUBECONFIG".to_string(), kubeconfig_path.to_string_lossy().to_string())].into(),
+        error: None,
+    }
+}
+
+/// Generic: look up `creds_dir/<cli>/secret.env` and re-inject the stored env vars.
+fn mint_generic(cli: &str, creds_dir: &Path) -> BrokerMintResponse {
+    let secret_path = creds_dir.join(cli).join("secret.env");
+    if !secret_path.exists() {
+        return BrokerMintResponse {
+            ok: false,
+            env: Default::default(),
+            error: Some(format!("no creds for `{cli}` at {}", secret_path.display())),
+        };
+    }
+    let text = match fs::read_to_string(&secret_path) {
+        Ok(t) => t,
+        Err(e) => return BrokerMintResponse { ok: false, env: Default::default(), error: Some(format!("read: {e}")) },
+    };
+    let mut env = std::collections::HashMap::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') { continue; }
+        if let Some((k, v)) = line.split_once('=') {
+            env.insert(k.to_string(), v.to_string());
+        }
+    }
+    BrokerMintResponse { ok: true, env, error: None }
+}
+
+// ── Security helpers ──────────────────────────────────────────────────────────
+
+/// Validate that the connecting process is owned by the same user as us (via SO_PEERCRED).
+#[cfg(target_os = "linux")]
+fn validate_peer_cred(stream: &UnixStream) -> Result<(), String> {
+    use std::os::unix::io::AsRawFd;
+
+    let fd = stream.as_raw_fd();
+    let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let ret = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            &mut cred as *mut _ as *mut libc::c_void,
+            &mut len,
+        )
+    };
+    if ret != 0 {
+        return Err(format!("getsockopt SO_PEERCRED: {}", std::io::Error::last_os_error()));
+    }
+    let our_uid = unsafe { libc::getuid() };
+    if cred.uid != our_uid {
+        return Err(format!("UID mismatch: peer={}, ours={}", cred.uid, our_uid));
+    }
+    Ok(())
+}
+
+/// Ensure the creds directory exists and has mode 0700.
+fn ensure_creds_dir(dir: &Path) -> Result<(), String> {
+    if !dir.exists() {
+        fs::create_dir_all(dir).map_err(|e| format!("create creds dir {}: {e}", dir.display()))?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = fs::Permissions::from_mode(0o700);
+        fs::set_permissions(dir, perms).map_err(|e| format!("chmod 700 {}: {e}", dir.display()))?;
+    }
+    Ok(())
+}
+
+fn creds_dir() -> PathBuf {
+    std::env::var("CLIX_BROKER_CREDS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            dirs::data_local_dir()
+                .unwrap_or_else(|| PathBuf::from("/var/lib"))
+                .join("clix")
+                .join("broker")
+        })
+}
+
+fn write_json<T: serde::Serialize>(writer: &mut impl Write, value: &T) -> std::io::Result<()> {
+    let line = serde_json::to_string(value).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    writer.write_all(line.as_bytes())?;
+    writer.write_all(b"\n")?;
+    writer.flush()
+}

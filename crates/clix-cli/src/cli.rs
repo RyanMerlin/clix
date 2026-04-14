@@ -30,7 +30,16 @@ pub fn base_command() -> clap::Command {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Initialize clix in ~/.clix
-    Init,
+    Init {
+        /// Install PATH shims for the listed CLI commands (e.g. --install-shims gcloud kubectl).
+        /// Shims are placed in ~/.clix/bin/ and intercept direct CLI invocations by the agent.
+        #[arg(long = "install-shims", value_name = "COMMAND", num_args = 0..)]
+        install_shims: Vec<String>,
+        /// Migrate credentials for the listed CLIs into the broker-owned credential store
+        /// (e.g. --adopt-creds gcloud kubectl). This moves the creds out of the agent's reach.
+        #[arg(long = "adopt-creds", value_name = "CLI", num_args = 0..)]
+        adopt_creds: Vec<String>,
+    },
     /// Show clix status and configuration
     Status { #[arg(long)] json: bool },
     /// Print version information

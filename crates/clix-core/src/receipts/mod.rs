@@ -19,6 +19,18 @@ pub struct Receipt {
     pub execution: Option<serde_json::Value>,
     pub approval: Option<serde_json::Value>,
     pub sandbox_enforced: bool,
+    /// Which isolation tier was used for this execution.
+    #[serde(default)]
+    pub isolation_tier: Option<String>,
+    /// SHA-256 hex digest of the CLI binary that was executed.
+    #[serde(default)]
+    pub binary_sha256: Option<String>,
+    /// Opaque ID of the broker token mint used for credentials (for audit correlation).
+    #[serde(default)]
+    pub token_mint_id: Option<String>,
+    /// SHA-256 digest of the JailConfig used (for reproducibility auditing).
+    #[serde(default)]
+    pub jail_config_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,7 +68,7 @@ impl ReceiptStore {
 
     pub fn write(&self, receipt: &Receipt) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO receipts (id,kind,capability,created_at,status,decision,reason,input,context,execution,approval,sandbox_enforced) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+            "INSERT INTO receipts (id,kind,capability,created_at,status,decision,reason,input,context,execution,approval,sandbox_enforced,isolation_tier,binary_sha256,token_mint_id,jail_config_digest) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
             rusqlite::params![
                 receipt.id.to_string(),
                 serde_json::to_string(&receipt.kind).unwrap(),
@@ -70,6 +82,10 @@ impl ReceiptStore {
                 receipt.execution.as_ref().map(|e| serde_json::to_string(e).unwrap()),
                 receipt.approval.as_ref().map(|a| serde_json::to_string(a).unwrap()),
                 receipt.sandbox_enforced as i64,
+                receipt.isolation_tier,
+                receipt.binary_sha256,
+                receipt.token_mint_id,
+                receipt.jail_config_digest,
             ],
         ).map_err(|e| ClixError::Config(format!("receipt insert: {e}")))?;
         Ok(())
@@ -77,17 +93,20 @@ impl ReceiptStore {
 
     pub fn list(&self, limit: usize, status_filter: Option<&str>) -> Result<Vec<Receipt>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id,kind,capability,created_at,status,decision,reason,input,context,execution,approval,sandbox_enforced FROM receipts WHERE (?1 IS NULL OR status = ?1) ORDER BY created_at DESC LIMIT ?2"
+            "SELECT id,kind,capability,created_at,status,decision,reason,input,context,execution,approval,sandbox_enforced,isolation_tier,binary_sha256,token_mint_id,jail_config_digest FROM receipts WHERE (?1 IS NULL OR status = ?1) ORDER BY created_at DESC LIMIT ?2"
         ).map_err(|e| ClixError::Config(e.to_string()))?;
         let rows = stmt.query_map(rusqlite::params![status_filter, limit as i64], |row| {
             Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?,
                 row.get::<_,String>(3)?, row.get::<_,String>(4)?, row.get::<_,String>(5)?,
                 row.get::<_,Option<String>>(6)?, row.get::<_,String>(7)?, row.get::<_,String>(8)?,
-                row.get::<_,Option<String>>(9)?, row.get::<_,Option<String>>(10)?, row.get::<_,i64>(11)?))
+                row.get::<_,Option<String>>(9)?, row.get::<_,Option<String>>(10)?, row.get::<_,i64>(11)?,
+                row.get::<_,Option<String>>(12)?, row.get::<_,Option<String>>(13)?,
+                row.get::<_,Option<String>>(14)?, row.get::<_,Option<String>>(15)?))
         }).map_err(|e| ClixError::Config(e.to_string()))?;
         let mut receipts = vec![];
         for row in rows {
-            let (id,kind,cap,created_at,status,decision,reason,input,context,execution,approval,sandbox_enforced) =
+            let (id,kind,cap,created_at,status,decision,reason,input,context,execution,approval,sandbox_enforced,
+                 isolation_tier,binary_sha256,token_mint_id,jail_config_digest) =
                 row.map_err(|e| ClixError::Config(e.to_string()))?;
             receipts.push(Receipt {
                 id: Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::new_v4()),
@@ -101,6 +120,7 @@ impl ReceiptStore {
                 execution: execution.as_deref().and_then(|s| serde_json::from_str(s).ok()),
                 approval: approval.as_deref().and_then(|s| serde_json::from_str(s).ok()),
                 sandbox_enforced: sandbox_enforced != 0,
+                isolation_tier, binary_sha256, token_mint_id, jail_config_digest,
             });
         }
         Ok(receipts)
@@ -108,18 +128,21 @@ impl ReceiptStore {
 
     pub fn get(&self, id: &str) -> Result<Option<Receipt>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id,kind,capability,created_at,status,decision,reason,input,context,execution,approval,sandbox_enforced FROM receipts WHERE id = ?1"
+            "SELECT id,kind,capability,created_at,status,decision,reason,input,context,execution,approval,sandbox_enforced,isolation_tier,binary_sha256,token_mint_id,jail_config_digest FROM receipts WHERE id = ?1"
         ).map_err(|e| ClixError::Config(e.to_string()))?;
         let row = stmt.query_row(rusqlite::params![id], |row| {
             Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?,
                 row.get::<_,String>(3)?, row.get::<_,String>(4)?, row.get::<_,String>(5)?,
                 row.get::<_,Option<String>>(6)?, row.get::<_,String>(7)?, row.get::<_,String>(8)?,
-                row.get::<_,Option<String>>(9)?, row.get::<_,Option<String>>(10)?, row.get::<_,i64>(11)?))
+                row.get::<_,Option<String>>(9)?, row.get::<_,Option<String>>(10)?, row.get::<_,i64>(11)?,
+                row.get::<_,Option<String>>(12)?, row.get::<_,Option<String>>(13)?,
+                row.get::<_,Option<String>>(14)?, row.get::<_,Option<String>>(15)?))
         });
         match row {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(ClixError::Config(e.to_string())),
-            Ok((id,kind,cap,created_at,status,decision,reason,input,context,execution,approval,sandbox_enforced)) => {
+            Ok((id,kind,cap,created_at,status,decision,reason,input,context,execution,approval,sandbox_enforced,
+                isolation_tier,binary_sha256,token_mint_id,jail_config_digest)) => {
                 Ok(Some(Receipt {
                     id: Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::new_v4()),
                     kind: serde_json::from_str(&kind).unwrap_or(ReceiptKind::Capability),
@@ -132,6 +155,7 @@ impl ReceiptStore {
                     execution: execution.as_deref().and_then(|s| serde_json::from_str(s).ok()),
                     approval: approval.as_deref().and_then(|s| serde_json::from_str(s).ok()),
                     sandbox_enforced: sandbox_enforced != 0,
+                    isolation_tier, binary_sha256, token_mint_id, jail_config_digest,
                 }))
             }
         }
@@ -161,6 +185,7 @@ mod tests {
             created_at: Utc::now(), status, decision: "allow".to_string(), reason: None,
             input: serde_json::json!({}), context: serde_json::json!({}),
             execution: None, approval: None, sandbox_enforced: false,
+            isolation_tier: None, binary_sha256: None, token_mint_id: None, jail_config_digest: None,
         }
     }
 

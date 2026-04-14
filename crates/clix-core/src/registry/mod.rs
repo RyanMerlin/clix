@@ -98,7 +98,7 @@ mod tests {
             name: name.to_string(), version: 1, description: None,
             backend: Backend::Builtin { name: "date".to_string() },
             risk: RiskLevel::Low, side_effect_class: SideEffectClass::None,
-            sandbox_profile: None, approval_policy: None,
+            sandbox_profile: None, isolation: Default::default(), approval_policy: None,
             input_schema: serde_json::json!({}), validators: vec![], credentials: vec![],
         }
     }

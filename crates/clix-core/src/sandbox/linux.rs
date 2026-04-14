@@ -1,7 +1,7 @@
 use crate::error::{ClixError, Result};
 
 pub fn apply_sandbox(allowed_executables: &[String]) -> Result<()> {
-    use landlock::{Access, AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, ABI};
+    use landlock::{AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr};
     if allowed_executables.is_empty() { return Ok(()); }
     let mut ruleset = Ruleset::default()
         .handle_access(AccessFs::Execute)

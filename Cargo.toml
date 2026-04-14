@@ -4,6 +4,9 @@ members = [
     "crates/clix-core",
     "crates/clix-cli",
     "crates/clix-serve",
+    "crates/clix-worker",
+    "crates/clix-broker",
+    "crates/clix-shim",
 ]
 
 [workspace.dependencies]
@@ -30,3 +33,5 @@ whoami             = "1"
 urlencoding        = "2"
 rusqlite           = { version = "0.32", features = ["bundled"] }
 tempfile           = "3"
+libc               = "0.2"
+criterion          = { version = "0.5", features = ["html_reports"] }

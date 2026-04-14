@@ -1,13 +1,19 @@
 #[cfg(target_os = "linux")]
-mod linux;
+pub mod linux;
 #[cfg(not(target_os = "linux"))]
 mod stub;
 
-pub fn apply_sandbox(allowed_executables: &[String]) -> crate::error::Result<()> {
+pub mod jail;
+
+#[cfg(target_os = "linux")]
+pub mod seccomp;
+
+pub fn apply_sandbox(allowed_executables: &[impl AsRef<str>]) -> crate::error::Result<()> {
+    let paths: Vec<String> = allowed_executables.iter().map(|s| s.as_ref().to_string()).collect();
     #[cfg(target_os = "linux")]
-    return linux::apply_sandbox(allowed_executables);
+    return linux::apply_sandbox(&paths);
     #[cfg(not(target_os = "linux"))]
-    return stub::apply_sandbox(allowed_executables);
+    return stub::apply_sandbox(&paths);
 }
 
 pub fn sandbox_enforced() -> bool {
@@ -23,5 +29,5 @@ mod tests {
     #[test]
     fn test_sandbox_flag() { let _ = sandbox_enforced(); }
     #[test]
-    fn test_empty_allowlist_noop() { apply_sandbox(&[]).unwrap(); }
+    fn test_empty_allowlist_noop() { let empty: Vec<String> = vec![]; apply_sandbox(&empty).unwrap(); }
 }

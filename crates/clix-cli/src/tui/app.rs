@@ -318,6 +318,7 @@ impl App {
             capabilities: vec![],
             workflows: vec![],
             settings: serde_json::Value::Null,
+            isolation_defaults: Default::default(),
         };
         let yaml = serde_yaml::to_string(&manifest)?;
         let path = state.profiles_dir.join(format!("{}.yaml", name));
@@ -340,6 +341,7 @@ impl App {
             risk: RiskLevel::Low,
             side_effect_class: SideEffectClass::None,
             sandbox_profile: None,
+            isolation: Default::default(),
             approval_policy: None,
             input_schema: serde_json::json!({"type": "object", "properties": {}}),
             validators: vec![],

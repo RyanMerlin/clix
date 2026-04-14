@@ -45,11 +45,12 @@ mod tests {
         let home = std::env::temp_dir().join("clix-stdio-test");
         std::fs::create_dir_all(&home).unwrap();
         Arc::new(ServeState {
-            cap_registry: CapabilityRegistry::from_vec(vec![]),
-            wf_registry:  WorkflowRegistry::from_vec(vec![]),
-            policy:       PolicyBundle::default(),
-            store:        Mutex::new(ReceiptStore::open(&home.join("receipts.db")).unwrap()),
-            state:        ClixState::from_home(home),
+            cap_registry:    CapabilityRegistry::from_vec(vec![]),
+            wf_registry:     WorkflowRegistry::from_vec(vec![]),
+            policy:          PolicyBundle::default(),
+            store:           Mutex::new(ReceiptStore::open(&home.join("receipts.db")).unwrap()),
+            state:           ClixState::from_home(home),
+            worker_registry: None,
         })
     }
 

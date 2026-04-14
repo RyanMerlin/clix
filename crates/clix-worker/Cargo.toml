@@ -1,0 +1,9 @@
+[package]
+name    = "clix-worker"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+clix-core   = { path = "../clix-core" }
+serde       = { workspace = true }
+serde_json  = { workspace = true }

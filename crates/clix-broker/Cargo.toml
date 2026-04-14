@@ -1,0 +1,15 @@
+[package]
+name    = "clix-broker"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+clix-core   = { path = "../clix-core" }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+chrono      = { workspace = true }
+dirs        = { workspace = true }
+urlencoding = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
