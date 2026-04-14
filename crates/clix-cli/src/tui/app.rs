@@ -93,8 +93,10 @@ impl App {
             KeyCode::Char('2') => { self.screen = Screen::Capabilities; self.cursor = 0; self.cap_view = CapView::Namespaces; }
             KeyCode::Char('3') => { self.screen = Screen::Packs; self.cursor = 0; }
             KeyCode::Tab => self.next_screen(),
-            KeyCode::Down | KeyCode::Char('j') => self.cursor_down(),
-            KeyCode::Up | KeyCode::Char('k') => self.cursor_up(),
+            KeyCode::Left => self.prev_screen(),
+            KeyCode::Right => self.next_screen(),
+            KeyCode::Down => self.cursor_down(),
+            KeyCode::Up => self.cursor_up(),
             KeyCode::Enter => self.handle_enter(),
             KeyCode::Esc | KeyCode::Backspace => self.handle_back(),
             _ => {}
@@ -107,6 +109,16 @@ impl App {
             Screen::Profiles => Screen::Capabilities,
             Screen::Capabilities => Screen::Packs,
             Screen::Packs => Screen::Profiles,
+        };
+        self.cap_view = CapView::Namespaces;
+    }
+
+    fn prev_screen(&mut self) {
+        self.cursor = 0;
+        self.screen = match self.screen {
+            Screen::Profiles => Screen::Packs,
+            Screen::Capabilities => Screen::Profiles,
+            Screen::Packs => Screen::Capabilities,
         };
         self.cap_view = CapView::Namespaces;
     }

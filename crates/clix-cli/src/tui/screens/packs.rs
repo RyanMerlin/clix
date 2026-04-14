@@ -2,6 +2,14 @@ use ratatui::{prelude::*, widgets::*};
 use crate::tui::app::App;
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
+    if app.packs.is_empty() {
+        let msg = Paragraph::new("No packs installed — press i to install or n to create")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::DarkGray));
+        f.render_widget(msg, area);
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])

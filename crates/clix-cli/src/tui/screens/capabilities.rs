@@ -16,13 +16,21 @@ fn render_namespaces(f: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = namespaces.iter().map(|ns| {
         ListItem::new(format!("{:<30} ({} capabilities)", ns.key, ns.count))
     }).collect();
-    let is_empty = items.is_empty();
+
+    if items.is_empty() {
+        let msg = Paragraph::new("No capabilities loaded — install a pack or press n to create")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::DarkGray));
+        f.render_widget(msg, area);
+        return;
+    }
+
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title("Namespaces — Enter to drill in, Esc to quit"))
         .highlight_style(Style::default().bg(Color::DarkGray).bold())
         .highlight_symbol("> ");
     let mut state = ListState::default();
-    state.select(if is_empty { None } else { Some(app.cursor) });
+    state.select(Some(app.cursor));
     f.render_stateful_widget(list, area, &mut state);
 }
 
@@ -32,14 +40,22 @@ fn render_listing(f: &mut Frame, app: &App, area: Rect, ns: &str) {
         let desc = cap.description.as_deref().unwrap_or("");
         ListItem::new(format!("{:<40} {}", cap.name, desc))
     }).collect();
-    let is_empty = items.is_empty();
+
+    if items.is_empty() {
+        let msg = Paragraph::new("No capabilities loaded — install a pack or press n to create")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::DarkGray));
+        f.render_widget(msg, area);
+        return;
+    }
+
     let title = format!("{} — {} capabilities | Enter for detail, Esc to go back", ns, caps.len());
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(title))
         .highlight_style(Style::default().bg(Color::DarkGray).bold())
         .highlight_symbol("> ");
     let mut state = ListState::default();
-    state.select(if is_empty { None } else { Some(app.cursor) });
+    state.select(Some(app.cursor));
     f.render_stateful_widget(list, area, &mut state);
 }
 
