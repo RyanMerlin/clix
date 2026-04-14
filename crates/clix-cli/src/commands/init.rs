@@ -22,6 +22,19 @@ pub fn run() -> Result<()> {
         seed_builtin_packs(&state.packs_dir, &src)?;
         println!("Seeded built-in packs");
     }
+    // Auto-activate base profile on first init
+    let mut config: ClixConfig = if state.config_path.exists() {
+        let text = std::fs::read_to_string(&state.config_path)?;
+        serde_yaml::from_str(&text).unwrap_or_default()
+    } else {
+        ClixConfig::default()
+    };
+    if config.active_profiles.is_empty() {
+        config.active_profiles.push("base".to_string());
+        let yaml = serde_yaml::to_string(&config)?;
+        std::fs::write(&state.config_path, yaml)?;
+        println!("Activated default profile: base");
+    }
     println!("clix initialized at {}", home.display());
     Ok(())
 }

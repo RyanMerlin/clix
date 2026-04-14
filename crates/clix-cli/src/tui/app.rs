@@ -35,7 +35,16 @@ pub struct App {
 
 impl App {
     pub fn new() -> Result<Self> {
-        let state = ClixState::load(home_dir())?;
+        let mut state = ClixState::load(home_dir())?;
+        // TUI first-run guard: if no profiles are active but the base pack exists, activate it
+        if state.config.active_profiles.is_empty() {
+            let base_pack_dir = state.packs_dir.join("base");
+            if base_pack_dir.exists() {
+                state.config.active_profiles.push("base".to_string());
+                let yaml = serde_yaml::to_string(&state.config)?;
+                std::fs::write(&state.config_path, yaml)?;
+            }
+        }
         let registry = build_registry(&state)?;
         let profiles: Vec<ProfileManifest> = load_dir(&state.profiles_dir).unwrap_or_default();
         let packs: Vec<PackManifest> = load_dir(&state.packs_dir).unwrap_or_default();
