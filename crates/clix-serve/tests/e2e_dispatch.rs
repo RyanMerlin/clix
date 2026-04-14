@@ -34,6 +34,7 @@ fn make_cap(name: &str, side_effect: SideEffectClass) -> CapabilityManifest {
         input_schema:     serde_json::json!({"type":"object","properties":{}}),
         validators:       vec![],
         credentials:      vec![],
+        argv_pattern:     None,
     }
 }
 

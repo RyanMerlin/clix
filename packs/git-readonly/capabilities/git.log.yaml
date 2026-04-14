@@ -7,6 +7,7 @@ backend:
   args: ["log", "--oneline", "-{{ input.limit }}"]
 risk: low
 sideEffectClass: readOnly
+argv_pattern: "git log *"
 inputSchema:
   type: object
   properties:

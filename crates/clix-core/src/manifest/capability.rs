@@ -26,6 +26,11 @@ pub struct CapabilityManifest {
     pub validators: Vec<Validator>,
     #[serde(default)]
     pub credentials: Vec<CredentialSource>,
+    /// Optional glob pattern for shim argv matching, e.g. `"git status *"`.
+    /// When set, the shim resolves a bare invocation (`git status`) to this capability
+    /// without needing the full `clix run` prefix.
+    #[serde(default)]
+    pub argv_pattern: Option<String>,
 }
 
 /// Which isolation boundary to enforce when executing this capability.

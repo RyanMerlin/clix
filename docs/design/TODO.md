@@ -51,12 +51,15 @@ The broker crate exists with the unix-socket protocol; the credential adoption w
 
 ## Shim Infrastructure (`clix-shim`)
 
-- [ ] `clix init --install-shims` — write per-capability shims to `$CLIX_HOME/bin/{gcloud,kubectl,...}`
-- [ ] Shims are tiny Rust binaries that RPC into the gateway socket; running them is equivalent to `clix run <cap>`
-- [ ] Activation script: prepend `$CLIX_HOME/bin` to PATH in `.bashrc`/`.zshrc`/fish config
-- [ ] Shim rejects and errors loudly if the active profile disallows the capability
-- [ ] `clix shim list` — show installed shims and which capabilities they map to
-- [ ] `clix shim uninstall <name>` — remove a shim
+- [x] `clix init --install-shims` — write per-capability shims to `$CLIX_HOME/bin/{cmd,...}`
+- [x] Shims RPC into the gateway socket via `shim/call`; gateway resolves `argv_pattern` to a capability
+- [x] Activation scripts: `activate.sh`, `activate.fish`, `activate.ps1` written to `$CLIX_HOME/bin/`
+- [x] Shim exits 77 with profile-blocked hint if active profile disallows the capability
+- [x] `clix shim list` — show installed shims
+- [x] `clix shim uninstall <name>` — remove a shim
+- [ ] `argv_pattern` matching: add support for more complex patterns (flags, positional wildcards in middle)
+- [ ] `clix shim list --json` should show which capability each shim maps to (currently just file names)
+- [ ] Shim fallback: when gateway is down and `CLIX_SHIM_ALLOW_FALLBACK=1`, optionally exec the real binary with a warning
 
 ---
 
@@ -96,10 +99,13 @@ The broker crate exists with the unix-socket protocol; the credential adoption w
 
 - [ ] `clix profile create <name> --from <existing>` — clone a profile as a starting point
 - [ ] `clix capabilities inspect <name>` — show full manifest, resolved backend, active policy, sandbox profile
-- [ ] `clix run --dry-run` — evaluate policy and validators but skip execution; print what would happen
+- [x] `clix run --dry-run` — evaluate policy without execution; returns `{would_run, policy, isolation_tier}`
+- [x] `clix capabilities search <query>` — fuzzy search by name or description
+- [x] `clix doctor --json` — broker socket, sandbox support, active profile, pack/capability counts
+- [x] `clix mcp call <method> [--params JSON]` — one-shot in-process JSON-RPC; no server needed
 - [ ] `clix serve --socket` should print its PID and socket path to stderr for scripting
 - [ ] TUI: capability search with policy and sandbox info visible inline
-- [ ] `clix doctor` — check broker socket, worker binary, shim PATH, sandbox support, and report issues
+- [ ] `clix capabilities list --json` lean output: ✓ done (name, side_effect, summary only)
 
 ---
 
@@ -116,10 +122,11 @@ The broker crate exists with the unix-socket protocol; the credential adoption w
 
 ## Documentation
 
+- [x] `docs/agent-quickstart.md` — paste-into-prompt CLI reference; direct-run pattern without MCP
 - [ ] `docs/isolation.md` — deep-dive on the three-tier isolation model, namespace setup, seccomp policy, Firecracker path
 - [ ] `docs/broker.md` — credential adoption walkthrough, broker protocol, token minters
 - [ ] `docs/shims.md` — how shims work, installation, what happens on a bypass attempt
-- [ ] `docs/packs-authoring.md` — guide for writing and publishing packs; manifest reference
+- [ ] `docs/packs-authoring.md` — guide for writing and publishing packs; manifest reference (including `argv_pattern`)
 - [ ] Update `docs/architecture.md` to cover three-process trust model and worker registry (see below — partially done)
 - [ ] Add inline doc comments to `execution/mod.rs`, `policy/evaluate.rs`, `receipts/mod.rs`
 

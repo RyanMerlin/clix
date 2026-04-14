@@ -64,7 +64,7 @@ mod tests {
             backend: Backend::Builtin { name: "date".to_string() },
             risk, side_effect_class: SideEffectClass::ReadOnly,
             sandbox_profile: None, isolation: Default::default(), approval_policy: None,
-            input_schema: serde_json::json!({}), validators: vec![], credentials: vec![],
+            input_schema: serde_json::json!({}), validators: vec![], credentials: vec![], argv_pattern: None,
         }
     }
 

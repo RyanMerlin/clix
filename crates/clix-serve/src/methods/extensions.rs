@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use clix_core::execution::run_workflow;
+use clix_core::execution::{run_capability, run_workflow};
 use clix_core::packs::onboard_cli;
 use clix_core::policy::evaluate::ExecutionContext;
 use clix_core::sandbox::sandbox_enforced;
@@ -61,6 +61,56 @@ pub fn packs_list(serve: &Arc<ServeState>) -> MethodResult {
     }
     packs.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
     Ok(serde_json::json!({"packs": packs}))
+}
+
+/// Handle a shim invocation: resolve the raw argv to a capability via argv_pattern matching,
+/// then dispatch exactly like tools/call. Called by clix-shim binaries.
+pub async fn shim_call(serve: &Arc<ServeState>, params: &serde_json::Value) -> MethodResult {
+    let command = params["command"].as_str().ok_or("shim/call: missing 'command'")?;
+    let argv: Vec<&str> = match params.get("argv").and_then(|v| v.as_array()) {
+        Some(arr) => arr.iter().filter_map(|v| v.as_str()).collect(),
+        None => vec![],
+    };
+
+    // Build the full argv: [command, ...argv]
+    let mut full_argv = vec![command];
+    full_argv.extend_from_slice(&argv);
+
+    let cap = serve.cap_registry.resolve_argv(&full_argv)
+        .ok_or_else(|| format!(
+            "no capability matched argv: {}; run `clix capabilities list` to see available tools",
+            full_argv.join(" ")
+        ))?;
+    let cap_name = cap.name.clone();
+
+    let ctx = ExecutionContext {
+        env:     serve.state.config.default_env.clone(),
+        cwd:     serve.state.config.workspace_root.clone()
+                     .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"))),
+        user:    "agent".to_string(),
+        profile: serve.state.config.active_profiles.first().cloned().unwrap_or_else(|| "default".to_string()),
+        approver: None,
+    };
+    let serve_clone = Arc::clone(serve);
+    let outcome = tokio::task::spawn_blocking(move || {
+        let store = serve_clone.store.lock().unwrap();
+        run_capability(&serve_clone.cap_registry, &serve_clone.policy, serve_clone.state.config.infisical.as_ref(), &store, serve_clone.worker_registry.as_ref(), &cap_name, serde_json::json!({}), ctx)
+    }).await.map_err(|e| format!("task join: {e}"))?.map_err(|e| e.to_string())?;
+
+    let exit_code = if let Some(result) = &outcome.result {
+        result["exit_code"].as_i64().unwrap_or(if outcome.ok { 0 } else { 1 })
+    } else { if outcome.ok { 0 } else { 1 } };
+    let stdout = outcome.result.as_ref().and_then(|r| r["stdout"].as_str()).unwrap_or("").to_string();
+    let stderr = outcome.result.as_ref().and_then(|r| r["stderr"].as_str()).unwrap_or("").to_string();
+    Ok(serde_json::json!({
+        "ok": outcome.ok,
+        "exit_code": exit_code,
+        "stdout": stdout,
+        "stderr": stderr,
+        "receipt_id": outcome.receipt_id,
+        "capability": outcome.result.as_ref().map(|_| serde_json::json!(null)).unwrap_or_default(),
+        "_blocked": outcome.approval_required,
+    }))
 }
 
 pub fn status_get(serve: &Arc<ServeState>) -> MethodResult {

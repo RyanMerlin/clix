@@ -1,10 +1,13 @@
 pub mod capabilities;
+pub mod doctor;
 pub mod init;
+pub mod mcp;
 pub mod pack;
 pub mod profile;
 pub mod receipts;
 pub mod run;
 pub mod serve;
+pub mod shim;
 pub mod status;
 pub mod tui;
 pub mod workflow;

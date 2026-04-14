@@ -141,7 +141,7 @@ mod tests {
     }
 
     fn date_cap() -> CapabilityManifest {
-        CapabilityManifest { name: "sys.date".to_string(), version: 1, description: None, backend: Backend::Builtin { name: "date".to_string() }, risk: RiskLevel::Low, side_effect_class: SideEffectClass::None, sandbox_profile: None, isolation: Default::default(), approval_policy: None, input_schema: serde_json::json!({"type":"object","properties":{}}), validators: vec![], credentials: vec![] }
+        CapabilityManifest { name: "sys.date".to_string(), version: 1, description: None, backend: Backend::Builtin { name: "date".to_string() }, risk: RiskLevel::Low, side_effect_class: SideEffectClass::None, sandbox_profile: None, isolation: Default::default(), approval_policy: None, input_schema: serde_json::json!({"type":"object","properties":{}}), validators: vec![], credentials: vec![], argv_pattern: None }
     }
 
     #[test]

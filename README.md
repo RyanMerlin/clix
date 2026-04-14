@@ -33,26 +33,73 @@ curl -fsSL https://raw.githubusercontent.com/RyanMerlin/clix/main/scripts/instal
 # Set up and install built-in packs
 clix init
 
-# See what's available
-clix capabilities list
-clix pack list
+# See what's available (lean JSON — agent-friendly)
+clix capabilities list --json
+clix capabilities search "list" --json
+
+# Get the full schema for one capability
+clix capabilities show git.status --json
 
 # Run a capability
-clix run system.date
+clix run git.status --json
+clix run git.log -i limit=10 --json
 
-# Start as an MCP server (stdio transport, for agent tool use)
-clix serve
+# Preview without executing
+clix run git.status --dry-run --json
+
+# Health check
+clix doctor --json
 ```
 
-All read commands support `--json` for machine-readable output:
-
-```sh
-clix capabilities list --json
-clix receipts list --json
-clix status --json
-```
+All commands support `--json` for machine-readable, agent-parseable output.
 
 The state directory defaults to `~/.clix` (`%USERPROFILE%\.clix` on Windows). Override with `CLIX_HOME`.
+
+---
+
+## Using with AI agents
+
+clix is designed so agents interact with it as a CLI tool, not via MCP. The agent runs commands directly and pays context only for what it uses — no upfront tool catalogue registration.
+
+The minimal agent prompt (copy into your system prompt):
+
+```
+clix is a sandboxed CLI gateway.
+  clix capabilities list --json        # browse tools
+  clix capabilities show <name> --json # get schema
+  clix run <name> -i key=val --json    # run (returns {ok, result, receipt_id})
+  clix run <name> --dry-run --json     # preview policy/isolation, no execution
+  clix doctor --json                   # health
+Exit codes: 0 ok, 1 denied, 2 needs approval.
+```
+
+See [docs/agent-quickstart.md](docs/agent-quickstart.md) for the complete reference.
+
+---
+
+## Shims
+
+Shims let agents invoke tools as native CLI commands without any clix syntax. Once installed, `git status` in the agent's shell is a policy-enforced, sandboxed clix call.
+
+```sh
+# Install shims for any commands used by installed packs
+clix init --install-shims git kubectl
+
+# Source the activation script (adds ~/.clix/bin to PATH)
+source ~/.clix/bin/activate.sh   # bash/zsh
+source ~/.clix/bin/activate.fish # fish
+
+# The gateway must be running for shim calls to work
+clix serve --socket /tmp/clix-gateway.sock
+
+# Now these route through clix transparently
+git status
+kubectl get pods
+
+# Manage shims
+clix shim list
+clix shim uninstall git
+```
 
 ---
 
@@ -94,20 +141,33 @@ Built-in packs: `base` (system utilities), `kubectl-observe`, `gcloud-readonly`,
 
 ---
 
-## Serve (MCP / JSON-RPC)
+## MCP server (for editor integrations)
+
+For Claude Desktop, Cursor, and other MCP-compatible editors:
 
 ```sh
-# stdio transport — default for MCP tool use
+# stdio transport — for MCP tool use in editors
 clix serve
 
 # HTTP transport
 clix serve --http --port 3000
 
-# Unix socket
+# Unix socket (also used by shims)
 clix serve --socket /tmp/clix.sock
 ```
 
-The server implements MCP protocol `2024-11-05` (`tools/*`, `resources/*`) plus clix extensions for workflows, capabilities, and receipts.
+The server implements MCP protocol `2024-11-05` (`tools/*`, `resources/*`) plus clix extensions. Tool list defaults to namespace stubs to minimize upfront context; editors can drill into namespaces on demand.
+
+For agents running in a terminal or subprocess, prefer the direct CLI pattern (`clix run`) over MCP — it's lighter and doesn't require a long-running server.
+
+### One-shot JSON-RPC
+
+Need the MCP schema from a script or agent without a running server?
+
+```sh
+clix mcp call tools/list --params '{"namespace":"git"}'
+clix mcp call initialize
+```
 
 ---
 
@@ -167,6 +227,7 @@ Set `CLIX_STRICT_VERIFY=1` to verify the SBOM and attestations during install (r
 
 ## Docs
 
+- [Agent quickstart](docs/agent-quickstart.md) — paste-into-prompt CLI reference for agents
 - [Architecture](docs/architecture.md) — system design, trust model, isolation tiers
 - [Packs](docs/pack.md) — pack format reference
 - [Release process](docs/release.md)

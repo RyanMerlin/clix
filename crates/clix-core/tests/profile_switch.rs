@@ -118,6 +118,7 @@ fn test_profile_policy_isolation_no_cross_contamination() {
         input_schema:     serde_json::json!({"type":"object","properties":{}}),
         validators:       vec![],
         credentials:      vec![],
+        argv_pattern:     None,
     };
 
     let store_ro  = ReceiptStore::open(std::path::Path::new(":memory:")).unwrap();

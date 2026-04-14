@@ -346,6 +346,7 @@ impl App {
             input_schema: serde_json::json!({"type": "object", "properties": {}}),
             validators: vec![],
             credentials: vec![],
+            argv_pattern: None,
         };
         let yaml = serde_yaml::to_string(&manifest)?;
         let path = state.capabilities_dir.join(format!("{}.yaml", name));

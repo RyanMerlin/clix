@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 pub const STATIC_COMMANDS: &[&str] = &[
     "init", "status", "version", "run", "capabilities",
     "workflow", "profile", "receipts", "serve", "pack", "tui",
+    "doctor", "shim", "mcp",
 ];
 
 #[derive(Parser)]
@@ -50,6 +51,8 @@ pub enum Commands {
         #[arg(long = "input", short = 'i', value_name = "KEY=VALUE")]
         input: Vec<String>,
         #[arg(long)] json: bool,
+        /// Evaluate policy and show what would happen without actually executing
+        #[arg(long)] dry_run: bool,
     },
     /// Manage capabilities
     #[command(subcommand)]
@@ -73,12 +76,22 @@ pub enum Commands {
     Pack(PackCmd),
     /// Launch interactive TUI
     Tui,
+    /// Gateway health check for agents
+    Doctor { #[arg(long)] json: bool },
+    /// Manage PATH shims
+    #[command(subcommand)]
+    Shim(ShimCmd),
+    /// One-shot JSON-RPC call to the MCP dispatch layer (no server needed)
+    #[command(subcommand)]
+    Mcp(McpCmd),
 }
 
 #[derive(Subcommand)]
 pub enum CapabilitiesCmd {
     List { #[arg(long)] json: bool },
     Show { name: String, #[arg(long)] json: bool },
+    /// Search capabilities by name or description
+    Search { query: String, #[arg(long)] json: bool },
 }
 
 #[derive(Subcommand)]
@@ -109,6 +122,24 @@ pub enum ReceiptsCmd {
     },
     Show { id: String, #[arg(long)] json: bool },
     Tail,
+}
+
+#[derive(Subcommand)]
+pub enum ShimCmd {
+    /// List installed shims
+    List { #[arg(long)] json: bool },
+    /// Remove a shim
+    Uninstall { command: String },
+}
+
+#[derive(Subcommand)]
+pub enum McpCmd {
+    /// Send a single JSON-RPC request to the in-process MCP dispatcher and print the response
+    Call {
+        method: String,
+        #[arg(long, value_name = "JSON")]
+        params: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]

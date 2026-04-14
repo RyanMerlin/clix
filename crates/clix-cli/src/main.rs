@@ -6,7 +6,7 @@ mod tui;
 
 use anyhow::Result;
 use clap::FromArgMatches;
-use cli::{Cli, Commands, CapabilitiesCmd, WorkflowCmd, ProfileCmd, ReceiptsCmd, PackCmd};
+use cli::{Cli, Commands, CapabilitiesCmd, WorkflowCmd, ProfileCmd, ReceiptsCmd, PackCmd, ShimCmd, McpCmd};
 use clix_core::execution::run_capability;
 use clix_core::loader::{build_registry, load_policy};
 use clix_core::policy::evaluate::ExecutionContext;
@@ -99,10 +99,11 @@ async fn dispatch_static(cli: Cli) -> Result<()> {
         }
         Commands::Status { json } => commands::status::run(json)?,
         Commands::Version => println!("clix {}", env!("CARGO_PKG_VERSION")),
-        Commands::Run { capability, input, json } => commands::run::run(&capability, &input, json)?,
+        Commands::Run { capability, input, json, dry_run } => commands::run::run(&capability, &input, json, dry_run)?,
         Commands::Capabilities(sub) => match sub {
             CapabilitiesCmd::List { json } => commands::capabilities::list(json)?,
             CapabilitiesCmd::Show { name, json } => commands::capabilities::show(&name, json)?,
+            CapabilitiesCmd::Search { query, json } => commands::capabilities::search(&query, json)?,
         },
         Commands::Workflow(sub) => match sub {
             WorkflowCmd::List { json } => commands::workflow::list(json)?,
@@ -121,6 +122,14 @@ async fn dispatch_static(cli: Cli) -> Result<()> {
         },
         Commands::Serve { socket, http } => commands::serve::run(socket, http).await?,
         Commands::Tui => commands::tui::run()?,
+        Commands::Doctor { json } => commands::doctor::run(json)?,
+        Commands::Shim(sub) => match sub {
+            ShimCmd::List { json } => commands::shim::list(json)?,
+            ShimCmd::Uninstall { command } => commands::shim::uninstall(&command)?,
+        },
+        Commands::Mcp(sub) => match sub {
+            McpCmd::Call { method, params } => commands::mcp::call(&method, params.as_deref()).await?,
+        },
         Commands::Pack(sub) => match sub {
             PackCmd::List { json, available } => commands::pack::list(json, available)?,
             PackCmd::Show { name, json } => commands::pack::show(&name, json)?,

@@ -32,6 +32,7 @@ pub async fn dispatch(serve: Arc<ServeState>, req: serde_json::Value) -> serde_j
         "onboard/probe"  => crate::methods::extensions::onboard_probe(&params),
         "packs/list"     => crate::methods::extensions::packs_list(&serve),
         "status/get"     => crate::methods::extensions::status_get(&serve),
+        "shim/call"      => crate::methods::extensions::shim_call(&serve, &params).await,
         _ => return rpc_error(id, -32601, format!("method not found: {method}")),
     };
 
@@ -64,7 +65,7 @@ mod tests {
             backend: Backend::Builtin { name: "date".to_string() },
             risk: RiskLevel::Low, side_effect_class: SideEffectClass::ReadOnly,
             sandbox_profile: None, isolation: Default::default(), approval_policy: None,
-            input_schema: serde_json::json!({}), validators: vec![], credentials: vec![],
+            input_schema: serde_json::json!({}), validators: vec![], credentials: vec![], argv_pattern: None,
         }
     }
 

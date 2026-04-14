@@ -57,6 +57,36 @@ impl CapabilityRegistry {
         stubs
     }
 
+    /// Find the best capability for a raw argv slice (shim routing).
+    ///
+    /// Each capability can declare an `argv_pattern` like `"git status *"`.
+    /// This method finds the capability whose pattern matches the most leading tokens of `argv`.
+    /// Matching is simple prefix-word matching: each space-separated token in the pattern must
+    /// equal the corresponding argv element (trailing `*` token is ignored as a wildcard).
+    /// Returns the best (longest-prefix) match, or `None` if nothing matches.
+    pub fn resolve_argv(&self, argv: &[&str]) -> Option<&CapabilityManifest> {
+        let mut best: Option<(&CapabilityManifest, usize)> = None;
+        for cap in self.caps.values() {
+            if let Some(pattern) = &cap.argv_pattern {
+                let tokens: Vec<&str> = pattern.split_whitespace().collect();
+                // Count non-wildcard prefix tokens
+                let prefix_tokens: Vec<&str> = tokens.iter()
+                    .take_while(|&&t| t != "*")
+                    .copied()
+                    .collect();
+                if prefix_tokens.is_empty() { continue; }
+                if argv.len() < prefix_tokens.len() { continue; }
+                if argv[..prefix_tokens.len()] == prefix_tokens[..] {
+                    let score = prefix_tokens.len();
+                    if best.map_or(true, |(_, s)| score > s) {
+                        best = Some((cap, score));
+                    }
+                }
+            }
+        }
+        best.map(|(cap, _)| cap)
+    }
+
     /// Returns all capabilities whose `group_key` equals `namespace`.
     /// Each capability belongs to exactly one namespace group; this returns the members of that group.
     /// "gcloud" returns only `gcloud.*` leaves, not `gcloud.aiplatform.*` sub-namespace caps.
@@ -99,7 +129,7 @@ mod tests {
             backend: Backend::Builtin { name: "date".to_string() },
             risk: RiskLevel::Low, side_effect_class: SideEffectClass::None,
             sandbox_profile: None, isolation: Default::default(), approval_policy: None,
-            input_schema: serde_json::json!({}), validators: vec![], credentials: vec![],
+            input_schema: serde_json::json!({}), validators: vec![], credentials: vec![], argv_pattern: None,
         }
     }
 
