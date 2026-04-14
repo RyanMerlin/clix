@@ -21,6 +21,53 @@ pub enum CapView {
     Detail(String),
 }
 
+#[derive(Debug, Clone)]
+pub enum ModalKind {
+    CreateProfile,
+    CreateCapability,
+    CreatePack,
+    InstallPack,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ModalState {
+    pub kind: Option<ModalKind>,
+    pub fields: Vec<String>,
+    pub field_idx: usize,
+    pub input_buf: String,
+}
+
+impl ModalState {
+    pub fn is_open(&self) -> bool { self.kind.is_some() }
+    pub fn open(&mut self, kind: ModalKind, num_fields: usize) {
+        self.kind = Some(kind);
+        self.fields = vec![String::new(); num_fields];
+        self.field_idx = 0;
+        self.input_buf = String::new();
+    }
+    pub fn close(&mut self) {
+        self.kind = None;
+        self.fields.clear();
+        self.field_idx = 0;
+        self.input_buf = String::new();
+    }
+    pub fn commit_field(&mut self) {
+        if self.field_idx < self.fields.len() {
+            self.fields[self.field_idx] = self.input_buf.clone();
+        }
+    }
+    pub fn next_field(&mut self) -> bool {
+        self.commit_field();
+        if self.field_idx + 1 < self.fields.len() {
+            self.field_idx += 1;
+            self.input_buf = self.fields[self.field_idx].clone();
+            true
+        } else {
+            false
+        }
+    }
+}
+
 pub struct App {
     pub screen: Screen,
     pub cap_view: CapView,
@@ -31,13 +78,12 @@ pub struct App {
     pub cursor: usize,
     pub should_quit: bool,
     pub last_error: Option<String>,
+    pub modal: ModalState,
 }
 
 impl App {
     pub fn new() -> Result<Self> {
         let mut state = ClixState::load(home_dir())?;
-        // First-run guard: activate base profile if missing and base pack is installed.
-        // Handles the case where the user runs 'clix tui' before 'clix init'.
         if state.config.active_profiles.is_empty() {
             let base_pack_dir = state.packs_dir.join("base");
             if base_pack_dir.exists() {
@@ -60,6 +106,7 @@ impl App {
             cursor: 0,
             should_quit: false,
             last_error: None,
+            modal: ModalState::default(),
         })
     }
 
@@ -80,6 +127,11 @@ impl App {
             self.should_quit = true;
             return;
         }
+        // If a modal is open, it gets all keys
+        if self.modal.is_open() {
+            self.handle_modal_key(key);
+            return;
+        }
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('r') => {
@@ -92,6 +144,10 @@ impl App {
             KeyCode::Char('1') => { self.screen = Screen::Profiles; self.cursor = 0; }
             KeyCode::Char('2') => { self.screen = Screen::Capabilities; self.cursor = 0; self.cap_view = CapView::Namespaces; }
             KeyCode::Char('3') => { self.screen = Screen::Packs; self.cursor = 0; }
+            KeyCode::Char('n') => self.open_create_modal(),
+            KeyCode::Char('i') if self.screen == Screen::Packs => {
+                self.modal.open(ModalKind::InstallPack, 1);
+            }
             KeyCode::Tab => self.next_screen(),
             KeyCode::Left => self.prev_screen(),
             KeyCode::Right => self.next_screen(),
@@ -101,6 +157,155 @@ impl App {
             KeyCode::Esc | KeyCode::Backspace => self.handle_back(),
             _ => {}
         }
+    }
+
+    fn handle_modal_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => self.modal.close(),
+            KeyCode::Tab => {
+                self.modal.next_field();
+            }
+            KeyCode::Enter => self.modal_confirm(),
+            KeyCode::Backspace => {
+                self.modal.input_buf.pop();
+            }
+            KeyCode::Char(c) => {
+                self.modal.input_buf.push(c);
+            }
+            _ => {}
+        }
+    }
+
+    fn modal_confirm(&mut self) {
+        self.modal.commit_field();
+        match self.modal.kind.clone() {
+            Some(ModalKind::CreateProfile) => {
+                let name = self.modal.fields.get(0).cloned().unwrap_or_default();
+                let desc = self.modal.fields.get(1).cloned().unwrap_or_default();
+                if name.is_empty() { return; }
+                if let Err(e) = self.create_profile(&name, &desc) {
+                    self.last_error = Some(format!("Create failed: {e}"));
+                } else {
+                    self.modal.close();
+                    let _ = self.reload();
+                }
+            }
+            Some(ModalKind::CreateCapability) => {
+                let name = self.modal.fields.get(0).cloned().unwrap_or_default();
+                let desc = self.modal.fields.get(1).cloned().unwrap_or_default();
+                let command = self.modal.fields.get(2).cloned().unwrap_or_default();
+                if name.is_empty() || command.is_empty() { return; }
+                if let Err(e) = self.create_capability(&name, &desc, &command) {
+                    self.last_error = Some(format!("Create failed: {e}"));
+                } else {
+                    self.modal.close();
+                    let _ = self.reload();
+                }
+            }
+            Some(ModalKind::CreatePack) => {
+                let name = self.modal.fields.get(0).cloned().unwrap_or_default();
+                let desc = self.modal.fields.get(1).cloned().unwrap_or_default();
+                if name.is_empty() { return; }
+                if let Err(e) = self.create_pack(&name, &desc) {
+                    self.last_error = Some(format!("Create failed: {e}"));
+                } else {
+                    self.modal.close();
+                    let _ = self.reload();
+                }
+            }
+            Some(ModalKind::InstallPack) => {
+                let path = self.modal.fields.get(0).cloned().unwrap_or_default();
+                if path.is_empty() { return; }
+                if let Err(e) = self.install_pack(&path) {
+                    self.last_error = Some(format!("Install failed: {e}"));
+                } else {
+                    self.modal.close();
+                    let _ = self.reload();
+                }
+            }
+            None => {}
+        }
+    }
+
+    fn open_create_modal(&mut self) {
+        match self.screen {
+            Screen::Profiles => self.modal.open(ModalKind::CreateProfile, 2),
+            Screen::Capabilities => self.modal.open(ModalKind::CreateCapability, 3),
+            Screen::Packs => self.modal.open(ModalKind::CreatePack, 2),
+        }
+    }
+
+    fn create_profile(&self, name: &str, description: &str) -> anyhow::Result<()> {
+        use clix_core::manifest::profile::ProfileManifest;
+        let state = clix_core::state::ClixState::load(clix_core::state::home_dir())?;
+        let manifest = ProfileManifest {
+            name: name.to_string(),
+            version: 1,
+            description: if description.is_empty() { None } else { Some(description.to_string()) },
+            capabilities: vec![],
+            workflows: vec![],
+            settings: serde_json::Value::Null,
+        };
+        let yaml = serde_yaml::to_string(&manifest)?;
+        let path = state.profiles_dir.join(format!("{}.yaml", name));
+        std::fs::write(path, yaml)?;
+        Ok(())
+    }
+
+    fn create_capability(&self, name: &str, description: &str, command: &str) -> anyhow::Result<()> {
+        use clix_core::manifest::capability::{CapabilityManifest, Backend, RiskLevel, SideEffectClass};
+        let state = clix_core::state::ClixState::load(clix_core::state::home_dir())?;
+        let manifest = CapabilityManifest {
+            name: name.to_string(),
+            version: 1,
+            description: if description.is_empty() { None } else { Some(description.to_string()) },
+            backend: Backend::Subprocess {
+                command: command.to_string(),
+                args: vec![],
+                cwd_from_input: None,
+            },
+            risk: RiskLevel::Low,
+            side_effect_class: SideEffectClass::None,
+            sandbox_profile: None,
+            approval_policy: None,
+            input_schema: serde_json::json!({"type": "object", "properties": {}}),
+            validators: vec![],
+            credentials: vec![],
+        };
+        let yaml = serde_yaml::to_string(&manifest)?;
+        let path = state.capabilities_dir.join(format!("{}.yaml", name));
+        std::fs::write(path, yaml)?;
+        Ok(())
+    }
+
+    fn create_pack(&self, name: &str, description: &str) -> anyhow::Result<()> {
+        use clix_core::manifest::pack::PackManifest;
+        let state = clix_core::state::ClixState::load(clix_core::state::home_dir())?;
+        let pack_dir = state.packs_dir.join(name);
+        std::fs::create_dir_all(&pack_dir)?;
+        std::fs::create_dir_all(pack_dir.join("capabilities"))?;
+        std::fs::create_dir_all(pack_dir.join("profiles"))?;
+        let manifest = PackManifest {
+            name: name.to_string(),
+            version: 1,
+            description: if description.is_empty() { None } else { Some(description.to_string()) },
+            author: None,
+            homepage: None,
+            capabilities: vec![],
+            profiles: vec![],
+            workflows: vec![],
+        };
+        let yaml = serde_yaml::to_string(&manifest)?;
+        std::fs::write(pack_dir.join("pack.yaml"), yaml)?;
+        Ok(())
+    }
+
+    fn install_pack(&self, path_str: &str) -> anyhow::Result<()> {
+        use clix_core::packs::install::install_pack;
+        let state = clix_core::state::ClixState::load(clix_core::state::home_dir())?;
+        let path = std::path::PathBuf::from(path_str);
+        install_pack(&path, &state.packs_dir)?;
+        Ok(())
     }
 
     fn next_screen(&mut self) {
@@ -186,8 +391,6 @@ impl App {
         } else {
             state.config.active_profiles.push(name.to_string());
         }
-        // Note: re-serializes the full config, which will strip comments and any
-        // unknown keys not present in ClixConfig. Same trade-off as the CLI's profile activate/deactivate.
         let yaml = serde_yaml::to_string(&state.config)?;
         std::fs::write(&state.config_path, yaml)?;
         self.active_profiles = state.config.active_profiles.clone();

@@ -6,7 +6,7 @@ use crossterm::{
 };
 use ratatui::{prelude::*, widgets::*};
 use anyhow::Result;
-use crate::tui::app::{App, Screen};
+use crate::tui::app::{App, ModalKind, Screen};
 pub mod app;
 pub mod screens;
 
@@ -80,7 +80,7 @@ fn render(f: &mut Frame, app: &App) {
 
     // Status bar
     let status = app.last_error.as_deref()
-        .unwrap_or("q:quit  r:reload  ←/→:tabs  ↑/↓:select  Enter:action  Esc:back");
+        .unwrap_or("q:quit  r:reload  ←/→:tabs  ↑/↓:select  Enter:action  n:new  i:install(packs)  Esc:back");
     let style = if app.last_error.is_some() {
         Style::default().fg(Color::Red)
     } else {
@@ -88,4 +88,54 @@ fn render(f: &mut Frame, app: &App) {
     };
     let status_bar = Paragraph::new(status).style(style);
     f.render_widget(status_bar, chunks[2]);
+
+    // Render modal overlay if open
+    if app.modal.is_open() {
+        render_modal(f, app);
+    }
+}
+
+fn render_modal(f: &mut Frame, app: &App) {
+    let area = f.area();
+    let (title, field_labels): (&str, &[&str]) = match app.modal.kind.as_ref().unwrap() {
+        ModalKind::CreateProfile => ("Create Profile", &["Name", "Description (optional)"]),
+        ModalKind::CreateCapability => ("Create Capability", &["Name (e.g. git.status)", "Description (optional)", "Command (e.g. git)"]),
+        ModalKind::CreatePack => ("Create Pack", &["Name", "Description (optional)"]),
+        ModalKind::InstallPack => ("Install Pack", &["Path to directory or .clixpack.zip"]),
+    };
+    let height = (field_labels.len() as u16) * 3 + 4;
+    let width = area.width * 6 / 10;
+    let x = (area.width.saturating_sub(width)) / 2;
+    let y = (area.height.saturating_sub(height)) / 2;
+    let modal_area = ratatui::layout::Rect::new(x, y, width, height);
+
+    f.render_widget(Clear, modal_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" {} ", title))
+        .border_style(Style::default().fg(Color::Rgb(231, 91, 42)));
+    let inner = block.inner(modal_area);
+    f.render_widget(block, modal_area);
+
+    let field_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(field_labels.iter().map(|_| Constraint::Length(3)).collect::<Vec<_>>())
+        .split(inner);
+
+    for (i, (label, chunk)) in field_labels.iter().zip(field_chunks.iter()).enumerate() {
+        let value = if i == app.modal.field_idx {
+            format!("{}_", app.modal.input_buf)
+        } else {
+            app.modal.fields.get(i).cloned().unwrap_or_default()
+        };
+        let style = if i == app.modal.field_idx {
+            Style::default().fg(Color::White)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let field = Paragraph::new(value)
+            .block(Block::default().borders(Borders::ALL).title(*label).border_style(style));
+        f.render_widget(field, *chunk);
+    }
 }
