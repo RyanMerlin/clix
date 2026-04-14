@@ -1,0 +1,277 @@
+---
+document: clix-tui
+version: 1
+description: >
+  Technical design reference for the clix interactive TUI — architecture,
+  screen designs, navigation model, and key bindings.
+  Launch with: clix tui
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OVERVIEW
+# ─────────────────────────────────────────────────────────────────────────────
+overview:
+  purpose: >
+    The TUI is the graphical face of clix for humans setting things up.
+    It reads from the same Registry/Profile/Pack data layer as the headless
+    CLI and MCP server — no separate data path. The TUI for humans configuring,
+    the CLI/MCP for agents running.
+  technology:
+    terminal_backend: crossterm 0.28
+    ui_framework:     ratatui 0.29
+    async:            false  # synchronous — no tokio required for the TUI loop
+  launch_command:    "clix tui"
+  source_location:   "crates/clix-cli/src/tui/"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TERMINAL LIFECYCLE
+# ─────────────────────────────────────────────────────────────────────────────
+terminal_lifecycle:
+  startup:
+    order:
+      1: "App::new() — load ClixState, CapabilityRegistry, profiles, packs from disk"
+      2: "enable_raw_mode() — capture all keystrokes"
+      3: "EnterAlternateScreen — switch to TUI buffer, preserving shell history"
+      4: "Terminal::new(CrosstermBackend) — ratatui terminal handle"
+      5: "Install panic hook — ensures terminal is restored even on unexpected crash"
+      6: "Enter run_loop()"
+
+  run_loop:
+    description: "Synchronous draw → event → repeat until app.should_quit"
+    steps:
+      1: "terminal.draw(|f| render(f, &app)) — render current state to terminal"
+      2: "event::read() — block until next input event"
+      3: "Filter: only process KeyEventKind::Press (prevents double-fire on Windows)"
+      4: "app.handle_key(key) — update state"
+      5: "Check app.should_quit — break if true"
+
+  shutdown:
+    description: "Always runs — even after panic (via panic hook)"
+    steps:
+      1: "disable_raw_mode()"
+      2: "LeaveAlternateScreen — restore original shell buffer"
+      3: "terminal.show_cursor()"
+    panic_safety: >
+      A panic hook installed at startup calls disable_raw_mode() and
+      LeaveAlternateScreen before printing the panic message, so the user's
+      terminal is never left in a broken state.
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# APP STATE MACHINE
+# ─────────────────────────────────────────────────────────────────────────────
+state_machine:
+  description: >
+    All TUI state lives in the App struct. The renderer reads from App
+    without mutating it. handle_key() is the only mutation point.
+
+  app_struct:
+    screen:          "Screen enum — which top-level screen is active"
+    cap_view:        "CapView enum — drill-down level within the Capabilities screen"
+    profiles:        "Vec<ProfileManifest> — all profiles loaded from disk"
+    active_profiles: "Vec<String> — names of currently active profiles (from config.yaml)"
+    registry:        "CapabilityRegistry — all capabilities, grouped by namespace"
+    packs:           "Vec<PackManifest> — all installed packs"
+    cursor:          "usize — current list cursor position (shared across screens)"
+    should_quit:     "bool — signals the run loop to exit"
+    last_error:      "Option<String> — displayed in the status bar on reload failure"
+
+  screen_enum:
+    Profiles:      "Profile manager screen"
+    Capabilities:  "Capability browser screen"
+    Packs:         "Pack manager screen"
+
+  cap_view_enum:
+    Namespaces:       "Top level — list of namespace groups"
+    Listing(ns):      "Second level — capabilities within a namespace"
+    Detail(name):     "Third level — full detail for a single capability"
+
+  data_loading:
+    on_startup:    "App::new() loads all data once"
+    on_reload:     >
+      App::reload() re-reads ClixState, registry, profiles, and packs from disk.
+      Resets cursor to 0 and cap_view to Namespaces to avoid stale references.
+      Any error is stored in last_error and shown in the status bar.
+    trigger:       "r key"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LAYOUT
+# ─────────────────────────────────────────────────────────────────────────────
+layout:
+  description: "Three-row vertical layout applied to every screen"
+  rows:
+    tab_bar:
+      height:    "1 line"
+      content:   "[1] Profiles   [2] Capabilities   [3] Packs"
+      style:     "Active screen tab is bold + yellow"
+    content_area:
+      height:    "Remaining terminal height"
+      content:   "Active screen renderer fills this area"
+    status_bar:
+      height:    "1 line"
+      content:
+        normal:  "q:quit  r:reload  1/2/3/Tab:screens  j/k:navigate  Enter:select  Esc:back"
+        error:   "Last error message displayed in red when last_error is set"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SCREENS
+# ─────────────────────────────────────────────────────────────────────────────
+screens:
+
+  profiles:
+    file: "crates/clix-cli/src/tui/screens/profiles.rs"
+    description: >
+      Shows all installed profiles. Active profiles are marked with ●;
+      inactive with ○. Enter toggles the selected profile on or off
+      and persists the change to ~/.clix/config.yaml immediately.
+    layout:
+      type: full-width list
+    list_item_format: "<marker> <name>  <description>"
+    markers:
+      active:   "●"
+      inactive: "○"
+    actions:
+      enter:    "Toggle selected profile active/inactive — writes config.yaml"
+      j_k:      "Move cursor down/up"
+    state_persistence: >
+      toggle_profile() calls ClixState::load(), mutates active_profiles,
+      serializes config back to YAML, and writes to config_path.
+      self.active_profiles is updated in memory immediately after.
+    empty_state: "List renders with no selection if no profiles are installed"
+
+  capabilities:
+    file: "crates/clix-cli/src/tui/screens/capabilities.rs"
+    description: >
+      Three-level drill-down browser for the capability registry.
+      Uses CapView enum to track which level is displayed.
+    levels:
+      namespaces:
+        cap_view:   "CapView::Namespaces"
+        content:    "List of namespace groups with capability count"
+        item_format: "<namespace>  (<N> capabilities)"
+        data_source: "CapabilityRegistry::namespaces()"
+        action_enter: "Drill into CapView::Listing(ns)"
+        action_esc:   "Quit the TUI"
+
+      listing:
+        cap_view:   "CapView::Listing(ns)"
+        content:    "Capabilities within the selected namespace"
+        item_format: "<name>  <description>"
+        data_source: "CapabilityRegistry::by_namespace(ns)"
+        action_enter: "Drill into CapView::Detail(name)"
+        action_esc:   "Return to CapView::Namespaces"
+
+      detail:
+        cap_view:   "CapView::Detail(name)"
+        content:    "Full capability manifest fields"
+        fields_shown:
+          - "Name"
+          - "Description"
+          - "Backend (type + command or url)"
+          - "Risk level"
+          - "Input schema (pretty-printed JSON)"
+        data_source: "CapabilityRegistry::get(name)"
+        action_esc:  >
+          Return to CapView::Listing(ns) — namespace is re-derived from the
+          capability name via CapabilityRegistry::group_key(name)
+        missing_capability: "Renders 'Capability not found' panel if registry lookup fails"
+
+  packs:
+    file: "crates/clix-cli/src/tui/screens/packs.rs"
+    description: >
+      Split-panel view. Left panel shows all installed packs. Right panel
+      shows details for the currently selected pack.
+    layout:
+      type:          "Horizontal split"
+      left_width:    "35%"
+      right_width:   "65%"
+    left_panel:
+      content:       "Pack list — name and version"
+      item_format:   "<name> v<version>"
+    right_panel:
+      content:       "Pack detail for selected pack"
+      fields_shown:
+        - "Name"
+        - "Version"
+        - "Author"
+        - "Description"
+        - "Capabilities (count + bulleted list)"
+        - "Profiles (count + bulleted list, if any)"
+    empty_state: "Right panel hidden if pack list is empty"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# KEY BINDINGS
+# ─────────────────────────────────────────────────────────────────────────────
+key_bindings:
+  global:
+    q:         "Quit the TUI"
+    ctrl_c:    "Quit the TUI"
+    r:         "Reload all data from disk — resets cursor and cap_view"
+
+  navigation:
+    "1":       "Switch to Profiles screen"
+    "2":       "Switch to Capabilities screen (resets to Namespaces level)"
+    "3":       "Switch to Packs screen"
+    Tab:       "Cycle to next screen: Profiles → Capabilities → Packs → Profiles"
+    j / down:  "Move cursor down"
+    k / up:    "Move cursor up"
+
+  actions:
+    Enter:
+      profiles:            "Toggle selected profile active/inactive"
+      capabilities_ns:     "Drill into namespace → show capability listing"
+      capabilities_list:   "Drill into capability → show detail"
+      capabilities_detail: "No-op"
+      packs:               "No-op (detail auto-follows cursor)"
+    Esc / Backspace:
+      capabilities_detail: "Back to capability listing for the same namespace"
+      capabilities_list:   "Back to namespace list"
+      capabilities_ns:     "Quit the TUI"
+      profiles:            "Quit the TUI"
+      packs:               "Quit the TUI"
+
+  cursor_bounds: >
+    cursor_down clamps to list_len - 1 (no wrap-around).
+    cursor_up clamps at 0.
+    Empty lists receive ListState::select(None) — no highlight rendered.
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SOURCE FILE MAP
+# ─────────────────────────────────────────────────────────────────────────────
+source_map:
+  entry_point:         "crates/clix-cli/src/commands/tui.rs — delegates to crate::tui::run()"
+  terminal_lifecycle:  "crates/clix-cli/src/tui/mod.rs"
+  state_machine:       "crates/clix-cli/src/tui/app.rs"
+  profiles_screen:     "crates/clix-cli/src/tui/screens/profiles.rs"
+  capabilities_screen: "crates/clix-cli/src/tui/screens/capabilities.rs"
+  packs_screen:        "crates/clix-cli/src/tui/screens/packs.rs"
+  screen_exports:      "crates/clix-cli/src/tui/screens/mod.rs"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FUTURE SCREENS (v2 candidates)
+# ─────────────────────────────────────────────────────────────────────────────
+future_screens:
+  receipt_log:
+    description: "Scrollable audit log viewer — tail receipts.db in real time"
+    complexity:  Low
+    data_source: "ReceiptStore::list()"
+
+  policy_editor:
+    description: "Structured form for editing policy.yaml rules"
+    complexity:  High
+    note:        "Requires form validation and YAML round-trip"
+
+  external_cli_wizard:
+    description: "Multi-step wizard for onboarding a new external CLI as a pack"
+    complexity:  Medium-High
+    note:        "Mirrors clix pack onboard — wizard-style form flow"
+
+  pack_install_progress:
+    description: "Progress indicator for pack install/bundle operations"
+    complexity:  Low
