@@ -104,7 +104,10 @@ pub enum ReceiptsCmd {
 
 #[derive(Subcommand)]
 pub enum PackCmd {
-    List { #[arg(long)] json: bool },
+    List {
+        #[arg(long)] json: bool,
+        #[arg(long)] available: bool,
+    },
     Show { name: String, #[arg(long)] json: bool },
     Discover { path: String, #[arg(long)] json: bool },
     Validate { path: String },

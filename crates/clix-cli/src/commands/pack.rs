@@ -9,27 +9,65 @@ use clix_core::packs::scaffold::Preset;
 use clix_core::state::{home_dir, ClixState};
 use crate::output::print_json;
 
-pub fn list(json: bool) -> Result<()> {
+pub fn list(json: bool, available: bool) -> Result<()> {
     let state = ClixState::load(home_dir())?;
-    if !state.packs_dir.exists() { return Ok(()); }
-    let mut packs = vec![];
-    for entry in std::fs::read_dir(&state.packs_dir)? {
-        let entry = entry?;
-        if entry.file_type()?.is_dir() {
-            let pack_file = entry.path().join("pack.yaml");
-            if pack_file.exists() {
-                let content = std::fs::read_to_string(&pack_file)?;
-                if let Ok(p) = serde_yaml::from_str::<PackManifest>(&content) {
-                    packs.push(p);
+
+    if available {
+        // List available packs (in source but not installed)
+        let packs_src = [
+            std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("packs"))),
+            Some(std::path::PathBuf::from("packs")),
+        ].into_iter().flatten().find(|p| p.exists());
+
+        if let Some(src) = packs_src {
+            let mut packs = vec![];
+            for entry in std::fs::read_dir(&src)? {
+                let entry = entry?;
+                if entry.file_type()?.is_dir() {
+                    let name = entry.file_name();
+                    let name_str = name.to_string_lossy();
+                    // Check if NOT installed
+                    if !state.packs_dir.join(&*name_str).exists() {
+                        let pack_file = entry.path().join("pack.yaml");
+                        if pack_file.exists() {
+                            let content = std::fs::read_to_string(&pack_file)?;
+                            if let Ok(p) = serde_yaml::from_str::<PackManifest>(&content) {
+                                packs.push(p);
+                            }
+                        }
+                    }
+                }
+            }
+            packs.sort_by(|a, b| a.name.cmp(&b.name));
+            if json { print_json(&packs); }
+            else {
+                for p in &packs {
+                    println!("{:<30} v{}  {}", p.name, p.version, p.description.as_deref().unwrap_or(""));
                 }
             }
         }
-    }
-    packs.sort_by(|a, b| a.name.cmp(&b.name));
-    if json { print_json(&packs); }
-    else {
-        for p in &packs {
-            println!("{:<30} v{}  {}", p.name, p.version, p.description.as_deref().unwrap_or(""));
+    } else {
+        // List installed packs
+        if !state.packs_dir.exists() { return Ok(()); }
+        let mut packs = vec![];
+        for entry in std::fs::read_dir(&state.packs_dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                let pack_file = entry.path().join("pack.yaml");
+                if pack_file.exists() {
+                    let content = std::fs::read_to_string(&pack_file)?;
+                    if let Ok(p) = serde_yaml::from_str::<PackManifest>(&content) {
+                        packs.push(p);
+                    }
+                }
+            }
+        }
+        packs.sort_by(|a, b| a.name.cmp(&b.name));
+        if json { print_json(&packs); }
+        else {
+            for p in &packs {
+                println!("{:<30} v{}  {}", p.name, p.version, p.description.as_deref().unwrap_or(""));
+            }
         }
     }
     Ok(())
