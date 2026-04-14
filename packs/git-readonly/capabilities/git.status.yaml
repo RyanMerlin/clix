@@ -1,0 +1,12 @@
+name: git.status
+version: 1
+description: Show working tree status
+backend:
+  type: subprocess
+  command: git
+  args: ["status"]
+risk: low
+sideEffectClass: readOnly
+inputSchema:
+  type: object
+  properties: {}

@@ -8,11 +8,11 @@ backend:
     - ai
     - models
     - list
-    - "--project={{ inputs.project }}"
-    - "--region={{ inputs.region }}"
+    - "--project={{ input.project }}"
+    - "--region={{ input.region }}"
     - "--format=json"
 risk: low
-sideEffectClass: read-only
+sideEffectClass: readOnly
 inputSchema:
   type: object
   required: [project, region]

@@ -8,12 +8,12 @@ backend:
     - ai
     - models
     - describe
-    - "{{ inputs.model_id }}"
-    - "--project={{ inputs.project }}"
-    - "--region={{ inputs.region }}"
+    - "{{ input.model_id }}"
+    - "--project={{ input.project }}"
+    - "--region={{ input.region }}"
     - "--format=json"
 risk: low
-sideEffectClass: read-only
+sideEffectClass: readOnly
 inputSchema:
   type: object
   required: [project, region, model_id]
