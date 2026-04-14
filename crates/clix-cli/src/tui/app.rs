@@ -28,6 +28,13 @@ fn load_profiles_from_packs(packs_dir: &std::path::Path) -> Vec<ProfileManifest>
         .collect()
 }
 
+fn load_all_profiles(state: &clix_core::state::ClixState) -> Vec<ProfileManifest> {
+    // Global profiles (user-created) + pack-bundled profiles
+    let mut all: Vec<ProfileManifest> = load_dir(&state.profiles_dir).unwrap_or_default();
+    all.extend(load_profiles_from_packs(&state.packs_dir));
+    all
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Screen {
     Profiles,
@@ -124,8 +131,8 @@ impl App {
         let registry = build_registry(&state)?;
         // Packs live at packs_dir/<name>/pack.yaml — walk subdirectories
         let packs: Vec<PackManifest> = load_packs_from_dir(&state.packs_dir);
-        // Profiles live inside each pack at packs_dir/<name>/profiles/*.yaml
-        let profiles: Vec<ProfileManifest> = load_profiles_from_packs(&state.packs_dir);
+        // Profiles: global (~/.clix/profiles/) + pack-bundled (packs/<name>/profiles/)
+        let profiles: Vec<ProfileManifest> = load_all_profiles(&state);
         let active_profiles = state.config.active_profiles.clone();
         Ok(Self {
             screen: Screen::Profiles,
@@ -443,6 +450,10 @@ impl App {
                         self.last_error = Some(format!("Toggle failed: {e}"));
                     } else {
                         self.last_error = None;
+                        // Rebuild registry so Capabilities screen reflects the change
+                        if let Err(e) = self.reload() {
+                            self.last_error = Some(format!("Reload failed: {e}"));
+                        }
                     }
                 }
             }

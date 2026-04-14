@@ -6,7 +6,17 @@ use crate::output::print_json;
 
 pub fn list(json: bool) -> Result<()> {
     let state = ClixState::load(home_dir())?;
-    let profiles: Vec<ProfileManifest> = load_dir(&state.profiles_dir)?;
+    // Load global profiles + pack-bundled profiles
+    let mut profiles: Vec<ProfileManifest> = load_dir(&state.profiles_dir).unwrap_or_default();
+    if state.packs_dir.exists() {
+        for entry in std::fs::read_dir(&state.packs_dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                let mut pp = load_dir::<ProfileManifest>(&entry.path().join("profiles")).unwrap_or_default();
+                profiles.append(&mut pp);
+            }
+        }
+    }
     if json { print_json(&profiles); }
     else {
         for p in &profiles {
