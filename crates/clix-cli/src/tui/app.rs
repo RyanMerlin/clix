@@ -1,11 +1,32 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use clix_core::loader::build_registry;
-use clix_core::manifest::loader::load_dir;
 use clix_core::manifest::pack::PackManifest;
 use clix_core::manifest::profile::ProfileManifest;
 use clix_core::registry::CapabilityRegistry;
 use clix_core::state::{home_dir, ClixState};
+use clix_core::manifest::loader::load_dir;
+
+fn load_packs_from_dir(packs_dir: &std::path::Path) -> Vec<PackManifest> {
+    if !packs_dir.exists() { return vec![]; }
+    let Ok(entries) = std::fs::read_dir(packs_dir) else { return vec![]; };
+    entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter_map(|e| std::fs::read_to_string(e.path().join("pack.yaml")).ok())
+        .filter_map(|s| serde_yaml::from_str::<PackManifest>(&s).ok())
+        .collect()
+}
+
+fn load_profiles_from_packs(packs_dir: &std::path::Path) -> Vec<ProfileManifest> {
+    if !packs_dir.exists() { return vec![]; }
+    let Ok(entries) = std::fs::read_dir(packs_dir) else { return vec![]; };
+    entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .flat_map(|e| load_dir::<ProfileManifest>(&e.path().join("profiles")).unwrap_or_default())
+        .collect()
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Screen {
@@ -101,8 +122,10 @@ impl App {
             }
         }
         let registry = build_registry(&state)?;
-        let profiles: Vec<ProfileManifest> = load_dir(&state.profiles_dir).unwrap_or_default();
-        let packs: Vec<PackManifest> = load_dir(&state.packs_dir).unwrap_or_default();
+        // Packs live at packs_dir/<name>/pack.yaml — walk subdirectories
+        let packs: Vec<PackManifest> = load_packs_from_dir(&state.packs_dir);
+        // Profiles live inside each pack at packs_dir/<name>/profiles/*.yaml
+        let profiles: Vec<ProfileManifest> = load_profiles_from_packs(&state.packs_dir);
         let active_profiles = state.config.active_profiles.clone();
         Ok(Self {
             screen: Screen::Profiles,
