@@ -36,7 +36,8 @@ pub struct App {
 impl App {
     pub fn new() -> Result<Self> {
         let mut state = ClixState::load(home_dir())?;
-        // TUI first-run guard: if no profiles are active but the base pack exists, activate it
+        // First-run guard: activate base profile if missing and base pack is installed.
+        // Handles the case where the user runs 'clix tui' before 'clix init'.
         if state.config.active_profiles.is_empty() {
             let base_pack_dir = state.packs_dir.join("base");
             if base_pack_dir.exists() {
