@@ -1,4 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize};
+use chrono::{DateTime, Utc};
 use super::capability::{CredentialSource, IsolationTier};
 
 /// Deserialize a capability entry that is either a plain string name
@@ -62,6 +63,23 @@ pub struct ProfileManifest {
     /// Secret bindings for this profile. Override capability-declared credential sources at execution time.
     #[serde(default)]
     pub secret_bindings: Vec<ProfileSecretBinding>,
+    /// Folder-level bindings expand an entire Infisical path at execution time.
+    #[serde(default)]
+    pub folder_bindings: Vec<ProfileFolderBinding>,
+}
+
+/// Binds an entire Infisical folder path to a profile with a snapshot of secret names.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileFolderBinding {
+    pub project_id: String,
+    pub environment: String,
+    pub secret_path: String,
+    #[serde(default)]
+    pub inject_prefix: Option<String>,
+    pub synced_at: DateTime<Utc>,
+    /// Secret names captured at sync time.
+    pub snapshot: Vec<String>,
 }
 
 /// Binds an environment variable name to a concrete credential source at the profile level.

@@ -64,7 +64,7 @@ pub fn run_capability(registry: &CapabilityRegistry, policy: &PolicyBundle, infi
         store.write(&Receipt { id: receipt_id, kind: ReceiptKind::Capability, capability: cap.name.clone(), created_at: Utc::now(), status: ReceiptStatus::Denied, decision: "deny".to_string(), reason: Some(reason.clone()), input: input.clone(), context: serde_json::to_value(&ctx).unwrap_or_default(), execution: None, approval: None, sandbox_enforced: sandbox_enforced(), isolation_tier: None, binary_sha256: None, token_mint_id: None, jail_config_digest: None })?;
         return Ok(ExecutionOutcome { ok: false, approval_required: false, receipt_id, result: None, reason: Some(reason) });
     }
-    let secrets = resolve_credentials(&cap.credentials, infisical, profile_bindings)?;
+    let secrets = resolve_credentials(&cap.credentials, infisical, profile_bindings, &[])?;
     let redactor = SecretRedactor::new(secrets.clone());
     let exec_result = match &cap.backend {
         Backend::Builtin { name } => builtin_handler(name, &input)?,

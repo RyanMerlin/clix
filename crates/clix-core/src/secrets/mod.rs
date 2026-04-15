@@ -1,35 +1,136 @@
 pub mod redact;
-pub use redact::SecretRedactor;
+pub use redact::{SecretRedactor, preview};
 
 #[cfg(target_os = "linux")]
 pub mod keyring;
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
+use std::sync::OnceLock;
+use std::sync::Mutex;
 use crate::error::{ClixError, Result};
 use crate::manifest::capability::CredentialSource;
-use crate::manifest::profile::ProfileSecretBinding;
+use crate::manifest::profile::{ProfileSecretBinding, ProfileFolderBinding};
 use crate::state::InfisicalConfig;
+
+struct CachedToken {
+    token: String,
+    expires_at: Instant,
+}
+
+static TOKEN_CACHE: OnceLock<Mutex<Option<CachedToken>>> = OnceLock::new();
+
+fn token_cache() -> &'static Mutex<Option<CachedToken>> {
+    TOKEN_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+fn get_infisical_token_cached(cfg: &InfisicalConfig) -> Result<String> {
+    let mut cache = token_cache().lock().unwrap();
+    if let Some(ref ct) = *cache {
+        if ct.expires_at > Instant::now() {
+            return Ok(ct.token.clone());
+        }
+    }
+    // stale or missing — re-login
+    let (token, ttl) = get_infisical_token_with_ttl(cfg)?;
+    *cache = Some(CachedToken {
+        token: token.clone(),
+        expires_at: Instant::now() + Duration::from_secs(ttl.saturating_sub(60)),
+    });
+    Ok(token)
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ConnectivityReport {
+    pub auth_ok: bool,
+    pub site_reachable: bool,
+    pub workspace_reachable: bool,
+    pub root_folder_count: usize,
+    pub latency_ms: u64,
+    pub token_expires_in: Option<u64>,
+    pub error: Option<String>,
+}
+
+pub fn test_connectivity(cfg: &InfisicalConfig) -> ConnectivityReport {
+    let start = std::time::Instant::now();
+    match get_infisical_token_with_ttl(cfg) {
+        Err(e) => ConnectivityReport {
+            auth_ok: false,
+            site_reachable: false,
+            workspace_reachable: false,
+            root_folder_count: 0,
+            latency_ms: start.elapsed().as_millis() as u64,
+            token_expires_in: None,
+            error: Some(e.to_string()),
+        },
+        Ok((token, ttl)) => {
+            // Update cache with fresh token
+            {
+                let mut cache = token_cache().lock().unwrap();
+                *cache = Some(CachedToken {
+                    token: token.clone(),
+                    expires_at: Instant::now() + Duration::from_secs(ttl.saturating_sub(60)),
+                });
+            }
+            let project_id = cfg.default_project_id.as_deref().unwrap_or("");
+            let env = &cfg.default_environment;
+            let folders = if !project_id.is_empty() {
+                list_infisical_folders(cfg, project_id, env, "/").unwrap_or_default()
+            } else {
+                vec![]
+            };
+            ConnectivityReport {
+                auth_ok: true,
+                site_reachable: true,
+                workspace_reachable: !project_id.is_empty(),
+                root_folder_count: folders.len(),
+                latency_ms: start.elapsed().as_millis() as u64,
+                token_expires_in: Some(ttl),
+                error: None,
+            }
+        }
+    }
+}
 
 /// Resolve credential sources to a map of env-var-name → value.
 /// `profile_bindings` override same-named entries from `creds` (profile wins over capability defaults).
+/// `folder_bindings` expand entire Infisical folder snapshots; per-key bindings take precedence.
 pub fn resolve_credentials(
     creds: &[CredentialSource],
     infisical_cfg: Option<&InfisicalConfig>,
     profile_bindings: &[ProfileSecretBinding],
+    folder_bindings: &[ProfileFolderBinding],
 ) -> Result<HashMap<String, String>> {
     // Seed from capability-declared credentials
-    let mut effective: HashMap<String, &CredentialSource> = creds.iter()
-        .map(|c| (inject_as_of(c).to_string(), c))
+    let mut effective: HashMap<String, CredentialSource> = creds.iter()
+        .map(|c| (inject_as_of(c).to_string(), c.clone()))
         .collect();
-    // Profile bindings override capability defaults
-    let profile_sources: Vec<&CredentialSource> = profile_bindings.iter().map(|b| &b.source).collect();
+
+    // Folder bindings expand entire paths; lowest priority (overridden by per-key bindings)
+    for fb in folder_bindings {
+        let prefix = fb.inject_prefix.as_deref().unwrap_or("");
+        for secret_name in &fb.snapshot {
+            let inject_as = format!("{}{}", prefix, secret_name);
+            effective.entry(inject_as.clone()).or_insert_with(|| CredentialSource::Infisical {
+                inject_as,
+                secret_ref: crate::manifest::capability::InfisicalRef {
+                    secret_name: secret_name.clone(),
+                    project_id: Some(fb.project_id.clone()),
+                    environment: fb.environment.clone(),
+                    secret_path: fb.secret_path.clone(),
+                },
+            });
+        }
+    }
+
+    // Profile bindings override all
     for binding in profile_bindings {
-        effective.insert(binding.inject_as.clone(), profile_sources[profile_bindings.iter().position(|b| b.inject_as == binding.inject_as).unwrap()]);
+        effective.insert(binding.inject_as.clone(), binding.source.clone());
     }
 
     let mut resolved = HashMap::new();
     for (key, cred) in &effective {
-        let value = match *cred {
+        let value = match cred {
             CredentialSource::Literal { value, .. } => value.clone(),
             CredentialSource::Env { env_var, .. } => std::env::var(env_var).unwrap_or_default(),
             CredentialSource::Infisical { secret_ref, .. } => {
@@ -131,6 +232,10 @@ fn fetch_infisical_secret(cfg: &InfisicalConfig, secret_ref: &crate::manifest::c
 }
 
 fn get_infisical_token(cfg: &InfisicalConfig) -> Result<String> {
+    get_infisical_token_cached(cfg)
+}
+
+fn get_infisical_token_with_ttl(cfg: &InfisicalConfig) -> Result<(String, u64)> {
     let client_id = cfg.client_id.clone()
         .or_else(|| std::env::var("INFISICAL_UNIVERSAL_AUTH_CLIENT_ID").ok())
         .unwrap_or_default();
@@ -142,8 +247,10 @@ fn get_infisical_token(cfg: &InfisicalConfig) -> Result<String> {
     let resp = client.post(&url).json(&serde_json::json!({"clientId": client_id, "clientSecret": client_secret}))
         .send().map_err(|e| ClixError::CredentialResolution(format!("Infisical auth: {e}")))?;
     let body: serde_json::Value = resp.json().map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
-    body["accessToken"].as_str().map(|s| s.to_string())
-        .ok_or_else(|| ClixError::CredentialResolution("accessToken missing".to_string()))
+    let token = body["accessToken"].as_str().map(|s| s.to_string())
+        .ok_or_else(|| ClixError::CredentialResolution("accessToken missing".to_string()))?;
+    let ttl = body["expiresIn"].as_u64().unwrap_or(7200);
+    Ok((token, ttl))
 }
 
 #[cfg(test)]
@@ -155,7 +262,7 @@ mod tests {
     fn test_resolve_env() {
         std::env::set_var("CLIX_TEST_SECRET_VAR", "env-value-123");
         let creds = vec![CredentialSource::Env { env_var: "CLIX_TEST_SECRET_VAR".to_string(), inject_as: "TARGET".to_string() }];
-        let resolved = resolve_credentials(&creds, None, &[]).unwrap();
+        let resolved = resolve_credentials(&creds, None, &[], &[]).unwrap();
         assert_eq!(resolved.get("TARGET").unwrap(), "env-value-123");
         std::env::remove_var("CLIX_TEST_SECRET_VAR");
     }
@@ -163,7 +270,7 @@ mod tests {
     #[test]
     fn test_resolve_literal() {
         let creds = vec![CredentialSource::Literal { value: "lit-val".to_string(), inject_as: "INJECTED".to_string() }];
-        let resolved = resolve_credentials(&creds, None, &[]).unwrap();
+        let resolved = resolve_credentials(&creds, None, &[], &[]).unwrap();
         assert_eq!(resolved.get("INJECTED").unwrap(), "lit-val");
     }
 
@@ -177,7 +284,7 @@ mod tests {
             inject_as: "MY_TOKEN".to_string(),
             source: CredentialSource::Literal { value: "profile-override".to_string(), inject_as: "MY_TOKEN".to_string() },
         }];
-        let resolved = resolve_credentials(&creds, None, &bindings).unwrap();
+        let resolved = resolve_credentials(&creds, None, &bindings, &[]).unwrap();
         assert_eq!(resolved.get("MY_TOKEN").unwrap(), "profile-override");
     }
 }

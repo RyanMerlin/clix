@@ -47,6 +47,9 @@ configuration:
         environment:   "Environment slug (e.g. dev, prod)"
         client_id:     "Machine identity client ID"
         client_secret: "Machine identity client secret"
+      keyring_merge:   "On Linux, client_id/client_secret loaded from keyring at state::load() and merged into InfisicalConfig — config.yaml fields left blank"
+      file_permissions: "0600 enforced on Linux after every config.yaml write (via ClixState::save_config and inline writes)"
+      token_cache:     "In-process OnceLock<Mutex<Option<CachedToken>>>; expires_at = Instant::now() + (expiresIn - 60s skew); stale entries re-authenticate transparently"
     approval_gate:
       description:     "Optional webhook endpoint for external approval decisions"
       fields:
@@ -413,3 +416,41 @@ receipts:
     list:  "clix receipts list [--limit N] [--status <status>]"
     show:  "clix receipts show <id>"
     tail:  "clix receipts tail — live-tails the receipt log"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECRETS REDACTION
+# ─────────────────────────────────────────────────────────────────────────────
+secrets_redaction:
+  redactor:
+    description: "SecretRedactor replaces resolved secret values with [REDACTED] in stdout/stderr before receipt storage"
+    order: "longest values matched first to prevent substring leakage"
+  preview:
+    description: "preview() in redact.rs returns first-2 + bullets + last-4 for display only (never stored)"
+    rules:
+      empty: "(unset)"
+      1_to_7_chars: "all bullets"
+      8_to_11_chars: "bullets + last 4"
+      12_plus_chars: "first 2 + bullets + last 4"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECRETS CONNECTIVITY
+# ─────────────────────────────────────────────────────────────────────────────
+secrets_connectivity:
+  ConnectivityReport:
+    description: "Struct returned by test_connectivity() — serializable, never panics"
+    fields:
+      auth_ok: "bool — true if token was obtained successfully"
+      site_reachable: "bool — true if HTTP call to site_url completed"
+      workspace_reachable: "bool — true if project_id was configured and folders listed"
+      root_folder_count: "usize — number of folders at / in default_project_id"
+      latency_ms: "u64 — total wall time from call entry to return"
+      token_expires_in: "Option<u64> — expiresIn from auth response (seconds)"
+      error: "Option<String> — first error message if any step failed"
+  call_sites:
+    - "clix secrets test (CLI)"
+    - "clix doctor (CLI) — if infisical configured"
+    - "TUI Secrets screen t keypress"
+    - "TUI InfisicalSetup overlay post-save"
+  guarantee: "Never panics — all errors captured into report.error"

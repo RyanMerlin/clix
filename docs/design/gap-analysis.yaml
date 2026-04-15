@@ -367,3 +367,26 @@ summary:
       - CC-01: "init installs base pack"
       - CC-02: "clix pack list --available"
       - CC-03: "clix status summary"
+
+secrets_hardening:
+  status: closed
+  items:
+    - id: GAP-SEC-01
+      description: "No dedicated secrets surface in TUI — config only via Dashboard c key"
+      resolution: "Screen::Secrets added as sidebar slot 7"
+    - id: GAP-SEC-02
+      description: "Credentials stored without validation"
+      resolution: "test_connectivity called on every InfisicalSetup save; clix secrets test command"
+    - id: GAP-SEC-03
+      description: "No obfuscated display of stored credentials"
+      resolution: "preview() helper; used in TUI screen and clix secrets show"
+    - id: GAP-SEC-04
+      description: "Profile wizard binds one secret at a time — folder-level binding impossible"
+      resolution: "SecretPicker multi-select + F folder-bind + ProfileFolderBinding with snapshot"
+    - id: GAP-SEC-05
+      description: "No headless CLI access to Infisical config or tree"
+      resolution: "clix secrets show/test/set/unset/list/tree subcommands"
+  residual_gaps:
+    - "Multi-project-per-profile (single project_id/env per config)"
+    - "Secret rotation / TTL tracking"
+    - "Vault/Doppler backends"

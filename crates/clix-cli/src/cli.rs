@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 pub const STATIC_COMMANDS: &[&str] = &[
     "init", "status", "version", "run", "capabilities",
     "workflow", "profile", "receipts", "serve", "pack", "tui",
-    "doctor", "shim", "mcp", "tools",
+    "doctor", "shim", "mcp", "tools", "secrets",
 ];
 
 #[derive(Parser)]
@@ -95,6 +95,9 @@ pub enum Commands {
     /// One-shot JSON-RPC call to the MCP dispatch layer (no server needed)
     #[command(subcommand)]
     Mcp(McpCmd),
+    /// Manage Infisical secrets configuration
+    #[command(subcommand)]
+    Secrets(crate::commands::secrets::SecretsCmd),
 }
 
 #[derive(Subcommand)]

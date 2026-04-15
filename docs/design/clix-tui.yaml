@@ -271,6 +271,7 @@ key_bindings:
     ctrl_c:     "Force quit — always works"
     r:          "Reload all data from disk — resets cursor and cap_view"
     Esc:        "Close modal (if open) / navigate back / quit from top level"
+    "7":        "switch to Secrets screen"
 
   tab_navigation:
     left_arrow:  "Switch to previous tab"
@@ -368,6 +369,48 @@ source_map:
 # ─────────────────────────────────────────────────────────────────────────────
 # FUTURE SCREENS (v2 candidates)
 # ─────────────────────────────────────────────────────────────────────────────
+screens:
+  secrets:
+    description: >
+      First-class Infisical configuration and binding overview screen.
+      Accessible via sidebar slot 7 or pressing 7 anywhere.
+    cards:
+      config:
+        fields: [site_url, project_id (preview), environment, client_id (preview+source), client_secret (preview+source)]
+        source_annotation: "keyring | config.yaml"
+      connectivity:
+        badge: "connected | unverified | error"
+        fields: [latency_ms, token_expires_in, root_folder_count]
+        probed_on: "t keypress; not auto-probed on entry to avoid blocking"
+      bindings_summary:
+        description: "List of profiles with count of per-key and folder bindings"
+    key_bindings:
+      e: "open InfisicalSetup overlay (edit credentials)"
+      t: "probe connectivity, refresh badge"
+      b: "open SecretPicker in browse-only mode"
+      r: "reset credentials (requires typed confirmation)"
+      "?": "help"
+      q: "quit"
+
+overlays:
+  infisical_setup:
+    description: "5-field form for configuring Infisical credentials and project settings"
+    fields: [site_url, client_id, client_secret, project_id, environment]
+    masked_input: [client_id, client_secret]
+    post_save: "test_connectivity called; toast shows connected/error with latency"
+    storage: "keyring on Linux when available, otherwise config.yaml"
+
+widgets:
+  secret_picker:
+    description: "Live-loading Infisical folder/secret browser modal"
+    multi_select:
+      space: "toggle selection for cursor entry"
+      a: "select all secrets at current level"
+      enter: "confirm multi-selection (SelectedMany action)"
+    folder_bind:
+      F: "issue list_infisical_secrets for folder, build snapshot, return SelectedFolder action"
+    actions: [None, Cancelled, Selected, SelectedMany, SelectedFolder]
+
 future_screens:
   receipt_log:
     description: "Scrollable audit log viewer — tail receipts.db in real time"

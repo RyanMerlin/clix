@@ -54,6 +54,22 @@ impl ClixState {
         Ok(state)
     }
 
+    /// Write config.yaml and enforce 0600 permissions on Linux.
+    pub fn save_config(&self) -> Result<()> {
+        let yaml = serde_yaml::to_string(&self.config)?;
+        std::fs::write(&self.config_path, &yaml)?;
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(&self.config_path) {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o600);
+                let _ = std::fs::set_permissions(&self.config_path, perms);
+            }
+        }
+        Ok(())
+    }
+
     pub fn ensure_dirs(&self) -> Result<()> {
         for dir in [
             &self.home,

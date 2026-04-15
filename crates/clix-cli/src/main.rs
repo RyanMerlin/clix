@@ -7,6 +7,7 @@ mod tui;
 use anyhow::Result;
 use clap::FromArgMatches;
 use cli::{Cli, Commands, CapabilitiesCmd, WorkflowCmd, ProfileCmd, ReceiptsCmd, PackCmd, ShimCmd, McpCmd, ToolsCmd};
+
 use clix_core::execution::run_capability;
 use clix_core::loader::{build_registry, load_policy};
 use clix_core::policy::evaluate::ExecutionContext;
@@ -140,6 +141,10 @@ async fn dispatch_static(cli: Cli) -> Result<()> {
         Commands::Mcp(sub) => match sub {
             McpCmd::Call { method, params } => commands::mcp::call(&method, params.as_deref()).await?,
         },
+        Commands::Secrets(sub) => {
+            let state = ClixState::load(home_dir())?;
+            commands::secrets::run_secrets(sub, &state)?;
+        }
         Commands::Pack(sub) => match sub {
             PackCmd::List { json, available } => commands::pack::list(json, available)?,
             PackCmd::Show { name, json } => commands::pack::show(&name, json)?,

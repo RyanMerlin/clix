@@ -30,6 +30,10 @@ pub struct SecretPicker {
     pub error: Option<String>,
     /// Set after a successful load attempt (even if empty)
     pub loaded: bool,
+    /// Multi-selected entry indices
+    pub selected: std::collections::HashSet<usize>,
+    /// When Some(prefix), waiting for user to confirm folder-level bind with prefix
+    pub folder_bind_prompt: Option<String>,
 }
 
 impl SecretPicker {
@@ -42,6 +46,8 @@ impl SecretPicker {
             cursor: 0,
             error: None,
             loaded: false,
+            selected: std::collections::HashSet::new(),
+            folder_bind_prompt: None,
         }
     }
 
@@ -96,7 +102,7 @@ impl SecretPicker {
     /// Returns a bound `InfisicalRef` if the cursor is on a secret and Enter was pressed.
     pub fn handle_key(&mut self, code: KeyCode, cfg: Option<&InfisicalConfig>) -> SecretPickerAction {
         match code {
-            KeyCode::Esc => return SecretPickerAction::Cancel,
+            KeyCode::Esc => return SecretPickerAction::Cancelled,
             KeyCode::Up => {
                 if self.cursor > 0 { self.cursor -= 1; }
             }
@@ -112,14 +118,86 @@ impl SecretPicker {
             KeyCode::Backspace => {
                 if !self.path_stack.is_empty() {
                     self.path_stack.pop();
+                    self.selected.clear();
                     if let Some(cfg) = cfg { self.load(cfg); }
                 }
             }
+            // space: toggle multi-select for current entry
+            KeyCode::Char(' ') => {
+                let entry_idx = self.cursor;
+                if entry_idx < self.entries.len() {
+                    if self.selected.contains(&entry_idx) {
+                        self.selected.remove(&entry_idx);
+                    } else {
+                        self.selected.insert(entry_idx);
+                    }
+                }
+            }
+            // a: select all secrets at current level
+            KeyCode::Char('a') => {
+                for (i, entry) in self.entries.iter().enumerate() {
+                    if entry.kind == EntryKind::Secret {
+                        self.selected.insert(i);
+                    }
+                }
+            }
+            // F (shift-f): folder-level bind
+            KeyCode::Char('F') => {
+                if let Some(entry) = self.entries.get(self.cursor) {
+                    if entry.kind == EntryKind::Folder {
+                        let folder_name = entry.name.clone();
+                        let folder_path = if self.path_stack.is_empty() {
+                            format!("/{}/", folder_name)
+                        } else {
+                            format!("/{}/{}/", self.path_stack.join("/"), folder_name)
+                        };
+                        if let Some(cfg) = cfg {
+                            let snapshot = clix_core::secrets::list_infisical_secrets(
+                                cfg, &self.project_id, &self.environment, &folder_path
+                            ).unwrap_or_default();
+                            return SecretPickerAction::SelectedFolder {
+                                project_id: self.project_id.clone(),
+                                environment: self.environment.clone(),
+                                secret_path: folder_path,
+                                inject_prefix: None,
+                                snapshot,
+                            };
+                        } else {
+                            self.error = Some("Infisical not configured".to_string());
+                        }
+                    }
+                }
+            }
             KeyCode::Enter => {
+                // Multi-select confirm
+                if !self.selected.is_empty() {
+                    let refs: Vec<InfisicalRef> = self.selected.iter()
+                        .filter_map(|&idx| self.entries.get(idx))
+                        .filter(|e| e.kind == EntryKind::Secret)
+                        .map(|e| {
+                            let path = if self.path_stack.is_empty() {
+                                "/".to_string()
+                            } else {
+                                format!("/{}", self.path_stack.join("/"))
+                            };
+                            InfisicalRef {
+                                secret_name: e.name.clone(),
+                                project_id: Some(self.project_id.clone()),
+                                environment: self.environment.clone(),
+                                secret_path: path,
+                            }
+                        })
+                        .collect();
+                    if !refs.is_empty() {
+                        return SecretPickerAction::SelectedMany(refs);
+                    }
+                }
+
                 if let Some(entry) = self.entries.get(self.cursor) {
                     match entry.kind {
                         EntryKind::Folder => {
                             self.path_stack.push(entry.name.clone());
+                            self.selected.clear();
                             if let Some(cfg) = cfg { self.load(cfg); }
                         }
                         EntryKind::Secret => {
@@ -208,18 +286,20 @@ impl SecretPicker {
                 } else {
                     let entry = &self.entries[row - entry_offset];
                     let is_cursor = row == self.cursor;
+                    let entry_idx = row - entry_offset;
+                    let is_selected = self.selected.contains(&entry_idx);
                     let (icon, style) = match entry.kind {
                         EntryKind::Folder => (
                             "▸  ",
                             if is_cursor { theme::selected() } else { theme::accent() },
                         ),
                         EntryKind::Secret => (
-                            "🔑 ",
-                            if is_cursor { theme::selected() } else { theme::normal() },
+                            if is_selected { "[✓]" } else { "[ ]" },
+                            if is_cursor { theme::selected() } else if is_selected { theme::ok() } else { theme::normal() },
                         ),
                     };
                     ListItem::new(Line::from(vec![
-                        Span::styled(format!("  {}{}", icon, entry.name), style),
+                        Span::styled(format!("  {} {}", icon, entry.name), style),
                     ]))
                 }
             }).collect();
@@ -239,10 +319,15 @@ impl SecretPicker {
         }
 
         // Hint
+        let sel_count = self.selected.len();
+        let hint = if sel_count > 0 {
+            format!("{}selected  space:toggle  a:all  enter:confirm  F:folder-bind  esc:cancel",
+                format!("{} ", sel_count))
+        } else {
+            "↑↓ move  space:toggle  a:all  enter:open/bind  F:folder-bind  backspace:up  esc:cancel".to_string()
+        };
         f.render_widget(
-            Paragraph::new(
-                "↑↓ move  enter: open/bind  backspace: up  pgup/dn: page  esc: cancel"
-            ).style(theme::muted()),
+            Paragraph::new(hint).style(theme::muted()),
             chunks[2],
         );
     }
@@ -250,6 +335,18 @@ impl SecretPicker {
 
 pub enum SecretPickerAction {
     None,
-    Cancel,
+    /// Legacy: cancel / esc
+    Cancelled,
+    /// Single secret selected
     Selected(InfisicalRef),
+    /// Multiple secrets selected via space+enter
+    SelectedMany(Vec<InfisicalRef>),
+    /// Folder-level bind (F key on a folder entry)
+    SelectedFolder {
+        project_id: String,
+        environment: String,
+        secret_path: String,
+        inject_prefix: Option<String>,
+        snapshot: Vec<String>,
+    },
 }

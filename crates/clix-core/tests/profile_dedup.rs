@@ -16,6 +16,7 @@ fn write_profile(dir: &PathBuf, name: &str, description: &str) {
         settings: serde_json::Value::Null,
         isolation_defaults: Default::default(),
         secret_bindings: vec![],
+        folder_bindings: vec![],
     };
     let yaml = serde_yaml::to_string(&manifest).unwrap();
     std::fs::write(dir.join(format!("{}.yaml", name)), yaml).unwrap();

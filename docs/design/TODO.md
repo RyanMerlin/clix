@@ -41,10 +41,10 @@ The broker crate exists with the unix-socket protocol; the credential adoption w
 - [ ] `clix init --adopt-creds` — migrate `~/.config/gcloud`, `~/.kube/config`, service-account JSONs to broker-owned `0700` directory
 - [ ] `gcloud` token minter: OAuth refresh flow using broker-owned `application_default_credentials.json`
 - [ ] `kubectl` token minter: `ExecCredential` callback to broker instead of kubeconfig
-- [ ] Generic "inject at exec" secret store: arbitrary `KEY=value` secrets per CLI name
+- [x] Generic inject-at-exec secret store: DONE (Infisical binding + folder binding via ProfileFolderBinding with snapshot)
 - [ ] `SO_PEERCRED` enforcement: broker refuses connections from UIDs other than gateway UID
 - [ ] Broker daemon management: `clix serve --start-broker` / `clix serve --stop-broker`; launchd/systemd unit templates
-- [ ] Token TTL and rotation: minted tokens tracked, revoked, rotated on expiry
+- [ ] Token TTL and rotation: minted tokens tracked, revoked, rotated on expiry  ← remaining: rotation, multi-backend, audit export
 - [ ] Add `azure` and `aws` minters behind the same `TokenMinter` trait
 
 ---

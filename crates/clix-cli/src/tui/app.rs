@@ -27,6 +27,7 @@ pub enum Screen {
     Receipts,
     Workflows,
     Broker,
+    Secrets,
 }
 
 impl Screen {
@@ -39,6 +40,7 @@ impl Screen {
             Screen::Receipts => 4,
             Screen::Workflows => 5,
             Screen::Broker => 6,
+            Screen::Secrets => 7,
         }
     }
 
@@ -51,13 +53,14 @@ impl Screen {
             4 => Screen::Receipts,
             5 => Screen::Workflows,
             6 => Screen::Broker,
+            7 => Screen::Secrets,
             _ => Screen::Dashboard,
         }
     }
 
-    pub fn next(&self) -> Self { Screen::from_index((self.sidebar_index() + 1) % 7) }
+    pub fn next(&self) -> Self { Screen::from_index((self.sidebar_index() + 1) % 8) }
     pub fn prev(&self) -> Self {
-        Screen::from_index(self.sidebar_index().checked_sub(1).unwrap_or(6))
+        Screen::from_index(self.sidebar_index().checked_sub(1).unwrap_or(7))
     }
 }
 
@@ -112,6 +115,7 @@ pub struct App {
     pub packs: Vec<PackManifest>,
     pub receipts_preview: Vec<ReceiptRow>,
     pub infisical_cfg: Option<clix_core::state::InfisicalConfig>,
+    pub connectivity_report: Option<clix_core::secrets::ConnectivityReport>,
     // per-screen cursors
     pub profiles_cursor: usize,
     pub caps_view: CapView,
@@ -145,6 +149,7 @@ impl App {
             packs,
             receipts_preview: vec![],
             infisical_cfg,
+            connectivity_report: None,
             profiles_cursor: 0,
             caps_view: CapView::Namespaces,
             caps_cursor: 0,
@@ -233,6 +238,7 @@ impl App {
             KeyCode::Char('4') => self.switch_to(Screen::Receipts),
             KeyCode::Char('5') => self.switch_to(Screen::Workflows),
             KeyCode::Char('6') => self.switch_to(Screen::Broker),
+            KeyCode::Char('7') => self.switch_to(Screen::Secrets),
             KeyCode::Char('0') => self.switch_to(Screen::Dashboard),
             // Tab / arrows for screen navigation
             KeyCode::Tab => self.switch_to(self.screen.next()),
@@ -254,6 +260,26 @@ impl App {
             // c = configure Infisical (Dashboard or Broker)
             KeyCode::Char('c') if matches!(self.screen, Screen::Dashboard | Screen::Broker) => {
                 self.open_infisical_setup();
+            }
+            // e = edit Infisical config on Secrets screen
+            KeyCode::Char('e') if self.screen == Screen::Secrets => {
+                self.open_infisical_setup();
+            }
+            // t = test connectivity on Secrets screen
+            KeyCode::Char('t') if self.screen == Screen::Secrets => {
+                if let Some(ref cfg) = self.infisical_cfg.clone() {
+                    let report = clix_core::secrets::test_connectivity(cfg);
+                    let msg = if report.auth_ok {
+                        format!("Connected ({}ms)", report.latency_ms)
+                    } else {
+                        format!("Error: {}", report.error.as_deref().unwrap_or("unknown"))
+                    };
+                    let is_err = !report.auth_ok;
+                    self.connectivity_report = Some(report);
+                    self.toast(&msg, is_err);
+                } else {
+                    self.toast("Infisical not configured — press e to configure", true);
+                }
             }
             // Content navigation — arrow keys + page
             KeyCode::Down => self.cursor_down(),
@@ -449,8 +475,8 @@ impl App {
             let action = wiz.handle_key(code, Some(&registry), infisical.as_ref());
             let result: Option<Result<String>> = match action {
                 ProfileWizardAction::Cancel => { self.overlay = Overlay::None; None }
-                ProfileWizardAction::Submit { name, description, capabilities, secret_bindings } => {
-                    Some(self.do_create_profile(&name, &description, &capabilities, &secret_bindings))
+                ProfileWizardAction::Submit { name, description, capabilities, secret_bindings, folder_bindings } => {
+                    Some(self.do_create_profile(&name, &description, &capabilities, &secret_bindings, &folder_bindings))
                 }
                 ProfileWizardAction::None => None,
             };
@@ -613,7 +639,7 @@ impl App {
 
     // ─── write operations ─────────────────────────────────────────────────────
 
-    fn do_create_profile(&self, name: &str, description: &str, capabilities: &[String], secret_bindings: &[ProfileSecretBinding]) -> Result<String> {
+    fn do_create_profile(&self, name: &str, description: &str, capabilities: &[String], secret_bindings: &[ProfileSecretBinding], folder_bindings: &[clix_core::manifest::profile::ProfileFolderBinding]) -> Result<String> {
         let state = ClixState::load(home_dir())?;
         let manifest = ProfileManifest {
             name: name.to_string(),
@@ -624,6 +650,7 @@ impl App {
             settings: serde_json::Value::Null,
             isolation_defaults: Default::default(),
             secret_bindings: secret_bindings.to_vec(),
+            folder_bindings: folder_bindings.to_vec(),
         };
         let yaml = serde_yaml::to_string(&manifest)?;
         let path = state.profiles_dir.join(format!("{}.yaml", name));
@@ -814,12 +841,43 @@ impl App {
             root.insert(sv("infisical"), infisical_map);
         }
         std::fs::create_dir_all(config_path.parent().unwrap_or(config_path))?;
-        std::fs::write(config_path, serde_yaml::to_string(&val)?)?;
+        let config_yaml = serde_yaml::to_string(&val)?;
+        std::fs::write(config_path, &config_yaml)?;
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(config_path) {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o600);
+                let _ = std::fs::set_permissions(config_path, perms);
+            }
+        }
 
-        if keyring_ok {
-            Ok("Saved to keyring + config.yaml (credentials secured)".to_string())
+        // Post-save connectivity check
+        let cfg_for_test = clix_core::state::InfisicalConfig {
+            site_url: site_url.to_string(),
+            client_id: if keyring_ok || client_id.is_empty() { None } else { Some(client_id.to_string()) },
+            client_secret: if keyring_ok || client_secret.is_empty() { None } else { Some(client_secret.to_string()) },
+            default_project_id: if project_id.is_empty() { None } else { Some(project_id.to_string()) },
+            default_environment: environment.to_string(),
+        };
+        // Build effective cfg (merge keyring creds if they were just stored)
+        let effective_cfg = if keyring_ok {
+            let mut c = cfg_for_test;
+            c.client_id = Some(client_id.to_string());
+            c.client_secret = Some(client_secret.to_string());
+            c
         } else {
-            Ok("Saved to config.yaml (keyring unavailable — credentials stored in plaintext)".to_string())
+            cfg_for_test
+        };
+        let report = clix_core::secrets::test_connectivity(&effective_cfg);
+        if report.auth_ok {
+            let msg = format!("✓ Infisical connected ({}ms){}", report.latency_ms,
+                if keyring_ok { " — credentials secured in keyring" } else { " — credentials in config.yaml" });
+            Ok(msg)
+        } else {
+            let err_short: String = report.error.as_deref().unwrap_or("auth failed").chars().take(60).collect();
+            Ok(format!("Saved (✗ connectivity: {})", err_short))
         }
     }
 

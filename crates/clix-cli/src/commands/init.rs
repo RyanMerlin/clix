@@ -150,11 +150,26 @@ pub fn run() -> Result<()> {
         println!("Activated default profile: base");
     }
 
-    // Write config (single write)
+    // Write config (single write) + enforce 0600 on Linux
     let yaml = serde_yaml::to_string(&config)?;
-    std::fs::write(&state.config_path, yaml)?;
+    std::fs::write(&state.config_path, &yaml)?;
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(&state.config_path) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o600);
+            let _ = std::fs::set_permissions(&state.config_path, perms);
+        }
+    }
 
     println!("clix initialized at {}", home.display());
+
+    // Hint about Infisical if not configured
+    if config.infisical.is_none() {
+        println!();
+        println!("  run `clix secrets set` or press [c] in the TUI Dashboard to configure Infisical secrets");
+    }
     Ok(())
 }
 

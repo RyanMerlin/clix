@@ -1,4 +1,5 @@
 use ratatui::{prelude::*, widgets::*};
+use chrono::Utc;
 use crate::tui::app::App;
 use crate::tui::theme;
 
@@ -126,6 +127,31 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
             }
             if sb_count > 5 {
                 lines.push(Line::from(Span::styled(format!("    … {} more", sb_count - 5), theme::muted())));
+            }
+        }
+
+        // Folder bindings section
+        let fb_count = profile.folder_bindings.len();
+        if fb_count > 0 {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("  Folder bindings", theme::muted()),
+                Span::styled(format!("  ({}):", fb_count), theme::dim()),
+            ]));
+            for binding in &profile.folder_bindings {
+                let age = Utc::now().signed_duration_since(binding.synced_at);
+                let age_str = if age.num_days() > 0 {
+                    format!("{}d ago", age.num_days())
+                } else if age.num_hours() > 0 {
+                    format!("{}h ago", age.num_hours())
+                } else {
+                    format!("{}m ago", age.num_minutes())
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  📁 {:<24}", binding.secret_path), theme::dim()),
+                    Span::styled(format!("{} secrets", binding.snapshot.len()), theme::muted()),
+                    Span::styled(format!("  synced {}", age_str), theme::inactive()),
+                ]));
             }
         }
 

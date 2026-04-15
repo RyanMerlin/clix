@@ -1,4 +1,5 @@
 pub mod capabilities;
+pub mod secrets;
 pub mod doctor;
 pub mod init;
 pub mod mcp;

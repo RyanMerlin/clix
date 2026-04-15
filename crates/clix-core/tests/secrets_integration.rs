@@ -16,7 +16,7 @@ fn profile_binding_overrides_capability_literal() {
             inject_as: "MY_TOKEN".to_string(),
         },
     }];
-    let resolved = resolve_credentials(&creds, None, &bindings).unwrap();
+    let resolved = resolve_credentials(&creds, None, &bindings, &[]).unwrap();
     assert_eq!(resolved.get("MY_TOKEN").unwrap(), "profile-override");
 }
 
@@ -31,7 +31,7 @@ fn profile_binding_env_resolves() {
             inject_as: "API_KEY".to_string(),
         },
     }];
-    let resolved = resolve_credentials(&creds, None, &bindings).unwrap();
+    let resolved = resolve_credentials(&creds, None, &bindings, &[]).unwrap();
     assert_eq!(resolved.get("API_KEY").unwrap(), "env-from-profile");
     std::env::remove_var("CLIX_TEST_INTEGRATION_ENV");
 }
@@ -57,7 +57,7 @@ fn multiple_bindings_all_resolved() {
             },
         },
     ];
-    let resolved = resolve_credentials(&creds, None, &bindings).unwrap();
+    let resolved = resolve_credentials(&creds, None, &bindings, &[]).unwrap();
     assert_eq!(resolved.get("KEY_A").unwrap(), "alpha");
     assert_eq!(resolved.get("KEY_B").unwrap(), "beta");
     std::env::remove_var("CLIX_TEST_MULTI_A");
@@ -71,7 +71,7 @@ fn capability_cred_with_no_profile_binding_uses_default() {
         env_var: "CLIX_TEST_DEFAULT_VAR".to_string(),
         inject_as: "INJECTED".to_string(),
     }];
-    let resolved = resolve_credentials(&creds, None, &[]).unwrap();
+    let resolved = resolve_credentials(&creds, None, &[], &[]).unwrap();
     assert_eq!(resolved.get("INJECTED").unwrap(), "default-value");
     std::env::remove_var("CLIX_TEST_DEFAULT_VAR");
 }

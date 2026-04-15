@@ -2,6 +2,7 @@ use anyhow::Result;
 use clix_core::sandbox::sandbox_enforced;
 use clix_core::state::{home_dir, ClixState};
 use clix_core::loader::build_registry;
+use clix_core::secrets::test_connectivity;
 use crate::output::{print_json, print_kv};
 
 pub fn run(json: bool) -> Result<()> {
@@ -29,6 +30,18 @@ pub fn run(json: bool) -> Result<()> {
         .cloned()
         .unwrap_or_else(|| "none".to_string());
 
+    // Check Infisical connectivity
+    let infisical_status = if let Some(ref cfg) = state.config.infisical {
+        let report = test_connectivity(cfg);
+        if report.auth_ok {
+            format!("connected ({}ms)", report.latency_ms)
+        } else {
+            format!("error: {}", report.error.as_deref().unwrap_or("unknown"))
+        }
+    } else {
+        "not configured".to_string()
+    };
+
     // Check if broker socket exists
     let broker_socket = {
         let p = std::path::PathBuf::from(
@@ -46,6 +59,7 @@ pub fn run(json: bool) -> Result<()> {
             "pack_count": pack_count,
             "capability_count": cap_count,
             "home": state.home,
+            "infisical": infisical_status,
         }));
     } else {
         print_kv(&[
@@ -55,6 +69,7 @@ pub fn run(json: bool) -> Result<()> {
             ("packs",        pack_count.to_string()),
             ("capabilities", cap_count.to_string()),
             ("home",         state.home.display().to_string()),
+            ("infisical",    infisical_status),
         ]);
     }
     Ok(())

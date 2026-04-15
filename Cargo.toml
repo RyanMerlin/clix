@@ -36,3 +36,4 @@ tempfile           = "3"
 libc               = "0.2"
 criterion          = { version = "0.5", features = ["html_reports"] }
 keyring            = { version = "3", features = ["async-secret-service", "async-io", "crypto-rust"] }
+rpassword          = "7"

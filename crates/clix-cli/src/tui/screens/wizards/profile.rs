@@ -1,7 +1,7 @@
 use crossterm::event::KeyCode;
 use ratatui::{prelude::*, widgets::*};
 use clix_core::manifest::capability::{CredentialSource, InfisicalRef, RiskLevel, SideEffectClass};
-use clix_core::manifest::profile::{ProfileManifest, ProfileSecretBinding};
+use clix_core::manifest::profile::{ProfileManifest, ProfileSecretBinding, ProfileFolderBinding};
 use clix_core::registry::CapabilityRegistry;
 use clix_core::state::InfisicalConfig;
 use crate::tui::theme;
@@ -56,6 +56,8 @@ pub struct ProfileWizard {
     pub env_input: Option<(usize, FieldInput)>,
     /// "l" sub-mode: user is typing a literal value
     pub literal_input: Option<(usize, FieldInput)>,
+    /// Folder-level bindings added via the F key in SecretPicker
+    pub folder_bindings: Vec<ProfileFolderBinding>,
     // Shared error/info
     pub error: Option<String>,
 }
@@ -68,6 +70,7 @@ pub enum ProfileWizardAction {
         description: String,
         capabilities: Vec<String>,
         secret_bindings: Vec<ProfileSecretBinding>,
+        folder_bindings: Vec<ProfileFolderBinding>,
     },
 }
 
@@ -113,6 +116,7 @@ impl ProfileWizard {
             picker: None,
             env_input: None,
             literal_input: None,
+            folder_bindings: vec![],
             error: None,
         }
     }
@@ -150,12 +154,26 @@ impl ProfileWizard {
         if let Some((row_idx, ref mut picker)) = self.picker {
             let action = picker.handle_key(code, infisical_cfg);
             match action {
-                SecretPickerAction::Cancel => { self.picker = None; }
+                SecretPickerAction::Cancelled => { self.picker = None; }
                 SecretPickerAction::Selected(iref) => {
                     let inject_as = self.binding_rows.get(row_idx).map(|r| r.inject_as.clone()).unwrap_or_default();
                     if let Some(row) = self.binding_rows.get_mut(row_idx) {
                         row.binding = Some(CredentialSource::Infisical { secret_ref: iref, inject_as });
                     }
+                    self.picker = None;
+                }
+                SecretPickerAction::SelectedMany(_) => {
+                    self.picker = None;
+                }
+                SecretPickerAction::SelectedFolder { project_id, environment, secret_path, inject_prefix, snapshot } => {
+                    self.folder_bindings.push(ProfileFolderBinding {
+                        project_id,
+                        environment,
+                        secret_path,
+                        inject_prefix,
+                        synced_at: chrono::Utc::now(),
+                        snapshot,
+                    });
                     self.picker = None;
                 }
                 SecretPickerAction::None => {}
@@ -316,6 +334,7 @@ impl ProfileWizard {
                     description: self.description.value.trim().to_string(),
                     capabilities: self.checklist.selected_ids(),
                     secret_bindings,
+                    folder_bindings: self.folder_bindings.clone(),
                 };
             }
             _ => {}
@@ -672,12 +691,15 @@ impl SecretsEditState {
         if let Some((row_idx, ref mut picker)) = self.picker {
             let action = picker.handle_key(code, infisical_cfg);
             match action {
-                SecretPickerAction::Cancel => { self.picker = None; }
+                SecretPickerAction::Cancelled => { self.picker = None; }
                 SecretPickerAction::Selected(iref) => {
                     let inject_as = self.binding_rows.get(row_idx).map(|r| r.inject_as.clone()).unwrap_or_default();
                     if let Some(row) = self.binding_rows.get_mut(row_idx) {
                         row.binding = Some(CredentialSource::Infisical { secret_ref: iref, inject_as });
                     }
+                    self.picker = None;
+                }
+                SecretPickerAction::SelectedMany(_) | SecretPickerAction::SelectedFolder { .. } => {
                     self.picker = None;
                 }
                 SecretPickerAction::None => {}
