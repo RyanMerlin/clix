@@ -149,9 +149,12 @@ impl PackWizard {
             )
         }).collect();
         self.binary_checklist = Checklist::new(items);
-        // Pre-select the seed_command if typed
+        // Pre-filter and pre-select based on seed_command
         let seed = self.seed_command.value.trim().to_lowercase();
         if !seed.is_empty() {
+            // Set filter so the list opens showing only matching binaries
+            self.binary_checklist.filter = seed.clone();
+            // Auto-select exact match
             for item in &mut self.binary_checklist.items {
                 if item.label.to_lowercase() == seed {
                     item.selected = true;
