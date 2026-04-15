@@ -1,6 +1,9 @@
 pub mod redact;
 pub use redact::SecretRedactor;
 
+#[cfg(target_os = "linux")]
+pub mod keyring;
+
 use std::collections::HashMap;
 use crate::error::{ClixError, Result};
 use crate::manifest::capability::CredentialSource;

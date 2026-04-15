@@ -5,12 +5,32 @@ use crossterm::event::KeyCode;
 pub struct FieldInput {
     pub value: String,
     pub cursor: usize,  // byte offset
+    pub masked: bool,
 }
 
 impl FieldInput {
     pub fn new(initial: &str) -> Self {
         let len = initial.len();
-        Self { value: initial.to_string(), cursor: len }
+        Self { value: initial.to_string(), cursor: len, masked: false }
+    }
+
+    pub fn masked() -> Self {
+        Self { masked: true, ..Self::default() }
+    }
+
+    /// Returns (before_display, after_display) split at cursor.
+    /// When masked, each char is replaced by '•'.
+    pub fn split_display_at_cursor(&self) -> (String, String) {
+        let before = &self.value[..self.cursor];
+        let after = &self.value[self.cursor..];
+        if self.masked {
+            (
+                "•".repeat(before.chars().count()),
+                "•".repeat(after.chars().count()),
+            )
+        } else {
+            (before.to_string(), after.to_string())
+        }
     }
 
     pub fn handle_key(&mut self, code: KeyCode) {

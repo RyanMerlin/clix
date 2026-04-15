@@ -563,12 +563,12 @@ fn render_inline_input(f: &mut Frame, fi: &FieldInput, label: &str, area: Rect) 
         .border_style(theme::border_focused());
     let inner = block.inner(dialog);
     f.render_widget(block, dialog);
-    let (before, after) = fi.split_at_cursor();
-    let cursor_char = if after.is_empty() { " " } else { &after[..after.chars().next().map(|c| c.len_utf8()).unwrap_or(1)] };
-    let after_cursor = if after.is_empty() { "" } else { &after[cursor_char.len()..] };
+    let (before_disp, after_disp) = fi.split_display_at_cursor();
+    let cursor_ch: String = after_disp.chars().next().map(|c| c.to_string()).unwrap_or_else(|| " ".to_string());
+    let after_cursor: String = if after_disp.is_empty() { String::new() } else { after_disp.chars().skip(1).collect() };
     let line = Line::from(vec![
-        Span::raw(before),
-        Span::styled(cursor_char, Style::default().bg(theme::ACCENT_BRIGHT).fg(Color::Black)),
+        Span::raw(before_disp),
+        Span::styled(cursor_ch, Style::default().bg(theme::ACCENT_BRIGHT).fg(Color::Black)),
         Span::raw(after_cursor),
     ]);
     let chunks = Layout::default()
@@ -581,18 +581,25 @@ fn render_inline_input(f: &mut Frame, fi: &FieldInput, label: &str, area: Rect) 
 
 pub fn render_text_field(f: &mut Frame, field: &FieldInput, label: &str, focused: bool, area: Rect) {
     let border_style = if focused { theme::border_focused() } else { theme::border_normal() };
-    let (before, after) = field.split_at_cursor();
-    let cursor_char = if after.is_empty() { " " } else { &after[..after.chars().next().map(|c| c.len_utf8()).unwrap_or(1)] };
-    let after_cursor = if after.is_empty() { "" } else { &after[cursor_char.len()..] };
+    let (before_disp, after_disp) = field.split_display_at_cursor();
+    // For cursor char: take the first char of after_disp (1 or 3 bytes for •)
+    let cursor_char: String = after_disp.chars().next()
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| " ".to_string());
+    let after_cursor: String = if after_disp.is_empty() {
+        String::new()
+    } else {
+        after_disp.chars().skip(1).collect()
+    };
 
     let content = if focused {
         Line::from(vec![
-            Span::raw(before),
+            Span::raw(before_disp),
             Span::styled(cursor_char, Style::default().bg(theme::ACCENT_BRIGHT).fg(Color::Black)),
             Span::raw(after_cursor),
         ])
     } else {
-        Line::from(Span::styled(before.to_string() + after, theme::dim()))
+        Line::from(Span::styled(before_disp + &after_disp, theme::dim()))
     };
 
     let para = Paragraph::new(content)

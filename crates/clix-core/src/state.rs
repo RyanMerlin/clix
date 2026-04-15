@@ -49,6 +49,8 @@ impl ClixState {
             let content = std::fs::read_to_string(&state.config_path)?;
             state.config = serde_yaml::from_str(&content)?;
         }
+        #[cfg(target_os = "linux")]
+        crate::secrets::keyring::merge_keyring_into_config(&mut state.config);
         Ok(state)
     }
 
@@ -134,10 +136,18 @@ pub struct InfisicalConfig {
     pub client_id: Option<String>,
     #[serde(default)]
     pub client_secret: Option<String>,
+    #[serde(default)]
+    pub default_project_id: Option<String>,
+    #[serde(default = "default_infisical_env")]
+    pub default_environment: String,
 }
 
 fn default_infisical_url() -> String {
     "https://app.infisical.com".to_string()
+}
+
+fn default_infisical_env() -> String {
+    "dev".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

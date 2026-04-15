@@ -183,7 +183,7 @@ fn render_stub(f: &mut Frame, app: &App, area: Rect) {
 // ─── legend ───────────────────────────────────────────────────────────────────
 
 fn render_legend(f: &mut Frame, app: &App, area: Rect) {
-    let has_overlay = matches!(app.overlay, Overlay::ProfileCreate(_) | Overlay::ProfileSecrets(_) | Overlay::CapabilityCreate(_) | Overlay::PackCreate(_) | Overlay::PackEdit { .. } | Overlay::InstallPack(_) | Overlay::Help);
+    let has_overlay = matches!(app.overlay, Overlay::ProfileCreate(_) | Overlay::ProfileSecrets(_) | Overlay::CapabilityCreate(_) | Overlay::PackCreate(_) | Overlay::PackEdit { .. } | Overlay::InstallPack(_) | Overlay::Help | Overlay::InfisicalSetup(_));
     if has_overlay { return; }
 
     let hints: Vec<Span> = match app.screen {
@@ -195,6 +195,9 @@ fn render_legend(f: &mut Frame, app: &App, area: Rect) {
         ]),
         Screen::Packs => legend_spans(&[
             ("↑↓", "move"), ("n", "new pack"), ("e", "edit caps"), ("i", "install"), ("tab", "next screen"), ("q", "quit"),
+        ]),
+        Screen::Dashboard | Screen::Broker => legend_spans(&[
+            ("0-6", "switch"), ("tab", "next"), ("c", "config"), ("n", "new"), ("r", "reload"), ("?", "help"), ("q", "quit"),
         ]),
         _ => legend_spans(&[
             ("0-6", "switch"), ("tab", "next"), ("n", "new"), ("r", "reload"), ("?", "help"), ("q", "quit"),
@@ -228,6 +231,7 @@ fn render_overlay(f: &mut Frame, app: &App, area: Rect) {
         Overlay::PackCreate(wiz) => wiz.render(f, area),
         Overlay::PackEdit { pack_name, checklist } => render_pack_edit(f, pack_name, checklist, area),
         Overlay::InstallPack(buf) => render_install_pack(f, buf, area),
+        Overlay::InfisicalSetup(state) => state.render(f, area),
     }
 }
 

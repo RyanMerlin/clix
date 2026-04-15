@@ -14,6 +14,7 @@ use clix_core::packs::scaffold::{scaffold_pack, Preset};
 use crate::tui::screens::wizards::pack::{PackWizard, PackWizardAction};
 use crate::tui::screens::wizards::profile::{ProfileWizard, ProfileWizardAction};
 use crate::tui::screens::wizards::capability::{CapabilityWizard, CapWizardAction};
+use crate::tui::screens::infisical_setup::{InfisicalSetupState, InfisicalSetupAction};
 
 // ─── screen ─────────────────────────────────────────────────────────────────
 
@@ -92,6 +93,7 @@ pub enum Overlay {
     InstallPack(String),  // path buffer
     Toast { message: String, is_error: bool, expires_at: std::time::Instant },
     Help,
+    InfisicalSetup(InfisicalSetupState),
 }
 
 impl Overlay {
@@ -249,6 +251,10 @@ impl App {
             KeyCode::Char('s') if self.screen == Screen::Profiles => {
                 self.open_profile_secrets();
             }
+            // c = configure Infisical (Dashboard or Broker)
+            KeyCode::Char('c') if matches!(self.screen, Screen::Dashboard | Screen::Broker) => {
+                self.open_infisical_setup();
+            }
             // Content navigation — arrow keys + page
             KeyCode::Down => self.cursor_down(),
             KeyCode::Up => self.cursor_up(),
@@ -319,6 +325,11 @@ impl App {
         let registry = self.registry.clone();
         let state = SecretsEditState::new(profile, &registry);
         self.overlay = Overlay::ProfileSecrets(state);
+    }
+
+    fn open_infisical_setup(&mut self) {
+        let state = InfisicalSetupState::new(self.infisical_cfg.as_ref());
+        self.overlay = Overlay::InfisicalSetup(state);
     }
 
     fn open_create_wizard(&mut self) {
@@ -409,6 +420,23 @@ impl App {
                 }
                 code => { checklist.handle_key(code); return; }
             }
+        }
+
+        // Infisical setup overlay
+        if let Overlay::InfisicalSetup(ref mut state) = self.overlay {
+            let action = state.handle_key(key.code);
+            match action {
+                InfisicalSetupAction::Cancel => { self.overlay = Overlay::None; }
+                InfisicalSetupAction::Save { site_url, client_id, client_secret, project_id, environment } => {
+                    let res = self.do_save_infisical_config(&site_url, &client_id, &client_secret, &project_id, &environment);
+                    match res {
+                        Ok(msg) => { self.overlay = Overlay::None; let _ = self.reload(); self.toast(&msg, false); }
+                        Err(e) => { self.toast(&format!("Error: {e}"), true); }
+                    }
+                }
+                InfisicalSetupAction::None => {}
+            }
+            return;
         }
 
         // Wizard key delegation
@@ -745,6 +773,56 @@ impl App {
         Ok(format!("Profile '{}' secrets updated ({} bindings)", profile_name, bindings.len()))
     }
 
+    fn do_save_infisical_config(&self, site_url: &str, client_id: &str, client_secret: &str, project_id: &str, environment: &str) -> Result<String> {
+        let state = ClixState::load(home_dir())?;
+        // Try keyring first (Linux only)
+        #[cfg(target_os = "linux")]
+        let keyring_ok = {
+            use clix_core::secrets::keyring::{store_credentials, KeyringResult};
+            matches!(store_credentials(client_id, client_secret), KeyringResult::Ok)
+        };
+        #[cfg(not(target_os = "linux"))]
+        let keyring_ok = false;
+
+        // Read or create config, patch infisical fields
+        let config_path = &state.config_path;
+        let existing = if config_path.exists() {
+            std::fs::read_to_string(config_path)?
+        } else {
+            String::new()
+        };
+        let mut val: serde_yaml::Value = if existing.is_empty() {
+            serde_yaml::Value::Mapping(Default::default())
+        } else {
+            serde_yaml::from_str(&existing)?
+        };
+        let infisical_map = {
+            let mut m = serde_yaml::Mapping::new();
+            m.insert(sv("siteUrl"), sv(site_url));
+            if !project_id.is_empty() {
+                m.insert(sv("defaultProjectId"), sv(project_id));
+            }
+            m.insert(sv("defaultEnvironment"), sv(environment));
+            // Only store credentials in config.yaml if keyring failed
+            if !keyring_ok {
+                m.insert(sv("clientId"), sv(client_id));
+                m.insert(sv("clientSecret"), sv(client_secret));
+            }
+            serde_yaml::Value::Mapping(m)
+        };
+        if let serde_yaml::Value::Mapping(ref mut root) = val {
+            root.insert(sv("infisical"), infisical_map);
+        }
+        std::fs::create_dir_all(config_path.parent().unwrap_or(config_path))?;
+        std::fs::write(config_path, serde_yaml::to_string(&val)?)?;
+
+        if keyring_ok {
+            Ok("Saved to keyring + config.yaml (credentials secured)".to_string())
+        } else {
+            Ok("Saved to config.yaml (keyring unavailable — credentials stored in plaintext)".to_string())
+        }
+    }
+
     fn do_install_pack(&self, path_str: &str) -> Result<String> {
         use clix_core::packs::install::install_pack;
         let state = ClixState::load(home_dir())?;
@@ -752,6 +830,12 @@ impl App {
         install_pack(&path, &state.packs_dir)?;
         Ok(format!("Pack installed from {}", path_str))
     }
+}
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+fn sv(s: &str) -> serde_yaml::Value {
+    serde_yaml::Value::String(s.to_string())
 }
 
 // ─── loaders ─────────────────────────────────────────────────────────────────

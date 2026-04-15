@@ -92,6 +92,13 @@ fn render_onboarding(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("n", theme::accent()),
         Span::raw(" to create a profile"),
     ]));
+    let has_infisical = app.infisical_cfg.is_some();
+    lines.push(Line::from(vec![
+        Span::styled(format!("  {}  ", check(has_infisical)), step_style(has_infisical)),
+        Span::raw("Press "),
+        Span::styled("c", theme::accent()),
+        Span::raw(" to configure Infisical secrets"),
+    ]));
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled("  tip  ", theme::info()),
