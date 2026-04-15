@@ -4,10 +4,16 @@ use crate::error::{ClixError, Result};
 use super::install::copy_dir_all;
 use crate::manifest::loader::load_manifest;
 use crate::manifest::pack::PackManifest;
+use super::signing;
 
 /// Bundle a pack directory into a .clixpack.zip archive with a .sha256 sidecar.
+/// If `signing_key_path` is Some, also writes a `.sig` and `.fingerprint` sidecar.
 /// Returns the path to the created zip.
 pub fn bundle_pack(pack_path: &Path, out_dir: &Path) -> Result<PathBuf> {
+    bundle_pack_signed(pack_path, out_dir, None)
+}
+
+pub fn bundle_pack_signed(pack_path: &Path, out_dir: &Path, signing_key_path: Option<&Path>) -> Result<PathBuf> {
     let manifest_path = ["pack.yaml", "pack.yml", "pack.json"]
         .iter()
         .map(|f| pack_path.join(f))
@@ -30,9 +36,23 @@ pub fn bundle_pack(pack_path: &Path, out_dir: &Path) -> Result<PathBuf> {
     let data = std::fs::read(&zip_path)?;
     let mut hasher = Sha256::new();
     hasher.update(&data);
-    let checksum = hex::encode(hasher.finalize());
+    let sha256_bytes: [u8; 32] = hasher.finalize().into();
+    let checksum = hex::encode(sha256_bytes);
     let sha_path = zip_path.with_extension("clixpack.sha256");
     std::fs::write(&sha_path, format!("{checksum}  {zip_name}\n"))?;
+
+    // Optionally sign
+    if let Some(key_path) = signing_key_path {
+        let signature = signing::sign_bytes(key_path, &sha256_bytes)?;
+        let sig_hex = hex::encode(signature.to_bytes());
+        let sig_path = format!("{}.sig", zip_path.display());
+        std::fs::write(&sig_path, &sig_hex)?;
+
+        let vk = signing::verifying_key_from_private(key_path)?;
+        let fp = signing::key_fingerprint(&vk);
+        let fp_path = format!("{}.fingerprint", zip_path.display());
+        std::fs::write(&fp_path, &fp)?;
+    }
 
     Ok(zip_path)
 }

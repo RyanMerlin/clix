@@ -19,12 +19,15 @@ anyhow     = { workspace = true }
 tokio      = { workspace = true }
 whoami     = { workspace = true }
 dirs       = { workspace = true }
+uuid       = { workspace = true }
 ratatui    = "0.29"
 crossterm  = "0.28"
 rpassword  = { workspace = true }
 chrono     = { workspace = true }
-sha2       = { workspace = true }
-hex        = { workspace = true }
+sha2          = { workspace = true }
+hex           = { workspace = true }
+ed25519-dalek = { workspace = true }
+rand_core     = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc       = { workspace = true }

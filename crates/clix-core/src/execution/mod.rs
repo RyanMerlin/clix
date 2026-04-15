@@ -49,6 +49,16 @@ pub fn run_capability(registry: &CapabilityRegistry, policy: &PolicyBundle, infi
         }
         Decision::RequireApproval { reason } => {
             store.write(&Receipt { id: receipt_id, kind: ReceiptKind::Capability, capability: cap.name.clone(), created_at: Utc::now(), status: ReceiptStatus::PendingApproval, decision: "require_approval".to_string(), reason: Some(reason.clone()), input: input.clone(), context: serde_json::to_value(&ctx).unwrap_or_default(), execution: None, approval: None, sandbox_enforced: sandbox_enforced(), isolation_tier: None, binary_sha256: None, token_mint_id: None, jail_config_digest: None })?;
+            // Try broker-based approval first
+            if worker_registry.is_some() {
+                let ctx_value = serde_json::to_value(&ctx).unwrap_or_default();
+                match approval::wait_for_broker_approval(receipt_id, &cap.name, &input, &ctx_value, reason) {
+                    Ok(outcome) => return Ok(outcome),
+                    Err(e) => {
+                        eprintln!("[clix] broker approval unavailable ({e}), returning pending");
+                    }
+                }
+            }
             return Ok(ExecutionOutcome { ok: false, approval_required: true, receipt_id, result: None, reason: Some(reason.clone()) });
         }
         Decision::Allow => {}

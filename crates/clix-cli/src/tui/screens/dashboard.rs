@@ -3,10 +3,33 @@ use crate::tui::app::App;
 use crate::tui::theme;
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
+    let pending = app.pending_approval_ids.len();
+    let (main_area, banner_area) = if pending > 0 {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
+            .split(area);
+        (chunks[1], Some(chunks[0]))
+    } else {
+        (area, None)
+    };
+
+    if let Some(banner) = banner_area {
+        let first_id = app.pending_approval_ids.first().map(|s| s.as_str()).unwrap_or("");
+        let short_id = &first_id[..first_id.len().min(8)];
+        let msg = format!(
+            " ⚠ {pending} pending approval{} — run `clix approve {short_id}` or press A on Receipts screen ",
+            if pending == 1 { "" } else { "s" }
+        );
+        let banner_widget = Paragraph::new(Line::from(Span::styled(msg, theme::warn())))
+            .style(Style::default().bg(ratatui::style::Color::DarkGray));
+        f.render_widget(banner_widget, banner);
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
-        .split(area);
+        .split(main_area);
 
     render_activity(f, app, chunks[0]);
     render_health(f, app, chunks[1]);

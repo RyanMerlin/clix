@@ -117,6 +117,8 @@ pub struct App {
     pub infisical_cfg: Option<clix_core::state::InfisicalConfig>,
     pub connectivity_report: Option<clix_core::secrets::ConnectivityReport>,
     pub broker_status: Option<crate::tui::screens::broker::BrokerScreenState>,
+    /// Receipt IDs with PendingApproval status, for the approval banner.
+    pub pending_approval_ids: Vec<String>,
     // per-screen cursors
     pub profiles_cursor: usize,
     pub caps_view: CapView,
@@ -141,6 +143,12 @@ impl App {
         let profiles = load_all_profiles(&state);
         let active_profiles = state.config.active_profiles.clone();
         let infisical_cfg = state.config.infisical.clone();
+        // Load pending approvals from receipts DB
+        let pending_approval_ids = clix_core::receipts::ReceiptStore::open(&state.receipts_db)
+            .ok()
+            .and_then(|store| store.list(100, Some("pending_approval")).ok())
+            .map(|receipts| receipts.iter().map(|r| r.id.to_string()).collect())
+            .unwrap_or_default();
         Ok(Self {
             screen: Screen::Dashboard,
             overlay: Overlay::None,
@@ -152,6 +160,7 @@ impl App {
             infisical_cfg,
             connectivity_report: None,
             broker_status: None,
+            pending_approval_ids,
             profiles_cursor: 0,
             caps_view: CapView::Namespaces,
             caps_cursor: 0,
@@ -167,6 +176,7 @@ impl App {
         self.registry = new.registry;
         self.packs = new.packs;
         self.infisical_cfg = new.infisical_cfg;
+        self.pending_approval_ids = new.pending_approval_ids;
         self.profiles_cursor = 0;
         self.caps_view = CapView::Namespaces;
         self.caps_cursor = 0;
@@ -285,6 +295,32 @@ impl App {
                     self.toast(&msg, is_err);
                 } else {
                     self.toast("Infisical not configured — press e to configure", true);
+                }
+            }
+            // A = approve first pending receipt on Receipts screen
+            KeyCode::Char('A') if self.screen == Screen::Receipts => {
+                if let Some(id) = self.pending_approval_ids.first().cloned() {
+                    use uuid::Uuid;
+                    use clix_core::execution::broker_client::BrokerClient;
+                    match id.parse::<Uuid>() {
+                        Ok(uid) => {
+                            match BrokerClient::connect() {
+                                Ok(mut client) => {
+                                    match client.send_approve(uid, whoami::username(), None) {
+                                        Ok(_) => {
+                                            self.pending_approval_ids.retain(|i| i != &id);
+                                            self.toast(&format!("Approved: {id}"), false);
+                                        }
+                                        Err(e) => self.toast(&format!("Approve failed: {e}"), true),
+                                    }
+                                }
+                                Err(e) => self.toast(&format!("Broker unavailable: {e}"), true),
+                            }
+                        }
+                        Err(_) => self.toast("Invalid receipt id", true),
+                    }
+                } else {
+                    self.toast("No pending approvals", false);
                 }
             }
             // Broker screen keys

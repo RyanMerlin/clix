@@ -40,3 +40,6 @@ rpassword          = "7"
 base64             = "0.22"
 which              = "4"
 prometheus         = { version = "0.13", features = ["process"] }
+ed25519-dalek      = { version = "2", features = ["rand_core", "pem"] }
+rand_core          = { version = "0.6", features = ["getrandom"] }
+pkcs8              = { version = "0.10", features = ["pem"] }
