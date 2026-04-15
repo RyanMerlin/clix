@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
         } else {
             output::OutputFormat::from_str(format_str)
         };
-        let outcome = run_capability(&registry, &policy, state.config.infisical.as_ref(), &store, None, &cap_name, inputs, ctx)?;
+        let outcome = run_capability(&registry, &policy, state.config.infisical.as_ref(), &store, None, &cap_name, inputs, ctx, &[])?;
         if format != output::OutputFormat::Json && outcome.result.is_some() {
             let result = outcome.result.as_ref().unwrap();
             print!("{}", output::format_value(result, &format));

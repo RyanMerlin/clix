@@ -2,7 +2,7 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use clix_core::loader::build_registry;
 use clix_core::manifest::pack::PackManifest;
-use clix_core::manifest::profile::ProfileManifest;
+use clix_core::manifest::profile::{ProfileManifest, ProfileSecretBinding};
 use clix_core::registry::CapabilityRegistry;
 use clix_core::state::{home_dir, ClixState};
 use clix_core::manifest::loader::load_dir;
@@ -85,6 +85,7 @@ pub struct ReceiptRow {
 pub enum Overlay {
     None,
     ProfileCreate(ProfileWizard),
+    ProfileSecrets(crate::tui::screens::wizards::profile::SecretsEditState),
     CapabilityCreate(CapabilityWizard),
     PackCreate(PackWizard),
     PackEdit { pack_name: String, checklist: crate::tui::widgets::checklist::Checklist },
@@ -108,6 +109,7 @@ pub struct App {
     pub registry: CapabilityRegistry,
     pub packs: Vec<PackManifest>,
     pub receipts_preview: Vec<ReceiptRow>,
+    pub infisical_cfg: Option<clix_core::state::InfisicalConfig>,
     // per-screen cursors
     pub profiles_cursor: usize,
     pub caps_view: CapView,
@@ -131,6 +133,7 @@ impl App {
         let packs = load_packs_from_dir(&state.packs_dir);
         let profiles = load_all_profiles(&state);
         let active_profiles = state.config.active_profiles.clone();
+        let infisical_cfg = state.config.infisical.clone();
         Ok(Self {
             screen: Screen::Dashboard,
             overlay: Overlay::None,
@@ -139,6 +142,7 @@ impl App {
             registry,
             packs,
             receipts_preview: vec![],
+            infisical_cfg,
             profiles_cursor: 0,
             caps_view: CapView::Namespaces,
             caps_cursor: 0,
@@ -153,6 +157,7 @@ impl App {
         self.active_profiles = new.active_profiles;
         self.registry = new.registry;
         self.packs = new.packs;
+        self.infisical_cfg = new.infisical_cfg;
         self.profiles_cursor = 0;
         self.caps_view = CapView::Namespaces;
         self.caps_cursor = 0;
@@ -240,6 +245,10 @@ impl App {
             KeyCode::Char('e') if self.screen == Screen::Packs => {
                 self.open_pack_edit();
             }
+            // s = edit profile secrets
+            KeyCode::Char('s') if self.screen == Screen::Profiles => {
+                self.open_profile_secrets();
+            }
             // Content navigation — arrow keys + page
             KeyCode::Down => self.cursor_down(),
             KeyCode::Up => self.cursor_up(),
@@ -304,6 +313,14 @@ impl App {
         self.overlay = Overlay::PackEdit { pack_name, checklist };
     }
 
+    fn open_profile_secrets(&mut self) {
+        use crate::tui::screens::wizards::profile::SecretsEditState;
+        let Some(profile) = self.profiles.get(self.profiles_cursor) else { return; };
+        let registry = self.registry.clone();
+        let state = SecretsEditState::new(profile, &registry);
+        self.overlay = Overlay::ProfileSecrets(state);
+    }
+
     fn open_create_wizard(&mut self) {
         match self.screen {
             Screen::Profiles => {
@@ -352,6 +369,26 @@ impl App {
             return;
         }
 
+        // Profile secrets edit overlay
+        if let Overlay::ProfileSecrets(ref mut state) = self.overlay {
+            use crate::tui::screens::wizards::profile::SecretsEditAction;
+            let infisical = self.infisical_cfg.clone();
+            let action = state.handle_key(key.code, infisical.as_ref());
+            match action {
+                SecretsEditAction::Cancel => { self.overlay = Overlay::None; }
+                SecretsEditAction::Save(bindings) => {
+                    let profile_name = state.profile_name.clone();
+                    let res = self.do_save_profile_secrets(&profile_name, &bindings);
+                    match res {
+                        Ok(msg) => { self.overlay = Overlay::None; let _ = self.reload(); self.toast(&msg, false); }
+                        Err(e) => { self.toast(&format!("Error: {e}"), true); }
+                    }
+                }
+                SecretsEditAction::None => {}
+            }
+            return;
+        }
+
         // Pack edit overlay
         if let Overlay::PackEdit { ref pack_name, ref mut checklist } = self.overlay {
             match key.code {
@@ -376,20 +413,30 @@ impl App {
 
         // Wizard key delegation
         let code = key.code;
-        let result: Option<Result<String>> = match &mut self.overlay {
-            Overlay::ProfileCreate(wiz) => {
-                let action = wiz.handle_key(code);
-                match action {
-                    ProfileWizardAction::Cancel => {
-                        self.overlay = Overlay::None;
-                        None
-                    }
-                    ProfileWizardAction::Submit { name, description, capabilities } => {
-                        Some(self.do_create_profile(&name, &description, &capabilities))
-                    }
-                    ProfileWizardAction::None => None,
+        // ProfileCreate: pass registry + infisical so the Secrets step can build rows + open picker
+        if let Overlay::ProfileCreate(ref mut wiz) = self.overlay {
+            // Clone refs so we can borrow self mutably inside
+            let registry = self.registry.clone();
+            let infisical = self.infisical_cfg.clone();
+            let action = wiz.handle_key(code, Some(&registry), infisical.as_ref());
+            let result: Option<Result<String>> = match action {
+                ProfileWizardAction::Cancel => { self.overlay = Overlay::None; None }
+                ProfileWizardAction::Submit { name, description, capabilities, secret_bindings } => {
+                    Some(self.do_create_profile(&name, &description, &capabilities, &secret_bindings))
+                }
+                ProfileWizardAction::None => None,
+            };
+            if let Some(res) = result {
+                match res {
+                    Ok(msg) => { self.overlay = Overlay::None; let _ = self.reload(); self.toast(&msg, false); }
+                    Err(e) => { self.toast(&format!("Error: {e}"), true); }
                 }
             }
+            return;
+        }
+
+        let result: Option<Result<String>> = match &mut self.overlay {
+            Overlay::ProfileCreate(_) => None, // handled above
             Overlay::CapabilityCreate(wiz) => {
                 let action = wiz.handle_key(code);
                 match action {
@@ -538,7 +585,7 @@ impl App {
 
     // ─── write operations ─────────────────────────────────────────────────────
 
-    fn do_create_profile(&self, name: &str, description: &str, capabilities: &[String]) -> Result<String> {
+    fn do_create_profile(&self, name: &str, description: &str, capabilities: &[String], secret_bindings: &[ProfileSecretBinding]) -> Result<String> {
         let state = ClixState::load(home_dir())?;
         let manifest = ProfileManifest {
             name: name.to_string(),
@@ -548,6 +595,7 @@ impl App {
             workflows: vec![],
             settings: serde_json::Value::Null,
             isolation_defaults: Default::default(),
+            secret_bindings: secret_bindings.to_vec(),
         };
         let yaml = serde_yaml::to_string(&manifest)?;
         let path = state.profiles_dir.join(format!("{}.yaml", name));
@@ -681,6 +729,22 @@ impl App {
         Ok(format!("Pack '{}' updated with {} capabilities", pack_name, capability_names.len()))
     }
 
+    fn do_save_profile_secrets(&self, profile_name: &str, bindings: &[ProfileSecretBinding]) -> Result<String> {
+        let state = ClixState::load(home_dir())?;
+        let path = state.profiles_dir.join(format!("{}.yaml", profile_name));
+        if !path.exists() {
+            return Err(anyhow::anyhow!("Profile file not found: {}", path.display()));
+        }
+        let existing = std::fs::read_to_string(&path)?;
+        let mut val: serde_yaml::Value = serde_yaml::from_str(&existing)?;
+        if let serde_yaml::Value::Mapping(ref mut m) = val {
+            let bindings_yaml = serde_yaml::to_value(bindings)?;
+            m.insert(serde_yaml::Value::String("secretBindings".into()), bindings_yaml);
+        }
+        std::fs::write(&path, serde_yaml::to_string(&val)?)?;
+        Ok(format!("Profile '{}' secrets updated ({} bindings)", profile_name, bindings.len()))
+    }
+
     fn do_install_pack(&self, path_str: &str) -> Result<String> {
         use clix_core::packs::install::install_pack;
         let state = ClixState::load(home_dir())?;
@@ -714,7 +778,16 @@ fn load_profiles_from_packs(packs_dir: &std::path::Path) -> Vec<ProfileManifest>
 }
 
 fn load_all_profiles(state: &ClixState) -> Vec<ProfileManifest> {
-    let mut all: Vec<ProfileManifest> = load_dir(&state.profiles_dir).unwrap_or_default();
-    all.extend(load_profiles_from_packs(&state.packs_dir));
-    all
+    use std::collections::HashMap;
+    // Global profiles win over pack-shipped ones (user-level override)
+    let mut by_name: HashMap<String, ProfileManifest> = HashMap::new();
+    for p in load_dir::<ProfileManifest>(&state.profiles_dir).unwrap_or_default() {
+        by_name.insert(p.name.clone(), p);
+    }
+    for p in load_profiles_from_packs(&state.packs_dir) {
+        by_name.entry(p.name.clone()).or_insert(p);
+    }
+    let mut profiles: Vec<ProfileManifest> = by_name.into_values().collect();
+    profiles.sort_by(|a, b| a.name.cmp(&b.name));
+    profiles
 }

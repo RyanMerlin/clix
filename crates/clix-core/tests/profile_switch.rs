@@ -142,7 +142,7 @@ fn test_profile_policy_isolation_no_cross_contamination() {
     };
     let outcome_ro = run_capability(
         &registry, &policy_ro, None, &store_ro, None,
-        "gcloud.projects.list", serde_json::json!({}), ctx_ro,
+        "gcloud.projects.list", serde_json::json!({}), ctx_ro, &[],
     ).unwrap();
     assert!(!outcome_ro.ok, "readonly profile should deny");
 
@@ -157,7 +157,7 @@ fn test_profile_policy_isolation_no_cross_contamination() {
     };
     let outcome_rw = run_capability(
         &registry, &policy_rw, None, &store_rw, None,
-        "gcloud.projects.list", serde_json::json!({}), ctx_rw,
+        "gcloud.projects.list", serde_json::json!({}), ctx_rw, &[],
     ).unwrap();
     assert!(outcome_rw.ok, "write profile should allow");
 

@@ -49,15 +49,22 @@ pub fn load_policy(state: &ClixState) -> Result<PolicyBundle> {
 }
 
 fn load_active_profiles(state: &ClixState) -> Result<Vec<crate::manifest::profile::ProfileManifest>> {
-    let mut all: Vec<crate::manifest::profile::ProfileManifest> = load_dir(&state.profiles_dir)?;
+    use std::collections::HashMap;
+    use crate::manifest::profile::ProfileManifest;
+    // Global profiles win over pack-shipped profiles (user override)
+    let mut by_name: HashMap<String, ProfileManifest> = HashMap::new();
+    for p in load_dir::<ProfileManifest>(&state.profiles_dir)? {
+        by_name.insert(p.name.clone(), p);
+    }
     if state.packs_dir.exists() {
         for entry in std::fs::read_dir(&state.packs_dir)? {
             let entry = entry?;
             if entry.file_type()?.is_dir() {
-                let mut pps = load_dir(&entry.path().join("profiles"))?;
-                all.append(&mut pps);
+                for p in load_dir::<ProfileManifest>(&entry.path().join("profiles"))? {
+                    by_name.entry(p.name.clone()).or_insert(p);
+                }
             }
         }
     }
-    Ok(all.into_iter().filter(|p| state.config.active_profiles.contains(&p.name)).collect())
+    Ok(by_name.into_values().filter(|p| state.config.active_profiles.contains(&p.name)).collect())
 }

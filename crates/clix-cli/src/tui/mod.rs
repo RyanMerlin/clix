@@ -183,12 +183,12 @@ fn render_stub(f: &mut Frame, app: &App, area: Rect) {
 // ─── legend ───────────────────────────────────────────────────────────────────
 
 fn render_legend(f: &mut Frame, app: &App, area: Rect) {
-    let has_overlay = matches!(app.overlay, Overlay::ProfileCreate(_) | Overlay::CapabilityCreate(_) | Overlay::PackCreate(_) | Overlay::PackEdit { .. } | Overlay::InstallPack(_) | Overlay::Help);
+    let has_overlay = matches!(app.overlay, Overlay::ProfileCreate(_) | Overlay::ProfileSecrets(_) | Overlay::CapabilityCreate(_) | Overlay::PackCreate(_) | Overlay::PackEdit { .. } | Overlay::InstallPack(_) | Overlay::Help);
     if has_overlay { return; }
 
     let hints: Vec<Span> = match app.screen {
         Screen::Profiles => legend_spans(&[
-            ("↑↓", "move"), ("enter", "toggle"), ("n", "new"), ("tab", "next screen"), ("?", "help"), ("q", "quit"),
+            ("↑↓", "move"), ("enter", "toggle"), ("s", "secrets"), ("n", "new"), ("tab", "next screen"), ("?", "help"), ("q", "quit"),
         ]),
         Screen::Capabilities => legend_spans(&[
             ("↑↓", "move"), ("enter", "drill in"), ("esc", "back"), ("n", "new"), ("tab", "next screen"), ("q", "quit"),
@@ -223,6 +223,7 @@ fn render_overlay(f: &mut Frame, app: &App, area: Rect) {
         Overlay::Toast { message, is_error, .. } => render_toast(f, message, *is_error, area),
         Overlay::Help => render_help(f, area),
         Overlay::ProfileCreate(wiz) => wiz.render(f, area),
+        Overlay::ProfileSecrets(state) => state.render(f, area),
         Overlay::CapabilityCreate(wiz) => wiz.render(f, area),
         Overlay::PackCreate(wiz) => wiz.render(f, area),
         Overlay::PackEdit { pack_name, checklist } => render_pack_edit(f, pack_name, checklist, area),

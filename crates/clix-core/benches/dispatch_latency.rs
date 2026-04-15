@@ -54,7 +54,7 @@ fn bench_builtin_dispatch(c: &mut Criterion) {
         b.iter(|| {
             run_capability(
                 &registry, &policy, None, &store, None,
-                "sys.date", input.clone(), ctx(),
+                "sys.date", input.clone(), ctx(), &[],
             ).unwrap()
         })
     });
@@ -81,7 +81,7 @@ fn bench_policy_deny(c: &mut Criterion) {
         b.iter(|| {
             run_capability(
                 &registry, &policy, None, &store, None,
-                "sys.date", input.clone(), ctx(),
+                "sys.date", input.clone(), ctx(), &[],
             ).unwrap()
         })
     });

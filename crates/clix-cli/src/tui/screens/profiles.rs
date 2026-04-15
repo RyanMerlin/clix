@@ -103,10 +103,38 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
         if cap_count > 10 {
             lines.push(Line::from(Span::styled(format!("    … {} more", cap_count - 10), theme::muted())));
         }
+        // Secret bindings section
+        let sb_count = profile.secret_bindings.len();
+        if sb_count > 0 {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("  Secrets     ", theme::muted()),
+                Span::styled(format!("  {} bound", sb_count), theme::ok()),
+            ]));
+            for binding in profile.secret_bindings.iter().take(5) {
+                use clix_core::manifest::capability::CredentialSource;
+                let src_display = match &binding.source {
+                    CredentialSource::Infisical { secret_ref, .. } =>
+                        format!("Infisical {}/{}", secret_ref.secret_path.trim_end_matches('/'), secret_ref.secret_name),
+                    CredentialSource::Env { env_var, .. } => format!("env ${}", env_var),
+                    CredentialSource::Literal { .. } => "literal ••••".to_string(),
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("    {:<20}", binding.inject_as), theme::muted()),
+                    Span::styled(src_display, theme::dim()),
+                ]));
+            }
+            if sb_count > 5 {
+                lines.push(Line::from(Span::styled(format!("    … {} more", sb_count - 5), theme::muted())));
+            }
+        }
+
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
             Span::styled("  enter", theme::accent()),
             Span::raw(if is_active { " deactivate" } else { " activate" }),
+            Span::styled("   s", theme::accent()),
+            Span::raw(" edit secrets"),
         ]));
 
         let inner = block.inner(area);

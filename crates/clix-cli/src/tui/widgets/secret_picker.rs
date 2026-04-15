@@ -1,0 +1,255 @@
+use crossterm::event::KeyCode;
+use ratatui::{prelude::*, widgets::*};
+use clix_core::manifest::capability::InfisicalRef;
+use clix_core::state::InfisicalConfig;
+use clix_core::secrets::{list_infisical_folders, list_infisical_secrets};
+use crate::tui::theme;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum EntryKind {
+    Folder,
+    Secret,
+}
+
+#[derive(Debug, Clone)]
+pub struct Entry {
+    pub kind: EntryKind,
+    pub name: String,
+}
+
+/// A live-loading Infisical folder/secret browser.
+/// Returns an `InfisicalRef` when the user selects a secret key.
+#[derive(Debug, Clone)]
+pub struct SecretPicker {
+    pub project_id: String,
+    pub environment: String,
+    /// Stack of path segments; current path = "/".join(stack)
+    pub path_stack: Vec<String>,
+    pub entries: Vec<Entry>,
+    pub cursor: usize,
+    pub error: Option<String>,
+    /// Set after a successful load attempt (even if empty)
+    pub loaded: bool,
+}
+
+impl SecretPicker {
+    pub fn new(project_id: &str, environment: &str) -> Self {
+        Self {
+            project_id: project_id.to_string(),
+            environment: environment.to_string(),
+            path_stack: vec![],
+            entries: vec![],
+            cursor: 0,
+            error: None,
+            loaded: false,
+        }
+    }
+
+    pub fn current_path(&self) -> String {
+        if self.path_stack.is_empty() {
+            "/".to_string()
+        } else {
+            format!("/{}/", self.path_stack.join("/"))
+        }
+    }
+
+    /// Load entries for the current path. Blocking — call before first render or after navigation.
+    pub fn load(&mut self, cfg: &InfisicalConfig) {
+        self.error = None;
+        self.loaded = false;
+        let path = self.current_path();
+        let mut entries: Vec<Entry> = vec![];
+
+        // Folders first
+        match list_infisical_folders(cfg, &self.project_id, &self.environment, &path) {
+            Ok(folders) => {
+                for name in folders {
+                    entries.push(Entry { kind: EntryKind::Folder, name });
+                }
+            }
+            Err(e) => {
+                self.error = Some(format!("Folder list failed: {e}"));
+                self.loaded = true;
+                return;
+            }
+        }
+
+        // Then secrets
+        match list_infisical_secrets(cfg, &self.project_id, &self.environment, &path) {
+            Ok(secrets) => {
+                for name in secrets {
+                    entries.push(Entry { kind: EntryKind::Secret, name });
+                }
+            }
+            Err(e) => {
+                self.error = Some(format!("Secret list failed: {e}"));
+                self.loaded = true;
+                return;
+            }
+        }
+
+        self.entries = entries;
+        self.cursor = 0;
+        self.loaded = true;
+    }
+
+    /// Returns a bound `InfisicalRef` if the cursor is on a secret and Enter was pressed.
+    pub fn handle_key(&mut self, code: KeyCode, cfg: Option<&InfisicalConfig>) -> SecretPickerAction {
+        match code {
+            KeyCode::Esc => return SecretPickerAction::Cancel,
+            KeyCode::Up => {
+                if self.cursor > 0 { self.cursor -= 1; }
+            }
+            KeyCode::Down => {
+                if self.cursor + 1 < self.entries.len() { self.cursor += 1; }
+            }
+            KeyCode::PageUp => {
+                self.cursor = self.cursor.saturating_sub(10);
+            }
+            KeyCode::PageDown => {
+                self.cursor = (self.cursor + 10).min(self.entries.len().saturating_sub(1));
+            }
+            KeyCode::Backspace => {
+                if !self.path_stack.is_empty() {
+                    self.path_stack.pop();
+                    if let Some(cfg) = cfg { self.load(cfg); }
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(entry) = self.entries.get(self.cursor) {
+                    match entry.kind {
+                        EntryKind::Folder => {
+                            self.path_stack.push(entry.name.clone());
+                            if let Some(cfg) = cfg { self.load(cfg); }
+                        }
+                        EntryKind::Secret => {
+                            let path = if self.path_stack.is_empty() {
+                                "/".to_string()
+                            } else {
+                                format!("/{}", self.path_stack.join("/"))
+                            };
+                            return SecretPickerAction::Selected(InfisicalRef {
+                                secret_name: entry.name.clone(),
+                                project_id: Some(self.project_id.clone()),
+                                environment: self.environment.clone(),
+                                secret_path: path,
+                            });
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        SecretPickerAction::None
+    }
+
+    pub fn render(&self, f: &mut Frame, area: Rect) {
+        let width = area.width.saturating_sub(4).max(50).min(80);
+        let height = area.height.saturating_sub(4).max(12).min(24);
+        let x = (area.width.saturating_sub(width)) / 2;
+        let y = (area.height.saturating_sub(height)) / 2;
+        let dialog = Rect::new(x, y, width, height);
+
+        f.render_widget(Clear, dialog);
+
+        let title = format!(
+            " Infisical · {} · {} ",
+            self.project_id, self.environment
+        );
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(Span::styled(title, theme::accent_bold()))
+            .border_style(theme::border_focused());
+        let inner = block.inner(dialog);
+        f.render_widget(block, dialog);
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),  // path breadcrumb
+                Constraint::Min(0),     // entry list
+                Constraint::Length(1),  // hint
+            ])
+            .split(inner);
+
+        // Breadcrumb
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                format!(" Path: {}", self.current_path()),
+                theme::dim(),
+            )),
+            chunks[0],
+        );
+
+        // Entry list
+        if let Some(err) = &self.error {
+            f.render_widget(
+                Paragraph::new(Span::styled(err.as_str(), theme::danger())),
+                chunks[1],
+            );
+        } else if !self.loaded {
+            f.render_widget(
+                Paragraph::new(Span::styled("  Loading …", theme::muted())),
+                chunks[1],
+            );
+        } else {
+            // ".." go-up row if not at root
+            let show_up = !self.path_stack.is_empty();
+            let entry_offset = if show_up { 1 } else { 0 };
+            let total_rows = self.entries.len() + entry_offset;
+
+            let items: Vec<ListItem> = (0..total_rows).map(|row| {
+                if show_up && row == 0 {
+                    let style = if self.cursor == 0 { theme::selected() } else { theme::muted() };
+                    ListItem::new(Line::from(vec![
+                        Span::styled("  ", style),
+                        Span::styled("↑  ..", style),
+                    ]))
+                } else {
+                    let entry = &self.entries[row - entry_offset];
+                    let is_cursor = row == self.cursor;
+                    let (icon, style) = match entry.kind {
+                        EntryKind::Folder => (
+                            "▸  ",
+                            if is_cursor { theme::selected() } else { theme::accent() },
+                        ),
+                        EntryKind::Secret => (
+                            "🔑 ",
+                            if is_cursor { theme::selected() } else { theme::normal() },
+                        ),
+                    };
+                    ListItem::new(Line::from(vec![
+                        Span::styled(format!("  {}{}", icon, entry.name), style),
+                    ]))
+                }
+            }).collect();
+
+            if items.is_empty() {
+                f.render_widget(
+                    Paragraph::new(Span::styled("  (empty)", theme::inactive())),
+                    chunks[1],
+                );
+            } else {
+                let list = List::new(items)
+                    .highlight_style(theme::selected());
+                let mut state = ListState::default();
+                state.select(Some(self.cursor));
+                f.render_stateful_widget(list, chunks[1], &mut state);
+            }
+        }
+
+        // Hint
+        f.render_widget(
+            Paragraph::new(
+                "↑↓ move  enter: open/bind  backspace: up  pgup/dn: page  esc: cancel"
+            ).style(theme::muted()),
+            chunks[2],
+        );
+    }
+}
+
+pub enum SecretPickerAction {
+    None,
+    Cancel,
+    Selected(InfisicalRef),
+}

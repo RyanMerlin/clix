@@ -16,6 +16,7 @@ use crate::receipts::{Receipt, ReceiptKind, ReceiptStatus, ReceiptStore};
 use crate::registry::{CapabilityRegistry, WorkflowRegistry};
 use crate::sandbox::sandbox_enforced;
 use crate::schema::validate_input;
+use crate::manifest::profile::ProfileSecretBinding;
 use crate::secrets::{resolve_credentials, SecretRedactor};
 use crate::state::InfisicalConfig;
 use crate::template::render_args;
@@ -34,7 +35,7 @@ pub struct ExecutionOutcome {
     pub reason: Option<String>,
 }
 
-pub fn run_capability(registry: &CapabilityRegistry, policy: &PolicyBundle, infisical: Option<&InfisicalConfig>, store: &ReceiptStore, worker_registry: Option<&Arc<WorkerRegistry>>, name: &str, input: serde_json::Value, ctx: ExecutionContext) -> Result<ExecutionOutcome> {
+pub fn run_capability(registry: &CapabilityRegistry, policy: &PolicyBundle, infisical: Option<&InfisicalConfig>, store: &ReceiptStore, worker_registry: Option<&Arc<WorkerRegistry>>, name: &str, input: serde_json::Value, ctx: ExecutionContext, profile_bindings: &[ProfileSecretBinding]) -> Result<ExecutionOutcome> {
     let cap = registry.get(name).ok_or_else(|| ClixError::CapabilityNotFound(name.to_string()))?.clone();
     validate_input(&cap.input_schema, &input)?;
     let decision = evaluate_policy(policy, &ctx, &cap);
@@ -63,7 +64,7 @@ pub fn run_capability(registry: &CapabilityRegistry, policy: &PolicyBundle, infi
         store.write(&Receipt { id: receipt_id, kind: ReceiptKind::Capability, capability: cap.name.clone(), created_at: Utc::now(), status: ReceiptStatus::Denied, decision: "deny".to_string(), reason: Some(reason.clone()), input: input.clone(), context: serde_json::to_value(&ctx).unwrap_or_default(), execution: None, approval: None, sandbox_enforced: sandbox_enforced(), isolation_tier: None, binary_sha256: None, token_mint_id: None, jail_config_digest: None })?;
         return Ok(ExecutionOutcome { ok: false, approval_required: false, receipt_id, result: None, reason: Some(reason) });
     }
-    let secrets = resolve_credentials(&cap.credentials, infisical)?;
+    let secrets = resolve_credentials(&cap.credentials, infisical, profile_bindings)?;
     let redactor = SecretRedactor::new(secrets.clone());
     let exec_result = match &cap.backend {
         Backend::Builtin { name } => builtin_handler(name, &input)?,
@@ -107,7 +108,7 @@ pub fn run_workflow(cap_registry: &CapabilityRegistry, wf_registry: &WorkflowReg
     let mut outcomes = vec![];
     for step in &wf.steps {
         let step_input = merge_inputs(&input, &step.input);
-        let outcome = run_capability(cap_registry, policy, infisical, store, worker_registry, &step.capability, step_input, ctx.clone())?;
+        let outcome = run_capability(cap_registry, policy, infisical, store, worker_registry, &step.capability, step_input, ctx.clone(), &[])?;
         let failed = !outcome.ok;
         outcomes.push(outcome);
         if failed { match step.on_failure { StepFailurePolicy::Abort => break, StepFailurePolicy::Continue => {} } }
@@ -147,14 +148,14 @@ mod tests {
     #[test]
     fn test_run_builtin() {
         let reg = CapabilityRegistry::from_vec(vec![date_cap()]);
-        let outcome = run_capability(&reg, &PolicyBundle::default(), None, &store(), None, "sys.date", serde_json::json!({}), ctx()).unwrap();
+        let outcome = run_capability(&reg, &PolicyBundle::default(), None, &store(), None, "sys.date", serde_json::json!({}), ctx(), &[]).unwrap();
         assert!(outcome.ok);
     }
 
     #[test]
     fn test_unknown_capability_errors() {
         let reg = CapabilityRegistry::from_vec(vec![]);
-        assert!(run_capability(&reg, &PolicyBundle::default(), None, &store(), None, "nope", serde_json::json!({}), ctx()).is_err());
+        assert!(run_capability(&reg, &PolicyBundle::default(), None, &store(), None, "nope", serde_json::json!({}), ctx(), &[]).is_err());
     }
 
     #[test]
@@ -163,7 +164,7 @@ mod tests {
         let mut policy = PolicyBundle::default();
         policy.rules.push(PolicyRule { capability: Some("sys.date".to_string()), action: PolicyAction::Deny, reason: Some("test".to_string()), ..Default::default() });
         let store = store();
-        let outcome = run_capability(&reg, &policy, None, &store, None, "sys.date", serde_json::json!({}), ctx()).unwrap();
+        let outcome = run_capability(&reg, &policy, None, &store, None, "sys.date", serde_json::json!({}), ctx(), &[]).unwrap();
         assert!(!outcome.ok);
         assert_eq!(store.list(10, Some("denied")).unwrap().len(), 1);
     }

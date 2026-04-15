@@ -1,5 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize};
-use super::capability::IsolationTier;
+use super::capability::{CredentialSource, IsolationTier};
 
 /// Deserialize a capability entry that is either a plain string name
 /// or a full capability object (legacy format) — we only keep the name.
@@ -59,6 +59,20 @@ pub struct ProfileManifest {
     /// Profile-wide isolation defaults. Individual capabilities can override.
     #[serde(default)]
     pub isolation_defaults: IsolationDefaults,
+    /// Secret bindings for this profile. Override capability-declared credential sources at execution time.
+    #[serde(default)]
+    pub secret_bindings: Vec<ProfileSecretBinding>,
+}
+
+/// Binds an environment variable name to a concrete credential source at the profile level.
+/// At execution time this overrides any same-named binding declared by the capability itself.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileSecretBinding {
+    /// The env var name that will be injected into the process (matches `inject_as` in CredentialSource).
+    pub inject_as: String,
+    /// Where to source the value.
+    pub source: CredentialSource,
 }
 
 /// Profile-level defaults that apply to all capabilities unless overridden at capability level.
