@@ -126,6 +126,61 @@ impl ReceiptStore {
         Ok(receipts)
     }
 
+    /// Export all receipts optionally filtered by status and/or a minimum created_at timestamp.
+    /// Returns receipts in ascending chronological order.  No LIMIT — export is unbounded.
+    pub fn export(&self, status_filter: Option<&str>, since: Option<DateTime<Utc>>) -> Result<Vec<Receipt>> {
+        let since_str = since.map(|dt| dt.to_rfc3339());
+        let mut stmt = self.conn.prepare(
+            "SELECT id,kind,capability,created_at,status,decision,reason,input,context,execution,approval,sandbox_enforced,isolation_tier,binary_sha256,token_mint_id,jail_config_digest \
+             FROM receipts \
+             WHERE (?1 IS NULL OR status = ?1) AND (?2 IS NULL OR created_at >= ?2) \
+             ORDER BY created_at ASC"
+        ).map_err(|e| ClixError::Config(e.to_string()))?;
+        let rows = stmt.query_map(rusqlite::params![status_filter, since_str], |row| {
+            Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?,
+                row.get::<_,String>(3)?, row.get::<_,String>(4)?, row.get::<_,String>(5)?,
+                row.get::<_,Option<String>>(6)?, row.get::<_,String>(7)?, row.get::<_,String>(8)?,
+                row.get::<_,Option<String>>(9)?, row.get::<_,Option<String>>(10)?, row.get::<_,i64>(11)?,
+                row.get::<_,Option<String>>(12)?, row.get::<_,Option<String>>(13)?,
+                row.get::<_,Option<String>>(14)?, row.get::<_,Option<String>>(15)?))
+        }).map_err(|e| ClixError::Config(e.to_string()))?;
+        let mut receipts = vec![];
+        for row in rows {
+            let (id,kind,cap,created_at,status,decision,reason,input,context,execution,approval,sandbox_enforced,
+                 isolation_tier,binary_sha256,token_mint_id,jail_config_digest) =
+                row.map_err(|e| ClixError::Config(e.to_string()))?;
+            receipts.push(Receipt {
+                id: Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::new_v4()),
+                kind: serde_json::from_str(&kind).unwrap_or(ReceiptKind::Capability),
+                capability: cap,
+                created_at: created_at.parse().unwrap_or_else(|_| Utc::now()),
+                status: parse_status(&status),
+                decision, reason,
+                input: serde_json::from_str(&input).unwrap_or(serde_json::Value::Null),
+                context: serde_json::from_str(&context).unwrap_or(serde_json::Value::Null),
+                execution: execution.as_deref().and_then(|s| serde_json::from_str(s).ok()),
+                approval: approval.as_deref().and_then(|s| serde_json::from_str(s).ok()),
+                sandbox_enforced: sandbox_enforced != 0,
+                isolation_tier, binary_sha256, token_mint_id, jail_config_digest,
+            });
+        }
+        Ok(receipts)
+    }
+
+    /// Count receipts grouped by status.  Returns (total, succeeded, denied, failed, pending_approval).
+    pub fn count_by_status(&self) -> Result<(usize, usize, usize, usize, usize)> {
+        let total: i64 = self.conn.query_row("SELECT COUNT(*) FROM receipts", [], |r| r.get(0))
+            .map_err(|e| ClixError::Config(e.to_string()))?;
+        let count = |s: &str| -> Result<i64> {
+            self.conn.query_row(
+                "SELECT COUNT(*) FROM receipts WHERE status = ?1",
+                rusqlite::params![s], |r| r.get(0))
+                .map_err(|e| ClixError::Config(e.to_string()))
+        };
+        Ok((total as usize, count("succeeded")? as usize, count("denied")? as usize,
+            count("failed")? as usize, count("pending_approval")? as usize))
+    }
+
     pub fn get(&self, id: &str) -> Result<Option<Receipt>> {
         let mut stmt = self.conn.prepare(
             "SELECT id,kind,capability,created_at,status,decision,reason,input,context,execution,approval,sandbox_enforced,isolation_tier,binary_sha256,token_mint_id,jail_config_digest FROM receipts WHERE id = ?1"

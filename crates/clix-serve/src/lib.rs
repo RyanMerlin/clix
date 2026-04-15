@@ -1,5 +1,6 @@
 pub mod dispatch;
 pub mod methods;
+pub mod metrics;
 pub mod transport;
 pub use dispatch::{dispatch, ServeState};
 
@@ -11,6 +12,7 @@ use clix_core::receipts::ReceiptStore;
 use clix_core::state::{home_dir, ClixState};
 
 pub fn build_serve_state() -> Result<Arc<ServeState>> {
+    metrics::init();
     let state = ClixState::load(home_dir())?;
     state.ensure_dirs()?;
     let cap_registry = build_registry(&state)?;

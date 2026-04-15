@@ -135,6 +135,8 @@ async fn dispatch_static(cli: Cli) -> Result<()> {
             ReceiptsCmd::List { limit, status, json } => commands::receipts::list(limit, status.as_deref(), json)?,
             ReceiptsCmd::Show { id, json } => commands::receipts::show(&id, json)?,
             ReceiptsCmd::Tail => commands::receipts::tail()?,
+            ReceiptsCmd::Export { status, since, format, output } =>
+                commands::receipts::export(status, since, format, output)?,
         },
         Commands::Serve { socket, http } => commands::serve::run(socket, http).await?,
         Commands::Tui => commands::tui::run()?,

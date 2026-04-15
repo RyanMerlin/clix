@@ -62,10 +62,24 @@ pub async fn tools_call(serve: &Arc<ServeState>, params: &serde_json::Value) -> 
     };
     let serve_clone = Arc::clone(serve);
     let name = name.to_string();
+    let cap_name_for_metrics = name.clone();
     let outcome = tokio::task::spawn_blocking(move || {
         let store = serve_clone.store.lock().unwrap();
         run_capability(&serve_clone.cap_registry, &serve_clone.policy, serve_clone.state.config.infisical.as_ref(), &store, serve_clone.worker_registry.as_ref(), &name, arguments, ctx, &[])
-    }).await.map_err(|e| format!("task join: {e}"))?.map_err(|e| e.to_string())?;
+    }).await.map_err(|e| format!("task join: {e}"))?;
+    let outcome = match outcome {
+        Ok(o) => {
+            let status = if o.ok { "succeeded" } else if o.approval_required { "pending_approval" } else { "denied" };
+            crate::metrics::record_call(&cap_name_for_metrics, status);
+            if !o.ok && !o.approval_required { crate::metrics::record_denial(&cap_name_for_metrics); }
+            o
+        }
+        Err(e) => {
+            crate::metrics::record_call(&cap_name_for_metrics, "error");
+            crate::metrics::record_error(&cap_name_for_metrics);
+            return Err(e.to_string());
+        }
+    };
     let content = if let Some(result) = &outcome.result {
         if let Some(stdout) = result["stdout"].as_str() {
             vec![serde_json::json!({"type":"text","text":stdout})]

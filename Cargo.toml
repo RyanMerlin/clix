@@ -38,3 +38,5 @@ criterion          = { version = "0.5", features = ["html_reports"] }
 keyring            = { version = "3", features = ["async-secret-service", "async-io", "crypto-rust"] }
 rpassword          = "7"
 base64             = "0.22"
+which              = "4"
+prometheus         = { version = "0.13", features = ["process"] }

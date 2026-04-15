@@ -12,3 +12,4 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 anyhow     = { workspace = true }
 tracing    = { workspace = true }
+prometheus = { workspace = true }

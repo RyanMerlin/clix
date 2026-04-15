@@ -143,6 +143,21 @@ pub enum ReceiptsCmd {
     },
     Show { id: String, #[arg(long)] json: bool },
     Tail,
+    /// Export receipts as JSONL or JSON array
+    Export {
+        /// Filter by status (succeeded, denied, failed, pending_approval)
+        #[arg(long)]
+        status: Option<String>,
+        /// Only export receipts after this ISO-8601 timestamp
+        #[arg(long)]
+        since: Option<String>,
+        /// Output format: jsonl (default) or json
+        #[arg(long, default_value = "jsonl")]
+        format: String,
+        /// Output file (default: stdout)
+        #[arg(long, short)]
+        output: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]

@@ -21,6 +21,7 @@ use crate::secrets::{resolve_credentials, SecretRedactor};
 use crate::state::InfisicalConfig;
 use crate::template::render_args;
 use backends::{builtin_handler, expand_secret_refs, run_isolated, run_remote, run_subprocess};
+use sha2::Digest;
 use validators::run_validators;
 use worker_registry::WorkerRegistry;
 use std::sync::Arc;
@@ -66,12 +67,15 @@ pub fn run_capability(registry: &CapabilityRegistry, policy: &PolicyBundle, infi
     }
     let secrets = resolve_credentials(&cap.credentials, infisical, profile_bindings, &[])?;
     let redactor = SecretRedactor::new(secrets.clone());
+    let mut binary_sha256: Option<String> = None;
+    let mut token_mint_id: Option<String> = None;
     let exec_result = match &cap.backend {
         Backend::Builtin { name } => builtin_handler(name, &input)?,
         Backend::Subprocess { command, cwd_from_input, .. } => {
             let cwd = if let Some(key) = cwd_from_input {
                 input[key].as_str().map(std::path::PathBuf::from).unwrap_or_else(|| ctx.cwd.clone())
             } else { ctx.cwd.clone() };
+            binary_sha256 = hash_binary(command);
             let expanded = expand_secret_refs(&rendered_args, &secrets);
             let (exit_code, stdout, stderr, isolation_tier) = if let Some(reg) = worker_registry {
                 let dispatch = run_isolated(
@@ -84,6 +88,7 @@ pub fn run_capability(registry: &CapabilityRegistry, policy: &PolicyBundle, infi
                     cap.sandbox_profile.as_ref(),
                     reg,
                 )?;
+                token_mint_id = dispatch.token_mint_id.map(|u| u.to_string());
                 (dispatch.exit_code, dispatch.stdout, dispatch.stderr, dispatch.isolation_tier)
             } else {
                 let sub = run_subprocess(command, &expanded, &cwd, &secrets)?;
@@ -99,7 +104,7 @@ pub fn run_capability(registry: &CapabilityRegistry, policy: &PolicyBundle, infi
     let ok = exec_result["exitCode"].as_i64().unwrap_or(0) == 0;
     let status = if ok { ReceiptStatus::Succeeded } else { ReceiptStatus::Failed };
     let isolation_tier_str = exec_result["isolationTier"].as_str().map(String::from);
-    store.write(&Receipt { id: receipt_id, kind: ReceiptKind::Capability, capability: cap.name.clone(), created_at: Utc::now(), status, decision: "allow".to_string(), reason: None, input: input.clone(), context: serde_json::to_value(&ctx).unwrap_or_default(), execution: Some(exec_result.clone()), approval: None, sandbox_enforced: sandbox_enforced(), isolation_tier: isolation_tier_str, binary_sha256: None, token_mint_id: None, jail_config_digest: None })?;
+    store.write(&Receipt { id: receipt_id, kind: ReceiptKind::Capability, capability: cap.name.clone(), created_at: Utc::now(), status, decision: "allow".to_string(), reason: None, input: input.clone(), context: serde_json::to_value(&ctx).unwrap_or_default(), execution: Some(exec_result.clone()), approval: None, sandbox_enforced: sandbox_enforced(), isolation_tier: isolation_tier_str, binary_sha256, token_mint_id, jail_config_digest: None })?;
     Ok(ExecutionOutcome { ok, approval_required: false, receipt_id, result: Some(exec_result), reason: None })
 }
 
@@ -114,6 +119,13 @@ pub fn run_workflow(cap_registry: &CapabilityRegistry, wf_registry: &WorkflowReg
         if failed { match step.on_failure { StepFailurePolicy::Abort => break, StepFailurePolicy::Continue => {} } }
     }
     Ok(outcomes)
+}
+
+fn hash_binary(command: &str) -> Option<String> {
+    let path = which::which(command).ok()?;
+    let bytes = std::fs::read(&path).ok()?;
+    let hash = sha2::Sha256::digest(&bytes);
+    Some(hex::encode(hash))
 }
 
 fn merge_inputs(base: &serde_json::Value, step: &serde_json::Value) -> serde_json::Value {

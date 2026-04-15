@@ -3,6 +3,7 @@ use clix_core::sandbox::sandbox_enforced;
 use clix_core::state::{home_dir, ClixState};
 use clix_core::loader::build_registry;
 use clix_core::secrets::test_connectivity;
+use clix_core::receipts::ReceiptStore;
 use crate::output::{print_json, print_kv};
 
 pub fn run(json: bool) -> Result<()> {
@@ -45,6 +46,16 @@ pub fn run(json: bool) -> Result<()> {
     // Live broker ping
     let (broker_label, broker_status_str) = check_broker();
 
+    // Receipt stats
+    let receipt_stats = ReceiptStore::open(&state.receipts_db)
+        .ok()
+        .and_then(|s| s.count_by_status().ok());
+    let (r_total, r_allowed, r_denied, r_failed, _r_pending) =
+        receipt_stats.unwrap_or((0, 0, 0, 0, 0));
+    let receipts_summary = format!(
+        "{r_total} total  ({r_allowed} allowed · {r_denied} denied · {r_failed} failed)"
+    );
+
     if json {
         print_json(&serde_json::json!({
             "broker_up": broker_label.starts_with('✓'),
@@ -55,6 +66,12 @@ pub fn run(json: bool) -> Result<()> {
             "capability_count": cap_count,
             "home": state.home,
             "infisical": infisical_status,
+            "receipts": {
+                "total": r_total,
+                "allowed": r_allowed,
+                "denied": r_denied,
+                "failed": r_failed,
+            },
         }));
     } else {
         print_kv(&[
@@ -65,6 +82,7 @@ pub fn run(json: bool) -> Result<()> {
             ("capabilities", cap_count.to_string()),
             ("home",         state.home.display().to_string()),
             ("infisical",    infisical_status),
+            ("receipts",     receipts_summary),
         ]);
     }
     Ok(())

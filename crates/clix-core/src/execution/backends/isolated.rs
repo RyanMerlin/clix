@@ -19,6 +19,8 @@ pub struct IsolatedDispatch {
     pub stderr: String,
     pub isolation_tier: IsolationTier,
     pub binary_sha256: Option<String>,
+    /// Opaque mint ID generated at dispatch time (for broker audit correlation).
+    pub token_mint_id: Option<Uuid>,
 }
 
 /// Run a capability subprocess through the isolation layer.
@@ -91,6 +93,7 @@ fn run_via_worker(
             stderr,
             isolation_tier: IsolationTier::WarmWorker,
             binary_sha256: None, // filled by registry after handshake; not plumbed here yet
+            token_mint_id: Some(Uuid::new_v4()),
         }),
         WorkerEvent::Error { message, .. } => Err(ClixError::Worker(message)),
         _ => Err(ClixError::Worker("unexpected event from worker".to_string())),
@@ -112,6 +115,7 @@ fn run_direct_fallback(
         stderr: sub.stderr,
         isolation_tier: tier.clone(),
         binary_sha256: None,
+        token_mint_id: None,
     })
 }
 
