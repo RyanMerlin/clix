@@ -183,7 +183,7 @@ fn render_stub(f: &mut Frame, app: &App, area: Rect) {
 // ─── legend ───────────────────────────────────────────────────────────────────
 
 fn render_legend(f: &mut Frame, app: &App, area: Rect) {
-    let has_overlay = matches!(app.overlay, Overlay::ProfileCreate(_) | Overlay::CapabilityCreate(_) | Overlay::PackCreate(_) | Overlay::InstallPack(_) | Overlay::Help);
+    let has_overlay = matches!(app.overlay, Overlay::ProfileCreate(_) | Overlay::CapabilityCreate(_) | Overlay::PackCreate(_) | Overlay::PackEdit { .. } | Overlay::InstallPack(_) | Overlay::Help);
     if has_overlay { return; }
 
     let hints: Vec<Span> = match app.screen {
@@ -194,7 +194,7 @@ fn render_legend(f: &mut Frame, app: &App, area: Rect) {
             ("↑↓", "move"), ("enter", "drill in"), ("esc", "back"), ("n", "new"), ("tab", "next screen"), ("q", "quit"),
         ]),
         Screen::Packs => legend_spans(&[
-            ("↑↓", "move"), ("n", "new pack"), ("i", "install"), ("tab", "next screen"), ("q", "quit"),
+            ("↑↓", "move"), ("n", "new pack"), ("e", "edit caps"), ("i", "install"), ("tab", "next screen"), ("q", "quit"),
         ]),
         _ => legend_spans(&[
             ("0-6", "switch"), ("tab", "next"), ("n", "new"), ("r", "reload"), ("?", "help"), ("q", "quit"),
@@ -225,6 +225,7 @@ fn render_overlay(f: &mut Frame, app: &App, area: Rect) {
         Overlay::ProfileCreate(wiz) => wiz.render(f, area),
         Overlay::CapabilityCreate(wiz) => wiz.render(f, area),
         Overlay::PackCreate(wiz) => wiz.render(f, area),
+        Overlay::PackEdit { pack_name, checklist } => render_pack_edit(f, pack_name, checklist, area),
         Overlay::InstallPack(buf) => render_install_pack(f, buf, area),
     }
 }
@@ -318,4 +319,36 @@ fn render_install_pack(f: &mut Frame, buf: &str, area: Rect) {
         Line::from(Span::styled("enter: install   esc: cancel", theme::muted())),
     ]);
     f.render_widget(para, inner);
+}
+
+fn render_pack_edit(f: &mut Frame, pack_name: &str, checklist: &crate::tui::widgets::checklist::Checklist, area: Rect) {
+    let width = area.width.saturating_sub(4).max(55);
+    let height = area.height.saturating_sub(2).max(14);
+    let x = (area.width.saturating_sub(width)) / 2;
+    let y = (area.height.saturating_sub(height)) / 2;
+    let dialog = Rect::new(x, y, width, height);
+
+    f.render_widget(Clear, dialog);
+
+    let title = format!(" Edit Pack · {} ", pack_name);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(title, theme::accent_bold()))
+        .border_style(theme::border_focused());
+    let inner = block.inner(dialog);
+    f.render_widget(block, dialog);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(inner);
+
+    let title = format!("Capabilities ({} selected)", checklist.selected_count());
+    checklist.render(f, chunks[0], &title, true);
+
+    f.render_widget(
+        Paragraph::new("space:toggle  /:filter  a:all  x:none  enter:save  esc:cancel")
+            .style(theme::muted()),
+        chunks[1],
+    );
 }

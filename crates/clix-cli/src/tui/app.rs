@@ -87,6 +87,7 @@ pub enum Overlay {
     ProfileCreate(ProfileWizard),
     CapabilityCreate(CapabilityWizard),
     PackCreate(PackWizard),
+    PackEdit { pack_name: String, checklist: crate::tui::widgets::checklist::Checklist },
     InstallPack(String),  // path buffer
     Toast { message: String, is_error: bool, expires_at: std::time::Instant },
     Help,
@@ -235,6 +236,10 @@ impl App {
             KeyCode::Char('i') if self.screen == Screen::Packs => {
                 self.overlay = Overlay::InstallPack(String::new());
             }
+            // e = edit pack capabilities
+            KeyCode::Char('e') if self.screen == Screen::Packs => {
+                self.open_pack_edit();
+            }
             // Content navigation — arrow keys
             KeyCode::Down => self.cursor_down(),
             KeyCode::Up => self.cursor_up(),
@@ -246,6 +251,32 @@ impl App {
 
     fn switch_to(&mut self, screen: Screen) {
         self.screen = screen;
+    }
+
+    fn open_pack_edit(&mut self) {
+        use crate::tui::widgets::checklist::{Checklist, ChecklistItem};
+        let Some(pack) = self.packs.get(self.packs_cursor) else { return; };
+        let pack_name = pack.name.clone();
+        let current_caps: std::collections::HashSet<String> = pack.capabilities.iter().cloned().collect();
+
+        // Build checklist from all known capabilities
+        let mut items: Vec<ChecklistItem> = self.registry.all().iter().map(|cap| {
+            let risk_str = format!("{:?}", cap.risk).to_lowercase();
+            let tag_color = crate::tui::theme::risk_color(&risk_str);
+            let mut item = ChecklistItem::new(
+                &cap.name,
+                &cap.name,
+                cap.description.as_deref().unwrap_or(""),
+                &risk_str,
+                tag_color,
+                "",
+            );
+            item.selected = current_caps.contains(&cap.name);
+            item
+        }).collect();
+        items.sort_by(|a, b| a.id.cmp(&b.id));
+
+        self.overlay = Overlay::PackEdit { pack_name, checklist: Checklist::new(items) };
     }
 
     fn open_create_wizard(&mut self) {
@@ -294,6 +325,28 @@ impl App {
                 _ => {}
             }
             return;
+        }
+
+        // Pack edit overlay
+        if let Overlay::PackEdit { ref pack_name, ref mut checklist } = self.overlay {
+            match key.code {
+                KeyCode::Esc => { self.overlay = Overlay::None; return; }
+                KeyCode::Enter => {
+                    let pack_name = pack_name.clone();
+                    let selected = checklist.selected_ids();
+                    let res = self.do_edit_pack_capabilities(&pack_name, &selected);
+                    match res {
+                        Ok(msg) => {
+                            self.overlay = Overlay::None;
+                            let _ = self.reload();
+                            self.toast(&msg, false);
+                        }
+                        Err(e) => self.toast(&format!("Error: {e}"), true),
+                    }
+                    return;
+                }
+                code => { checklist.handle_key(code); return; }
+            }
         }
 
         // Wizard key delegation
@@ -533,8 +586,8 @@ impl App {
             let _ = std::fs::write(caps_dir.join(&file_name), yaml);
         }
 
-        // Patch pack.yaml to add description and author
-        if !description.is_empty() || !author.is_empty() {
+        // Patch pack.yaml: add description, author, and capabilities list
+        {
             let pack_yaml_path = pack_dir.join("pack.yaml");
             if let Ok(existing) = std::fs::read_to_string(&pack_yaml_path) {
                 let mut val: serde_yaml::Value = serde_yaml::from_str(&existing).unwrap_or_default();
@@ -547,6 +600,25 @@ impl App {
                         m.insert(serde_yaml::Value::String("author".into()),
                             serde_yaml::Value::String(author.to_string()));
                     }
+                    // Merge discovered capabilities into the pack's capabilities list
+                    if !capability_names.is_empty() {
+                        let existing_caps: Vec<String> = m.get("capabilities")
+                            .and_then(|v| v.as_sequence())
+                            .map(|seq| seq.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect())
+                            .unwrap_or_default();
+                        let mut all_caps = existing_caps;
+                        for cn in capability_names {
+                            if !all_caps.contains(cn) {
+                                all_caps.push(cn.clone());
+                            }
+                        }
+                        m.insert(serde_yaml::Value::String("capabilities".into()),
+                            serde_yaml::Value::Sequence(
+                                all_caps.iter().map(|s| serde_yaml::Value::String(s.clone())).collect()
+                            ));
+                    }
                 }
                 if let Ok(patched) = serde_yaml::to_string(&val) {
                     let _ = std::fs::write(&pack_yaml_path, patched);
@@ -555,6 +627,26 @@ impl App {
         }
 
         Ok(format!("Pack '{}' created with {} capabilities", name, capability_names.len()))
+    }
+
+    fn do_edit_pack_capabilities(&self, pack_name: &str, capability_names: &[String]) -> Result<String> {
+        let state = ClixState::load(home_dir())?;
+        let pack_dir = state.packs_dir.join(pack_name);
+        let pack_yaml_path = pack_dir.join("pack.yaml");
+        if !pack_yaml_path.exists() {
+            return Err(anyhow::anyhow!("pack.yaml not found for '{}'", pack_name));
+        }
+        let existing = std::fs::read_to_string(&pack_yaml_path)?;
+        let mut val: serde_yaml::Value = serde_yaml::from_str(&existing).unwrap_or_default();
+        if let serde_yaml::Value::Mapping(ref mut m) = val {
+            m.insert(serde_yaml::Value::String("capabilities".into()),
+                serde_yaml::Value::Sequence(
+                    capability_names.iter().map(|s| serde_yaml::Value::String(s.clone())).collect()
+                ));
+        }
+        let patched = serde_yaml::to_string(&val)?;
+        std::fs::write(&pack_yaml_path, patched)?;
+        Ok(format!("Pack '{}' updated with {} capabilities", pack_name, capability_names.len()))
     }
 
     fn do_install_pack(&self, path_str: &str) -> Result<String> {
