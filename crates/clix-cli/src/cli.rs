@@ -1,10 +1,11 @@
 use clap::{Parser, Subcommand};
+pub use crate::commands::broker::BrokerCmd;
 
 /// All static top-level subcommand names. Dynamic capability subcommands must not use these.
 pub const STATIC_COMMANDS: &[&str] = &[
     "init", "status", "version", "run", "capabilities",
     "workflow", "profile", "receipts", "serve", "pack", "tui",
-    "doctor", "shim", "mcp", "tools", "secrets",
+    "doctor", "shim", "mcp", "tools", "secrets", "broker",
 ];
 
 #[derive(Parser)]
@@ -40,6 +41,9 @@ pub enum Commands {
         /// (e.g. --adopt-creds gcloud kubectl). This moves the creds out of the agent's reach.
         #[arg(long = "adopt-creds", value_name = "CLI", num_args = 0..)]
         adopt_creds: Vec<String>,
+        /// Adopt a service-account JSON key file into the broker credential store.
+        #[arg(long = "adopt-sa", value_name = "PATH")]
+        adopt_sa: Option<String>,
         /// Write .mcp.json and CLAUDE.md integration block for Claude Code (project-scoped).
         /// Run from the project root. Merges with existing .mcp.json if present.
         #[arg(long = "claude-code")]
@@ -98,6 +102,9 @@ pub enum Commands {
     /// Manage Infisical secrets configuration
     #[command(subcommand)]
     Secrets(crate::commands::secrets::SecretsCmd),
+    /// Manage the credential broker daemon
+    #[command(subcommand)]
+    Broker(BrokerCmd),
 }
 
 #[derive(Subcommand)]

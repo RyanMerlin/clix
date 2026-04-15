@@ -116,6 +116,7 @@ pub struct App {
     pub receipts_preview: Vec<ReceiptRow>,
     pub infisical_cfg: Option<clix_core::state::InfisicalConfig>,
     pub connectivity_report: Option<clix_core::secrets::ConnectivityReport>,
+    pub broker_status: Option<crate::tui::screens::broker::BrokerScreenState>,
     // per-screen cursors
     pub profiles_cursor: usize,
     pub caps_view: CapView,
@@ -150,6 +151,7 @@ impl App {
             receipts_preview: vec![],
             infisical_cfg,
             connectivity_report: None,
+            broker_status: None,
             profiles_cursor: 0,
             caps_view: CapView::Namespaces,
             caps_cursor: 0,
@@ -224,6 +226,10 @@ impl App {
 
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Char('r') if self.screen == Screen::Broker => {
+                self.broker_status = Some(crate::tui::screens::broker::BrokerScreenState::probe());
+                self.toast("Broker status refreshed", false);
+            }
             KeyCode::Char('r') => {
                 match self.reload() {
                     Ok(_) => self.toast("Reloaded", false),
@@ -280,6 +286,13 @@ impl App {
                 } else {
                     self.toast("Infisical not configured — press e to configure", true);
                 }
+            }
+            // Broker screen keys
+            KeyCode::Char('s') if self.screen == Screen::Broker => {
+                self.toast("run `clix broker start` in terminal to start broker", false);
+            }
+            KeyCode::Char('x') if self.screen == Screen::Broker => {
+                self.toast("run `clix broker stop` in terminal to stop broker", false);
             }
             // Content navigation — arrow keys + page
             KeyCode::Down => self.cursor_down(),

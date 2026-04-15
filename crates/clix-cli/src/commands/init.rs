@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
 use clix_core::state::{ClixConfig, ClixState, home_dir};
 use clix_core::packs::seed::seed_builtin_packs;
+use chrono::Utc;
 
 /// Write a `.mcp.json` at `project_dir` (defaults to cwd) for Claude Code.
 ///
@@ -348,6 +349,78 @@ fn adopt_kubectl_creds(broker_creds_dir: &Path) -> Result<()> {
     println!("kubectl config adopted into broker store: {}", dest.display());
     println!("Original path ({}) now points to a dead symlink.", src.display());
     Ok(())
+}
+
+/// Adopt a service-account JSON key file into the broker credential store.
+///
+/// Copies the file to `$CLIX_BROKER_CREDS_DIR/gcloud/sa-<sha256_prefix>.json` with 0600
+/// permissions. Replaces the original with a dead symlink. Appends an entry to
+/// `$CLIX_BROKER_CREDS_DIR/gcloud/sa_registry.json`.
+///
+/// Returns a summary string on success.
+pub fn adopt_sa_json(path: &str) -> Result<String> {
+    use sha2::{Sha256, Digest};
+
+    let src = std::path::Path::new(path);
+    if !src.exists() {
+        return Err(anyhow!("SA JSON file not found: {path}"));
+    }
+
+    let content = std::fs::read(src)
+        .map_err(|e| anyhow!("read SA JSON: {e}"))?;
+
+    // Parse to extract client_email
+    let sa: serde_json::Value = serde_json::from_slice(&content)
+        .map_err(|e| anyhow!("parse SA JSON: {e}"))?;
+    let client_email = sa["client_email"].as_str()
+        .ok_or_else(|| anyhow!("SA JSON missing client_email"))?
+        .to_string();
+
+    // Compute sha256 hash for dedup filename
+    let mut hasher = Sha256::new();
+    hasher.update(&content);
+    let hash = hex::encode(hasher.finalize());
+    let short_hash = &hash[..12];
+
+    let broker_creds_dir = broker_creds_dir();
+    let dest_dir = broker_creds_dir.join("gcloud");
+    std::fs::create_dir_all(&dest_dir)?;
+    secure_dir(&dest_dir)?;
+
+    let dest_filename = format!("sa-{short_hash}.json");
+    let dest = dest_dir.join(&dest_filename);
+
+    std::fs::write(&dest, &content)
+        .map_err(|e| anyhow!("write SA to broker store: {e}"))?;
+    secure_file(&dest)?;
+
+    // Replace original with dead symlink
+    let _ = std::fs::remove_file(src);
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink("/clix-broker-adopted-this-credential", src)
+            .map_err(|e| anyhow!("create dead symlink at {}: {e}", src.display()))?;
+    }
+
+    // Update SA registry
+    let registry_path = dest_dir.join("sa_registry.json");
+    let mut registry: Vec<serde_json::Value> = if registry_path.exists() {
+        let text = std::fs::read_to_string(&registry_path).unwrap_or_default();
+        serde_json::from_str(&text).unwrap_or_default()
+    } else {
+        vec![]
+    };
+    let adopted_at = chrono::Utc::now().to_rfc3339();
+    registry.push(serde_json::json!({
+        "path": dest_filename,
+        "email": client_email,
+        "adopted_at": adopted_at,
+    }));
+    let registry_json = serde_json::to_string_pretty(&registry)?;
+    std::fs::write(&registry_path, registry_json)?;
+    secure_file(&registry_path)?;
+
+    Ok(format!("SA {} adopted → {}", client_email, dest.display()))
 }
 
 fn broker_creds_dir() -> PathBuf {

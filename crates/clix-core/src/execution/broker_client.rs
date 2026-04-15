@@ -37,7 +37,7 @@ pub fn mint_credentials(socket_path: &Path, cli: &str) -> Result<HashMap<String,
         }
     };
 
-    let req = BrokerMintRequest { cli: cli.to_string(), duration_secs: 3600 };
+    let req = BrokerMintRequest::Mint { cli: cli.to_string(), duration_secs: 3600 };
     let mut writer = stream.try_clone()
         .map_err(|e| crate::error::ClixError::Broker(format!("clone broker stream: {e}")))?;
     let msg = serde_json::to_string(&req)? + "\n";
@@ -53,14 +53,19 @@ pub fn mint_credentials(socket_path: &Path, cli: &str) -> Result<HashMap<String,
     let resp: BrokerMintResponse = serde_json::from_str(line.trim())
         .map_err(|e| crate::error::ClixError::Broker(format!("parse broker response: {e}")))?;
 
-    if !resp.ok {
-        let err = resp.error.unwrap_or_else(|| "unknown error".to_string());
-        // Not all CLIs have broker-adopted creds — this is expected for generic tools
-        eprintln!("[clix-gateway] broker mint for '{cli}': {err}");
-        return Ok(HashMap::new());
+    match resp.into_mint_result() {
+        Some((true, env, _)) => Ok(env),
+        Some((false, _, err)) => {
+            let msg = err.unwrap_or_else(|| "unknown error".to_string());
+            // Not all CLIs have broker-adopted creds — this is expected for generic tools
+            eprintln!("[clix-gateway] broker mint for '{cli}': {msg}");
+            Ok(HashMap::new())
+        }
+        None => {
+            eprintln!("[clix-gateway] unexpected broker response type for mint request");
+            Ok(HashMap::new())
+        }
     }
-
-    Ok(resp.env)
 }
 
 /// Extract the CLI name from a command string (basename without path or extension).

@@ -76,27 +76,53 @@ pub struct WorkerReady {
     pub error: Option<String>,
 }
 
-/// Request from the gateway to the broker daemon to mint an ephemeral credential set.
+/// Request from the gateway to the broker daemon.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BrokerMintRequest {
-    /// The CLI identifier (e.g. "gcloud", "kubectl").
-    pub cli: String,
-    /// How long the minted token should be valid for (seconds). Broker may cap this.
-    #[serde(default = "default_duration")]
-    pub duration_secs: u64,
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum BrokerMintRequest {
+    /// Mint ephemeral credentials for the given CLI.
+    #[serde(rename = "mint")]
+    Mint {
+        /// The CLI identifier (e.g. "gcloud", "kubectl").
+        cli: String,
+        /// How long the minted token should be valid for (seconds). Broker may cap this.
+        #[serde(default = "default_duration")]
+        duration_secs: u64,
+    },
+    /// Health-check ping — broker responds with Pong.
+    #[serde(rename = "ping")]
+    Ping,
 }
 
 fn default_duration() -> u64 { 3600 }
 
-/// Response from the broker: a set of env vars to inject into the worker subprocess.
+/// Response from the broker.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BrokerMintResponse {
-    pub ok: bool,
-    /// Env vars (e.g. `{"GOOGLE_OAUTH_ACCESS_TOKEN": "ya29.xxx"}`).
-    #[serde(default)]
-    pub env: HashMap<String, String>,
-    #[serde(default)]
-    pub error: Option<String>,
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum BrokerMintResponse {
+    /// Ephemeral credential set minted successfully (or error).
+    #[serde(rename = "mintResult")]
+    MintResult {
+        ok: bool,
+        /// Env vars (e.g. `{"GOOGLE_OAUTH_ACCESS_TOKEN": "ya29.xxx"}`).
+        #[serde(default)]
+        env: HashMap<String, String>,
+        #[serde(default)]
+        error: Option<String>,
+    },
+    /// Response to a Ping request.
+    #[serde(rename = "pong")]
+    Pong {
+        version: String,
+    },
+}
+
+impl BrokerMintResponse {
+    /// Convenience: extract (ok, env, error) from a MintResult variant.
+    pub fn into_mint_result(self) -> Option<(bool, HashMap<String, String>, Option<String>)> {
+        match self {
+            BrokerMintResponse::MintResult { ok, env, error } => Some((ok, env, error)),
+            _ => None,
+        }
+    }
 }

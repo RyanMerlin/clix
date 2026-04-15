@@ -1,3 +1,4 @@
+pub mod broker;
 pub mod capabilities;
 pub mod secrets;
 pub mod doctor;

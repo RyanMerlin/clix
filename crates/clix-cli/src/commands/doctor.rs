@@ -42,18 +42,13 @@ pub fn run(json: bool) -> Result<()> {
         "not configured".to_string()
     };
 
-    // Check if broker socket exists
-    let broker_socket = {
-        let p = std::path::PathBuf::from(
-            std::env::var("CLIX_BROKER_SOCKET")
-                .unwrap_or_else(|_| "/tmp/clix-broker.sock".to_string())
-        );
-        p.exists()
-    };
+    // Live broker ping
+    let (broker_label, broker_status_str) = check_broker();
 
     if json {
         print_json(&serde_json::json!({
-            "broker_up": broker_socket,
+            "broker_up": broker_label.starts_with('✓'),
+            "broker_status": broker_status_str,
             "sandbox_enforced": enforced,
             "active_profile": active_profile,
             "pack_count": pack_count,
@@ -63,7 +58,7 @@ pub fn run(json: bool) -> Result<()> {
         }));
     } else {
         print_kv(&[
-            ("broker",       if broker_socket { "up" } else { "not running" }.to_string()),
+            ("broker",       format!("{broker_label}: {broker_status_str}")),
             ("sandbox",      if enforced { "enforced" } else { "not enforced" }.to_string()),
             ("profile",      active_profile),
             ("packs",        pack_count.to_string()),
@@ -73,4 +68,28 @@ pub fn run(json: bool) -> Result<()> {
         ]);
     }
     Ok(())
+}
+
+fn check_broker() -> (&'static str, String) {
+    let socket_path = std::env::var("CLIX_BROKER_SOCKET")
+        .unwrap_or_else(|_| "/tmp/clix-broker.sock".to_string());
+
+    use std::os::unix::net::UnixStream;
+    use std::io::{BufRead, BufReader, Write};
+    use std::time::Instant;
+
+    let start = Instant::now();
+    match UnixStream::connect(&socket_path) {
+        Err(e) => ("✗ broker", format!("socket unreachable: {e}")),
+        Ok(mut stream) => {
+            let _ = stream.write_all(b"{\"type\":\"ping\"}\n");
+            let reader = BufReader::new(&stream);
+            match reader.lines().next() {
+                Some(Ok(line)) if line.contains("pong") =>
+                    ("✓ broker", format!("{}ms", start.elapsed().as_millis())),
+                Some(Ok(line)) => ("✗ broker", format!("unexpected: {line}")),
+                _ => ("✗ broker", "no response".to_string()),
+            }
+        }
+    }
 }

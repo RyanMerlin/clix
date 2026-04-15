@@ -26,7 +26,7 @@ axum               = "0.7"
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zip                = "2"
-sha2               = "0.10"
+sha2               = { version = "0.10", features = ["oid"] }
 hex                = "0.4"
 dirs               = "5"
 whoami             = "1"
@@ -37,3 +37,4 @@ libc               = "0.2"
 criterion          = { version = "0.5", features = ["html_reports"] }
 keyring            = { version = "3", features = ["async-secret-service", "async-io", "crypto-rust"] }
 rpassword          = "7"
+base64             = "0.22"

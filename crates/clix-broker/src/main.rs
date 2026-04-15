@@ -21,6 +21,7 @@
 ///   - Drops supplementary groups (if run as root, also drops to a dedicated user — TODO).
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
+use base64::Engine as _;
 #[cfg(target_os = "linux")]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -94,23 +95,30 @@ fn handle_connection(stream: std::os::unix::net::UnixStream, creds_dir: &Path) {
         let req: BrokerMintRequest = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {
-                let resp = BrokerMintResponse { ok: false, env: Default::default(), error: Some(format!("bad request: {e}")) };
+                let resp = BrokerMintResponse::MintResult { ok: false, env: Default::default(), error: Some(format!("bad request: {e}")) };
                 let _ = write_json(&mut writer, &resp);
                 continue;
             }
         };
 
-        let resp = mint_token(&req, creds_dir);
+        let resp = dispatch_request(&req, creds_dir);
         if write_json(&mut writer, &resp).is_err() { break; }
     }
 }
 
-/// Mint ephemeral credentials for a given CLI.
-fn mint_token(req: &BrokerMintRequest, creds_dir: &Path) -> BrokerMintResponse {
-    match req.cli.as_str() {
-        "gcloud" => mint_gcloud(creds_dir, req.duration_secs),
-        "kubectl" => mint_kubectl(creds_dir),
-        _ => mint_generic(&req.cli, creds_dir),
+/// Dispatch a broker request and produce a response.
+fn dispatch_request(req: &BrokerMintRequest, creds_dir: &Path) -> BrokerMintResponse {
+    match req {
+        BrokerMintRequest::Ping => BrokerMintResponse::Pong {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        },
+        BrokerMintRequest::Mint { cli, duration_secs } => {
+            match cli.as_str() {
+                "gcloud" => mint_gcloud(creds_dir, *duration_secs),
+                "kubectl" => mint_kubectl(creds_dir),
+                _ => mint_generic(cli, creds_dir),
+            }
+        }
     }
 }
 
@@ -119,7 +127,7 @@ fn mint_token(req: &BrokerMintRequest, creds_dir: &Path) -> BrokerMintResponse {
 fn mint_gcloud(creds_dir: &Path, _duration_secs: u64) -> BrokerMintResponse {
     let adc_path = creds_dir.join("gcloud").join("adc.json");
     if !adc_path.exists() {
-        return BrokerMintResponse {
+        return BrokerMintResponse::MintResult {
             ok: false,
             env: Default::default(),
             error: Some(format!("gcloud ADC not found at {}. Run: clix init --adopt-creds gcloud", adc_path.display())),
@@ -128,12 +136,12 @@ fn mint_gcloud(creds_dir: &Path, _duration_secs: u64) -> BrokerMintResponse {
 
     let adc_text = match fs::read_to_string(&adc_path) {
         Ok(t) => t,
-        Err(e) => return BrokerMintResponse { ok: false, env: Default::default(), error: Some(format!("read ADC: {e}")) },
+        Err(e) => return BrokerMintResponse::MintResult { ok: false, env: Default::default(), error: Some(format!("read ADC: {e}")) },
     };
 
     let adc: serde_json::Value = match serde_json::from_str(&adc_text) {
         Ok(v) => v,
-        Err(e) => return BrokerMintResponse { ok: false, env: Default::default(), error: Some(format!("parse ADC: {e}")) },
+        Err(e) => return BrokerMintResponse::MintResult { ok: false, env: Default::default(), error: Some(format!("parse ADC: {e}")) },
     };
 
     // If there's a cached access token and expiry, check if still valid (with 60s buffer)
@@ -141,7 +149,7 @@ fn mint_gcloud(creds_dir: &Path, _duration_secs: u64) -> BrokerMintResponse {
         if let Ok(expiry_dt) = chrono::DateTime::parse_from_rfc3339(expiry) {
             let now = chrono::Utc::now();
             if expiry_dt.with_timezone(&chrono::Utc) > now + chrono::Duration::seconds(60) {
-                return BrokerMintResponse {
+                return BrokerMintResponse::MintResult {
                     ok: true,
                     env: [("GOOGLE_OAUTH_ACCESS_TOKEN".to_string(), token.to_string())].into(),
                     error: None,
@@ -157,22 +165,33 @@ fn mint_gcloud(creds_dir: &Path, _duration_secs: u64) -> BrokerMintResponse {
     let token_uri = adc["token_uri"].as_str().unwrap_or("https://oauth2.googleapis.com/token");
 
     if refresh_token.is_empty() || client_id.is_empty() {
-        // Service account — the access_token may already be present but expired
-        // For service accounts, we'd need to sign a JWT. For now, return what we have
-        // with a warning (proper SA support is a follow-up).
-        if let Some(token) = adc["access_token"].as_str() {
-            eprintln!("[clix-broker] WARNING: gcloud service account token may be expired; SA refresh not yet implemented");
-            return BrokerMintResponse {
-                ok: true,
-                env: [("GOOGLE_OAUTH_ACCESS_TOKEN".to_string(), token.to_string())].into(),
-                error: None,
-            };
+        // Service account — try SA JWT signing
+        let sa_result = mint_sa_token(&adc);
+        match sa_result {
+            Ok((token, _expires_in)) => {
+                return BrokerMintResponse::MintResult {
+                    ok: true,
+                    env: [("GOOGLE_OAUTH_ACCESS_TOKEN".to_string(), token)].into(),
+                    error: None,
+                };
+            }
+            Err(e) => {
+                // Fall back to cached token if available
+                if let Some(token) = adc["access_token"].as_str() {
+                    eprintln!("[clix-broker] WARNING: SA JWT signing failed ({e}), using cached token which may be expired");
+                    return BrokerMintResponse::MintResult {
+                        ok: true,
+                        env: [("GOOGLE_OAUTH_ACCESS_TOKEN".to_string(), token.to_string())].into(),
+                        error: None,
+                    };
+                }
+                return BrokerMintResponse::MintResult {
+                    ok: false,
+                    env: Default::default(),
+                    error: Some(format!("gcloud SA token error: {e}")),
+                };
+            }
         }
-        return BrokerMintResponse {
-            ok: false,
-            env: Default::default(),
-            error: Some("gcloud: no refresh_token and no cached access_token in ADC".to_string()),
-        };
     }
 
     // Perform the OAuth2 refresh
@@ -185,13 +204,13 @@ fn mint_gcloud(creds_dir: &Path, _duration_secs: u64) -> BrokerMintResponse {
             updated["token_expiry"] = serde_json::Value::String(expiry.to_rfc3339());
             let _ = fs::write(&adc_path, serde_json::to_string_pretty(&updated).unwrap_or_default());
 
-            BrokerMintResponse {
+            BrokerMintResponse::MintResult {
                 ok: true,
                 env: [("GOOGLE_OAUTH_ACCESS_TOKEN".to_string(), access_token)].into(),
                 error: None,
             }
         }
-        Err(e) => BrokerMintResponse {
+        Err(e) => BrokerMintResponse::MintResult {
             ok: false,
             env: Default::default(),
             error: Some(format!("gcloud OAuth2 refresh failed: {e}")),
@@ -229,7 +248,7 @@ fn oauth2_refresh(token_uri: &str, client_id: &str, client_secret: &str, refresh
 fn mint_kubectl(creds_dir: &Path) -> BrokerMintResponse {
     let kubeconfig_path = creds_dir.join("kubectl").join("kubeconfig");
     if !kubeconfig_path.exists() {
-        return BrokerMintResponse {
+        return BrokerMintResponse::MintResult {
             ok: false,
             env: Default::default(),
             error: Some(format!("kubectl config not found at {}. Run: clix init --adopt-creds kubectl", kubeconfig_path.display())),
@@ -239,7 +258,7 @@ fn mint_kubectl(creds_dir: &Path) -> BrokerMintResponse {
     // Write to a tmpfile so the worker gets a path it can read inside its jail.
     // For now we return KUBECONFIG pointing to the broker-owned location (the worker's
     // fs policy must include an RO bind of this path — handled by the manifest).
-    BrokerMintResponse {
+    BrokerMintResponse::MintResult {
         ok: true,
         env: [("KUBECONFIG".to_string(), kubeconfig_path.to_string_lossy().to_string())].into(),
         error: None,
@@ -250,7 +269,7 @@ fn mint_kubectl(creds_dir: &Path) -> BrokerMintResponse {
 fn mint_generic(cli: &str, creds_dir: &Path) -> BrokerMintResponse {
     let secret_path = creds_dir.join(cli).join("secret.env");
     if !secret_path.exists() {
-        return BrokerMintResponse {
+        return BrokerMintResponse::MintResult {
             ok: false,
             env: Default::default(),
             error: Some(format!("no creds for `{cli}` at {}", secret_path.display())),
@@ -258,7 +277,7 @@ fn mint_generic(cli: &str, creds_dir: &Path) -> BrokerMintResponse {
     }
     let text = match fs::read_to_string(&secret_path) {
         Ok(t) => t,
-        Err(e) => return BrokerMintResponse { ok: false, env: Default::default(), error: Some(format!("read: {e}")) },
+        Err(e) => return BrokerMintResponse::MintResult { ok: false, env: Default::default(), error: Some(format!("read: {e}")) },
     };
     let mut env = std::collections::HashMap::new();
     for line in text.lines() {
@@ -268,7 +287,73 @@ fn mint_generic(cli: &str, creds_dir: &Path) -> BrokerMintResponse {
             env.insert(k.to_string(), v.to_string());
         }
     }
-    BrokerMintResponse { ok: true, env, error: None }
+    BrokerMintResponse::MintResult { ok: true, env, error: None }
+}
+
+/// Sign a JWT and exchange it for a Google access token using a service account JSON.
+fn mint_sa_token(sa_json: &serde_json::Value) -> Result<(String, u64), String> {
+    use rsa::{RsaPrivateKey, pkcs1v15::SigningKey, pkcs8::DecodePrivateKey};
+    use rsa::signature::{SignatureEncoding, Signer};
+    use sha2::Sha256;
+
+    let client_email = sa_json["client_email"].as_str()
+        .ok_or("missing client_email")?;
+    let private_key_pem = sa_json["private_key"].as_str()
+        .ok_or("missing private_key")?;
+    let token_uri = sa_json["token_uri"].as_str()
+        .unwrap_or("https://oauth2.googleapis.com/token");
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+
+    // Build JWT header and claims
+    let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(r#"{"alg":"RS256","typ":"JWT"}"#);
+    let claims = serde_json::json!({
+        "iss": client_email,
+        "scope": "https://www.googleapis.com/auth/cloud-platform",
+        "aud": token_uri,
+        "exp": now + 3600,
+        "iat": now,
+    });
+    let claims_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(claims.to_string());
+    let signing_input = format!("{}.{}", header, claims_b64);
+
+    // Sign with RSA-SHA256 (PKCS1v15 — deterministic, no rng needed)
+    let private_key = RsaPrivateKey::from_pkcs8_pem(private_key_pem)
+        .map_err(|e| format!("parse private key: {e}"))?;
+    let signing_key = SigningKey::<Sha256>::new(private_key);
+    let sig = signing_key.sign(signing_input.as_bytes());
+    let sig_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(sig.to_bytes());
+
+    let jwt = format!("{}.{}", signing_input, sig_b64);
+
+    // Exchange JWT for access token via curl (same pattern as oauth2_refresh)
+    let body = format!(
+        "grant_type={}&assertion={}",
+        urlencoding::encode("urn:ietf:params:oauth:grant-type:jwt-bearer"),
+        urlencoding::encode(&jwt),
+    );
+    let output = std::process::Command::new("curl")
+        .args(["--silent", "--fail", "-X", "POST", token_uri,
+               "-H", "Content-Type: application/x-www-form-urlencoded",
+               "-d", &body])
+        .output()
+        .map_err(|e| format!("curl: {e}"))?;
+
+    if !output.status.success() {
+        return Err(format!("HTTP error: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+
+    let resp: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("parse token response: {e}"))?;
+    let token = resp["access_token"].as_str()
+        .ok_or_else(|| format!("no access_token in response: {}", String::from_utf8_lossy(&output.stdout)))?
+        .to_string();
+    let expires_in = resp["expires_in"].as_u64().unwrap_or(3600);
+    Ok((token, expires_in))
 }
 
 // ── Security helpers ──────────────────────────────────────────────────────────

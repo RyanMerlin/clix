@@ -6,7 +6,7 @@ mod tui;
 
 use anyhow::Result;
 use clap::FromArgMatches;
-use cli::{Cli, Commands, CapabilitiesCmd, WorkflowCmd, ProfileCmd, ReceiptsCmd, PackCmd, ShimCmd, McpCmd, ToolsCmd};
+use cli::{Cli, Commands, CapabilitiesCmd, WorkflowCmd, ProfileCmd, ReceiptsCmd, PackCmd, ShimCmd, McpCmd, ToolsCmd, BrokerCmd};
 
 use clix_core::execution::run_capability;
 use clix_core::loader::{build_registry, load_policy};
@@ -88,14 +88,23 @@ async fn main() -> Result<()> {
 
 async fn dispatch_static(cli: Cli) -> Result<()> {
     match cli.command {
-        Commands::Init { install_shims, adopt_creds, claude_code, cursor } => {
+        Commands::Init { install_shims, adopt_creds, adopt_sa, claude_code, cursor } => {
             commands::init::run()?;
             if !install_shims.is_empty() {
                 let cmds: Vec<&str> = install_shims.iter().map(String::as_str).collect();
                 commands::init::install_shims(&cmds)?;
             }
             for cli in &adopt_creds {
-                commands::init::adopt_creds(cli)?;
+                match commands::init::adopt_creds(cli) {
+                    Ok(_) => println!("  adopted: {cli}"),
+                    Err(e) => eprintln!("  error adopting {cli}: {e}"),
+                }
+            }
+            if let Some(sa_path) = adopt_sa {
+                match commands::init::adopt_sa_json(&sa_path) {
+                    Ok(msg) => println!("  {msg}"),
+                    Err(e) => eprintln!("  error adopting SA: {e}"),
+                }
             }
             if claude_code {
                 commands::init::setup_claude_code(None)?;
@@ -145,6 +154,7 @@ async fn dispatch_static(cli: Cli) -> Result<()> {
             let state = ClixState::load(home_dir())?;
             commands::secrets::run_secrets(sub, &state)?;
         }
+        Commands::Broker(sub) => commands::broker::run_broker(sub)?,
         Commands::Pack(sub) => match sub {
             PackCmd::List { json, available } => commands::pack::list(json, available)?,
             PackCmd::Show { name, json } => commands::pack::show(&name, json)?,

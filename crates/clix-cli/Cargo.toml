@@ -23,3 +23,8 @@ ratatui    = "0.29"
 crossterm  = "0.28"
 rpassword  = { workspace = true }
 chrono     = { workspace = true }
+sha2       = { workspace = true }
+hex        = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc       = { workspace = true }
