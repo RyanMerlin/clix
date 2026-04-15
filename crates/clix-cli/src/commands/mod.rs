@@ -1,3 +1,4 @@
+pub mod approve;
 pub mod broker;
 pub mod capabilities;
 pub mod secrets;

@@ -26,9 +26,32 @@ use base64::Engine as _;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::fs;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use uuid::Uuid;
 use clix_core::execution::worker_protocol::{BrokerMintRequest, BrokerMintResponse};
 
 const DEFAULT_SOCKET_PATH: &str = "/tmp/clix-broker.sock";
+
+// ─── Approval state machine ───────────────────────────────────────────────────
+
+enum ApprovalState {
+    Pending {
+        capability: String,
+        input: serde_json::Value,
+        context: serde_json::Value,
+        reason: String,
+        requested_at: std::time::Instant,
+    },
+    Granted { approver: String },
+    Denied { reason: String },
+}
+
+static PENDING_APPROVALS: OnceLock<Mutex<HashMap<Uuid, ApprovalState>>> = OnceLock::new();
+
+fn approvals() -> &'static Mutex<HashMap<Uuid, ApprovalState>> {
+    PENDING_APPROVALS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 fn main() {
     let socket_path = std::env::var("CLIX_BROKER_SOCKET")
@@ -117,6 +140,78 @@ fn dispatch_request(req: &BrokerMintRequest, creds_dir: &Path) -> BrokerMintResp
                 "gcloud" => mint_gcloud(creds_dir, *duration_secs),
                 "kubectl" => mint_kubectl(creds_dir),
                 _ => mint_generic(cli, creds_dir),
+            }
+        }
+        BrokerMintRequest::RequestApproval { receipt_id, capability, input, context, reason } => {
+            let mut map = approvals().lock().unwrap_or_else(|e| e.into_inner());
+            map.insert(*receipt_id, ApprovalState::Pending {
+                capability: capability.clone(),
+                input: input.clone(),
+                context: context.clone(),
+                reason: reason.clone(),
+                requested_at: std::time::Instant::now(),
+            });
+            eprintln!("[clix-broker] approval requested: {} ({})", receipt_id, capability);
+            BrokerMintResponse::ApprovalPending { receipt_id: *receipt_id }
+        }
+        BrokerMintRequest::PollApproval { receipt_id } => {
+            let mut map = approvals().lock().unwrap_or_else(|e| e.into_inner());
+            match map.get(receipt_id) {
+                None => BrokerMintResponse::ApprovalDenied {
+                    receipt_id: *receipt_id,
+                    reason: "unknown approval request".to_string(),
+                },
+                Some(ApprovalState::Pending { requested_at, .. }) => {
+                    if requested_at.elapsed().as_secs() > 300 {
+                        map.remove(receipt_id);
+                        BrokerMintResponse::ApprovalDenied {
+                            receipt_id: *receipt_id,
+                            reason: "timeout".to_string(),
+                        }
+                    } else {
+                        BrokerMintResponse::ApprovalPending { receipt_id: *receipt_id }
+                    }
+                }
+                Some(ApprovalState::Granted { approver }) => {
+                    let approver = approver.clone();
+                    map.remove(receipt_id);
+                    BrokerMintResponse::ApprovalGranted { receipt_id: *receipt_id, approver }
+                }
+                Some(ApprovalState::Denied { reason }) => {
+                    let reason = reason.clone();
+                    map.remove(receipt_id);
+                    BrokerMintResponse::ApprovalDenied { receipt_id: *receipt_id, reason }
+                }
+            }
+        }
+        BrokerMintRequest::Approve { receipt_id, approver, comment } => {
+            let mut map = approvals().lock().unwrap_or_else(|e| e.into_inner());
+            match map.get(receipt_id) {
+                Some(ApprovalState::Pending { .. }) => {
+                    eprintln!("[clix-broker] approved: {} by {}", receipt_id, approver);
+                    let _ = comment; // stored in receipt by caller if needed
+                    map.insert(*receipt_id, ApprovalState::Granted { approver: approver.clone() });
+                    BrokerMintResponse::ApprovalGranted { receipt_id: *receipt_id, approver: approver.clone() }
+                }
+                _ => BrokerMintResponse::ApprovalDenied {
+                    receipt_id: *receipt_id,
+                    reason: "no pending approval found for this id".to_string(),
+                },
+            }
+        }
+        BrokerMintRequest::Reject { receipt_id, approver, reason } => {
+            let mut map = approvals().lock().unwrap_or_else(|e| e.into_inner());
+            let denial = reason.clone().unwrap_or_else(|| format!("rejected by {approver}"));
+            match map.get(receipt_id) {
+                Some(ApprovalState::Pending { .. }) => {
+                    eprintln!("[clix-broker] rejected: {} by {}", receipt_id, approver);
+                    map.insert(*receipt_id, ApprovalState::Denied { reason: denial.clone() });
+                    BrokerMintResponse::ApprovalDenied { receipt_id: *receipt_id, reason: denial }
+                }
+                _ => BrokerMintResponse::ApprovalDenied {
+                    receipt_id: *receipt_id,
+                    reason: "no pending approval found for this id".to_string(),
+                },
             }
         }
     }

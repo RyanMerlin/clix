@@ -68,6 +68,108 @@ pub fn mint_credentials(socket_path: &Path, cli: &str) -> Result<HashMap<String,
     }
 }
 
+// ─── Approval helpers ─────────────────────────────────────────────────────────
+
+/// Result of polling an approval request.
+#[derive(Debug)]
+pub enum ApprovalPollResult {
+    Pending,
+    Granted { approver: String },
+    Denied { reason: String },
+}
+
+/// A connected broker client that reuses one UnixStream for multiple requests.
+pub struct BrokerClient {
+    writer: UnixStream,
+    reader: BufReader<UnixStream>,
+}
+
+impl BrokerClient {
+    pub fn connect() -> Result<Self> {
+        let socket = broker_socket_path();
+        let stream = UnixStream::connect(&socket)
+            .map_err(|e| crate::error::ClixError::Broker(format!("connect to broker at {}: {e}", socket.display())))?;
+        let writer = stream.try_clone()
+            .map_err(|e| crate::error::ClixError::Broker(format!("clone stream: {e}")))?;
+        let reader = BufReader::new(stream);
+        Ok(Self { writer, reader })
+    }
+
+    fn send_request(&mut self, req: &BrokerMintRequest) -> Result<BrokerMintResponse> {
+        let msg = serde_json::to_string(req)? + "\n";
+        self.writer.write_all(msg.as_bytes())
+            .map_err(|e| crate::error::ClixError::Broker(format!("write: {e}")))?;
+        self.writer.flush().ok();
+
+        let mut line = String::new();
+        self.reader.read_line(&mut line)
+            .map_err(|e| crate::error::ClixError::Broker(format!("read: {e}")))?;
+        serde_json::from_str(line.trim())
+            .map_err(|e| crate::error::ClixError::Broker(format!("parse response: {e}")))
+    }
+
+    pub fn send_request_approval(
+        &mut self,
+        receipt_id: uuid::Uuid,
+        capability: &str,
+        input: &serde_json::Value,
+        ctx: &serde_json::Value,
+        reason: &str,
+    ) -> Result<()> {
+        let req = BrokerMintRequest::RequestApproval {
+            receipt_id,
+            capability: capability.to_string(),
+            input: input.clone(),
+            context: ctx.clone(),
+            reason: reason.to_string(),
+        };
+        match self.send_request(&req)? {
+            BrokerMintResponse::ApprovalPending { .. } => Ok(()),
+            other => Err(crate::error::ClixError::Broker(format!(
+                "unexpected broker response to RequestApproval: {other:?}"
+            ))),
+        }
+    }
+
+    pub fn poll_approval(&mut self, receipt_id: uuid::Uuid) -> Result<ApprovalPollResult> {
+        let req = BrokerMintRequest::PollApproval { receipt_id };
+        match self.send_request(&req)? {
+            BrokerMintResponse::ApprovalPending { .. } => Ok(ApprovalPollResult::Pending),
+            BrokerMintResponse::ApprovalGranted { approver, .. } => {
+                Ok(ApprovalPollResult::Granted { approver })
+            }
+            BrokerMintResponse::ApprovalDenied { reason, .. } => {
+                Ok(ApprovalPollResult::Denied { reason })
+            }
+            other => Err(crate::error::ClixError::Broker(format!(
+                "unexpected broker response to PollApproval: {other:?}"
+            ))),
+        }
+    }
+
+    pub fn send_approve(
+        &mut self,
+        receipt_id: uuid::Uuid,
+        approver: String,
+        comment: Option<String>,
+    ) -> Result<()> {
+        let req = BrokerMintRequest::Approve { receipt_id, approver, comment };
+        self.send_request(&req)?;
+        Ok(())
+    }
+
+    pub fn send_reject(
+        &mut self,
+        receipt_id: uuid::Uuid,
+        approver: String,
+        reason: Option<String>,
+    ) -> Result<()> {
+        let req = BrokerMintRequest::Reject { receipt_id, approver, reason };
+        self.send_request(&req)?;
+        Ok(())
+    }
+}
+
 /// Extract the CLI name from a command string (basename without path or extension).
 /// `"/usr/bin/gcloud"` → `"gcloud"`, `"kubectl"` → `"kubectl"`.
 pub fn cli_name_from_command(command: &str) -> &str {

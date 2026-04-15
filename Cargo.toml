@@ -38,3 +38,6 @@ criterion          = { version = "0.5", features = ["html_reports"] }
 keyring            = { version = "3", features = ["async-secret-service", "async-io", "crypto-rust"] }
 rpassword          = "7"
 base64             = "0.22"
+ed25519-dalek      = { version = "2", features = ["rand_core", "pem"] }
+rand_core          = { version = "0.6", features = ["getrandom"] }
+pkcs8              = { version = "0.10", features = ["pem"] }

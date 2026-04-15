@@ -7,6 +7,8 @@ mod tui;
 use anyhow::Result;
 use clap::FromArgMatches;
 use cli::{Cli, Commands, CapabilitiesCmd, WorkflowCmd, ProfileCmd, ReceiptsCmd, PackCmd, ShimCmd, McpCmd, ToolsCmd, BrokerCmd};
+#[allow(unused_imports)]
+use commands::approve;
 
 use clix_core::execution::run_capability;
 use clix_core::loader::{build_registry, load_policy};
@@ -155,15 +157,24 @@ async fn dispatch_static(cli: Cli) -> Result<()> {
             commands::secrets::run_secrets(sub, &state)?;
         }
         Commands::Broker(sub) => commands::broker::run_broker(sub)?,
+        Commands::Approve { receipt_id, approver, comment } => {
+            commands::approve::approve(&receipt_id, &approver, comment.as_deref())?;
+        }
+        Commands::Reject { receipt_id, approver, reason } => {
+            commands::approve::reject(&receipt_id, &approver, reason.as_deref())?;
+        }
         Commands::Pack(sub) => match sub {
             PackCmd::List { json, available } => commands::pack::list(json, available)?,
             PackCmd::Show { name, json } => commands::pack::show(&name, json)?,
             PackCmd::Discover { path, json } => commands::pack::discover(&path, json)?,
             PackCmd::Validate { path } => commands::pack::validate(&path)?,
             PackCmd::Diff { installed, new_path, json } => commands::pack::diff(&installed, &new_path, json)?,
-            PackCmd::Install { path } => commands::pack::install(&path)?,
-            PackCmd::Bundle { path } => commands::pack::bundle(&path)?,
+            PackCmd::Install { path, verify_sig } => commands::pack::install(&path, verify_sig)?,
+            PackCmd::Bundle { path, sign, key } => commands::pack::bundle(&path, sign, key.as_deref())?,
             PackCmd::Publish { path } => commands::pack::publish(&path)?,
+            PackCmd::Keygen { force } => commands::pack::keygen(force)?,
+            PackCmd::Trust { pubkey_path } => commands::pack::trust(&pubkey_path)?,
+            PackCmd::Verify { pack_path } => commands::pack::verify(&pack_path)?,
             PackCmd::Scaffold { name, preset, command } => commands::pack::scaffold(&name, &preset, command.as_deref())?,
             PackCmd::Onboard { name, command, json } => commands::pack::onboard(&name, &command, json)?,
         },

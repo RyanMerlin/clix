@@ -6,6 +6,7 @@ pub const STATIC_COMMANDS: &[&str] = &[
     "init", "status", "version", "run", "capabilities",
     "workflow", "profile", "receipts", "serve", "pack", "tui",
     "doctor", "shim", "mcp", "tools", "secrets", "broker",
+    "approve", "reject",
 ];
 
 #[derive(Parser)]
@@ -105,6 +106,18 @@ pub enum Commands {
     /// Manage the credential broker daemon
     #[command(subcommand)]
     Broker(BrokerCmd),
+    /// Approve a pending capability execution
+    Approve {
+        receipt_id: String,
+        #[arg(long, default_value = "operator")] approver: String,
+        #[arg(long)] comment: Option<String>,
+    },
+    /// Reject a pending capability execution
+    Reject {
+        receipt_id: String,
+        #[arg(long, default_value = "operator")] approver: String,
+        #[arg(long)] reason: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -189,8 +202,18 @@ pub enum PackCmd {
     Discover { path: String, #[arg(long)] json: bool },
     Validate { path: String },
     Diff { installed: String, new_path: String, #[arg(long)] json: bool },
-    Install { path: String },
-    Bundle { path: String },
+    Install {
+        path: String,
+        /// Require a valid Ed25519 signature before installing
+        #[arg(long)] verify_sig: bool,
+    },
+    Bundle {
+        path: String,
+        /// Sign the bundle with the default key (~/.clix/pack-signing.pem)
+        #[arg(long)] sign: bool,
+        /// Override the signing key path
+        #[arg(long)] key: Option<String>,
+    },
     Publish { path: String },
     Scaffold {
         name: String,
@@ -202,4 +225,13 @@ pub enum PackCmd {
         #[arg(long)] command: String,
         #[arg(long)] json: bool,
     },
+    /// Generate an Ed25519 signing key pair
+    Keygen {
+        /// Overwrite existing keys
+        #[arg(long)] force: bool,
+    },
+    /// Add a public key to the trusted-pack-keys directory
+    Trust { pubkey_path: String },
+    /// Verify the signature of a pack archive without installing
+    Verify { pack_path: String },
 }

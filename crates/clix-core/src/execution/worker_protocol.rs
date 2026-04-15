@@ -92,6 +92,36 @@ pub enum BrokerMintRequest {
     /// Health-check ping — broker responds with Pong.
     #[serde(rename = "ping")]
     Ping,
+    /// Request a human approval for a pending capability execution.
+    #[serde(rename = "requestApproval")]
+    RequestApproval {
+        receipt_id: uuid::Uuid,
+        capability: String,
+        input: serde_json::Value,
+        context: serde_json::Value,
+        reason: String,
+    },
+    /// Poll the approval state for a previously submitted request.
+    #[serde(rename = "pollApproval")]
+    PollApproval {
+        receipt_id: uuid::Uuid,
+    },
+    /// Grant a pending approval.
+    #[serde(rename = "approve")]
+    Approve {
+        receipt_id: uuid::Uuid,
+        approver: String,
+        #[serde(default)]
+        comment: Option<String>,
+    },
+    /// Reject a pending approval.
+    #[serde(rename = "reject")]
+    Reject {
+        receipt_id: uuid::Uuid,
+        approver: String,
+        #[serde(default)]
+        reason: Option<String>,
+    },
 }
 
 fn default_duration() -> u64 { 3600 }
@@ -114,6 +144,23 @@ pub enum BrokerMintResponse {
     #[serde(rename = "pong")]
     Pong {
         version: String,
+    },
+    /// Approval request registered; waiting for human decision.
+    #[serde(rename = "approvalPending")]
+    ApprovalPending {
+        receipt_id: uuid::Uuid,
+    },
+    /// Approval granted.
+    #[serde(rename = "approvalGranted")]
+    ApprovalGranted {
+        receipt_id: uuid::Uuid,
+        approver: String,
+    },
+    /// Approval denied.
+    #[serde(rename = "approvalDenied")]
+    ApprovalDenied {
+        receipt_id: uuid::Uuid,
+        reason: String,
     },
 }
 
