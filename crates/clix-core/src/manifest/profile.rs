@@ -1,5 +1,47 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use super::capability::IsolationTier;
+
+/// Deserialize a capability entry that is either a plain string name
+/// or a full capability object (legacy format) — we only keep the name.
+fn deser_cap_name<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    match v {
+        serde_json::Value::String(s) => Ok(s),
+        serde_json::Value::Object(m) => m
+            .get("name")
+            .and_then(|n| n.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| serde::de::Error::custom("capability object missing 'name' field")),
+        _ => Err(serde::de::Error::custom("expected string or object for capability")),
+    }
+}
+
+fn deser_cap_list<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    struct CapListVisitor;
+    impl<'de> serde::de::Visitor<'de> for CapListVisitor {
+        type Value = Vec<String>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            write!(f, "a list of capability names or objects")
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Vec<String>, A::Error> {
+            let mut out = Vec::new();
+            while let Some(v) = seq.next_element::<serde_json::Value>()? {
+                let name = match v {
+                    serde_json::Value::String(s) => s,
+                    serde_json::Value::Object(m) => m
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .map(|s| s.to_string())
+                        .ok_or_else(|| serde::de::Error::custom("capability object missing 'name'"))?,
+                    _ => return Err(serde::de::Error::custom("unexpected capability entry")),
+                };
+                out.push(name);
+            }
+            Ok(out)
+        }
+    }
+    d.deserialize_seq(CapListVisitor)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -8,7 +50,7 @@ pub struct ProfileManifest {
     pub version: u32,
     #[serde(default)]
     pub description: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deser_cap_list")]
     pub capabilities: Vec<String>,
     #[serde(default)]
     pub workflows: Vec<String>,

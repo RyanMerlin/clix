@@ -1,4 +1,15 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// Deserialize sandboxProfile tolerating both string (legacy) and struct (current) forms.
+/// A string value is treated as a named preset and ignored — the structured policy is what matters.
+fn deser_sandbox_profile<'de, D: Deserializer<'de>>(d: D) -> Result<Option<SandboxProfile>, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    match v {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::String(_) => Ok(None),  // legacy named preset — ignore, use defaults
+        obj => serde_json::from_value(obj).map(Some).map_err(serde::de::Error::custom),
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -13,7 +24,7 @@ pub struct CapabilityManifest {
     #[serde(default)]
     pub side_effect_class: SideEffectClass,
     /// Structured sandbox policy for this capability. Controls seccomp, fs, network, and cgroup limits.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deser_sandbox_profile")]
     pub sandbox_profile: Option<SandboxProfile>,
     /// Which isolation tier to run this capability in (defaults to warm_worker on Linux).
     #[serde(default)]
@@ -157,9 +168,10 @@ pub enum SideEffectClass {
     #[serde(rename = "none")]
     #[default]
     None,
-    #[serde(rename = "readOnly")]
+    #[serde(rename = "readOnly", alias = "read_only", alias = "readonly")]
     ReadOnly,
     Additive,
+    #[serde(alias = "write_remote", alias = "writeRemote")]
     Mutating,
     Destructive,
 }
