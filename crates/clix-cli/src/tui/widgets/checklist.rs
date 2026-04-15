@@ -153,6 +153,12 @@ impl Checklist {
             format!(" {} ", title)
         };
 
+        // Divide available width: 2 check + label (40%) + detail (fills) + tag (12)
+        let usable = area.width.saturating_sub(4) as usize;  // minus borders + check
+        let label_width = (usable * 38 / 100).max(24).min(48);
+        let tag_width = 12usize;
+        let detail_width = usable.saturating_sub(label_width + tag_width + 4).max(20);
+
         let items: Vec<ListItem> = visible.iter().enumerate().map(|(display_idx, &real_idx)| {
             let item = &self.items[real_idx];
             let check = if item.selected { "■" } else { "□" };
@@ -164,14 +170,13 @@ impl Checklist {
                 theme::normal()
             };
 
-            // Build line: checkbox + label (padded) + detail + tag
-            let label_width = 32usize.min(area.width.saturating_sub(20) as usize);
             let label_padded = format!("{:<width$}", item.label, width = label_width);
+            let detail_padded = format!("{:<width$}", item.detail, width = detail_width);
 
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{} ", check), check_style),
                 Span::styled(label_padded, label_style),
-                Span::styled(format!("  {:<30}", item.detail), theme::dim()),
+                Span::styled(format!("  {}", detail_padded), theme::dim()),
                 Span::styled(format!("  {}", item.tag), Style::default().fg(item.tag_color)),
             ]))
         }).collect();

@@ -287,8 +287,8 @@ impl PackWizard {
     }
 
     pub fn render(&self, f: &mut Frame, area: Rect) {
-        let width = area.width.min(82).max(55);
-        let height = area.height.min(32).max(14);
+        let width = area.width.saturating_sub(4).max(55);
+        let height = area.height.saturating_sub(2).max(14);
         let x = (area.width.saturating_sub(width)) / 2;
         let y = (area.height.saturating_sub(height)) / 2;
         let dialog = Rect::new(x, y, width, height);

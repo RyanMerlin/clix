@@ -147,8 +147,8 @@ impl ProfileWizard {
 
     pub fn render(&self, f: &mut Frame, area: Rect) {
         // Center a dialog
-        let width = area.width.min(72).max(50);
-        let height = area.height.min(30).max(12);
+        let width = area.width.saturating_sub(4).max(50);
+        let height = area.height.saturating_sub(2).max(12);
         let x = (area.width.saturating_sub(width)) / 2;
         let y = (area.height.saturating_sub(height)) / 2;
         let dialog = Rect::new(x, y, width, height);
