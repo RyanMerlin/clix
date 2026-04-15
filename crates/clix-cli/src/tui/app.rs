@@ -255,12 +255,33 @@ impl App {
 
     fn open_pack_edit(&mut self) {
         use crate::tui::widgets::checklist::{Checklist, ChecklistItem};
+        use clix_core::manifest::loader::load_dir;
+        use clix_core::manifest::capability::CapabilityManifest;
+
         let Some(pack) = self.packs.get(self.packs_cursor) else { return; };
         let pack_name = pack.name.clone();
         let current_caps: std::collections::HashSet<String> = pack.capabilities.iter().cloned().collect();
 
-        // Build checklist from all known capabilities
-        let mut items: Vec<ChecklistItem> = self.registry.all().iter().map(|cap| {
+        // Load ALL capabilities from disk (unfiltered — registry may be scoped to active profiles)
+        let state = ClixState::load(home_dir()).ok();
+        let mut all_caps: Vec<CapabilityManifest> = vec![];
+        if let Some(ref s) = state {
+            let _ = load_dir::<CapabilityManifest>(&s.capabilities_dir).map(|mut v| all_caps.append(&mut v));
+            if s.packs_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&s.packs_dir) {
+                    for entry in entries.filter_map(|e| e.ok()) {
+                        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                            let _ = load_dir::<CapabilityManifest>(&entry.path().join("capabilities"))
+                                .map(|mut v| all_caps.append(&mut v));
+                        }
+                    }
+                }
+            }
+        }
+        all_caps.sort_by(|a, b| a.name.cmp(&b.name));
+        all_caps.dedup_by(|a, b| a.name == b.name);
+
+        let items: Vec<ChecklistItem> = all_caps.iter().map(|cap| {
             let risk_str = format!("{:?}", cap.risk).to_lowercase();
             let tag_color = crate::tui::theme::risk_color(&risk_str);
             let mut item = ChecklistItem::new(
@@ -274,7 +295,6 @@ impl App {
             item.selected = current_caps.contains(&cap.name);
             item
         }).collect();
-        items.sort_by(|a, b| a.id.cmp(&b.id));
 
         self.overlay = Overlay::PackEdit { pack_name, checklist: Checklist::new(items) };
     }
