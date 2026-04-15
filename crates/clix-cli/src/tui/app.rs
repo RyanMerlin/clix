@@ -240,9 +240,11 @@ impl App {
             KeyCode::Char('e') if self.screen == Screen::Packs => {
                 self.open_pack_edit();
             }
-            // Content navigation — arrow keys
+            // Content navigation — arrow keys + page
             KeyCode::Down => self.cursor_down(),
             KeyCode::Up => self.cursor_up(),
+            KeyCode::PageDown => self.cursor_page(15),
+            KeyCode::PageUp => self.cursor_page(-15),
             KeyCode::Enter => self.handle_enter(),
             KeyCode::Esc | KeyCode::Backspace => self.handle_back(),
             _ => {}
@@ -296,7 +298,10 @@ impl App {
             item
         }).collect();
 
-        self.overlay = Overlay::PackEdit { pack_name, checklist: Checklist::new(items) };
+        // Pre-filter to pack name so user sees relevant caps immediately
+        let mut checklist = Checklist::new(items);
+        checklist.filter = pack_name.to_lowercase();
+        self.overlay = Overlay::PackEdit { pack_name, checklist };
     }
 
     fn open_create_wizard(&mut self) {
@@ -442,6 +447,13 @@ impl App {
     fn cursor_up(&mut self) {
         let c = self.cursor_mut();
         if *c > 0 { *c -= 1; }
+    }
+
+    fn cursor_page(&mut self, delta: i32) {
+        let len = self.current_list_len();
+        if len == 0 { return; }
+        let c = self.cursor_mut();
+        *c = ((*c as i32) + delta).max(0).min((len as i32) - 1) as usize;
     }
 
     fn current_list_len(&self) -> usize {

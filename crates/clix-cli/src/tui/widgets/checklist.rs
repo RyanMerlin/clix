@@ -122,6 +122,15 @@ impl Checklist {
                 if self.cursor > 0 { self.cursor -= 1; }
                 return true;
             }
+            KeyCode::PageDown => {
+                let len = self.visible_indices().len();
+                if len > 0 { self.cursor = (self.cursor + 15).min(len - 1); }
+                return true;
+            }
+            KeyCode::PageUp => {
+                self.cursor = self.cursor.saturating_sub(15);
+                return true;
+            }
             KeyCode::Char(' ') => {
                 self.toggle_current();
                 return true;
