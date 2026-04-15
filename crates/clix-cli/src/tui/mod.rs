@@ -338,17 +338,6 @@ fn render_pack_edit(f: &mut Frame, pack_name: &str, checklist: &crate::tui::widg
     let inner = block.inner(dialog);
     f.render_widget(block, dialog);
 
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(1)])
-        .split(inner);
-
     let title = format!("Capabilities ({} selected)", checklist.selected_count());
-    checklist.render(f, chunks[0], &title, true);
-
-    f.render_widget(
-        Paragraph::new("space:toggle  /:filter  a:all  x:none  enter:save  esc:cancel")
-            .style(theme::muted()),
-        chunks[1],
-    );
+    checklist.render_with_hint(f, inner, &title, true, "enter:save  esc:cancel");
 }

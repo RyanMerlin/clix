@@ -149,6 +149,10 @@ impl Checklist {
     }
 
     pub fn render(&self, f: &mut Frame, area: Rect, title: &str, focused: bool) {
+        self.render_with_hint(f, area, title, focused, "");
+    }
+
+    pub fn render_with_hint(&self, f: &mut Frame, area: Rect, title: &str, focused: bool, extra_hint: &str) {
         let border_style = if focused { theme::border_focused() } else { theme::border_normal() };
         let visible = self.visible_indices();
         let count = self.selected_count();
@@ -209,9 +213,12 @@ impl Checklist {
             Paragraph::new("esc: exit filter  enter: confirm")
                 .style(theme::muted())
         } else {
-            Paragraph::new(format!("{} of {} selected  ·  space:toggle  /:filter  a:all  x:none",
-                count, self.items.len()))
-                .style(theme::muted())
+            let hint = if extra_hint.is_empty() {
+                format!("{} of {} selected  ·  space:toggle  /:filter  a:all  x:none", count, self.items.len())
+            } else {
+                format!("{} of {} selected  ·  space:toggle  /:filter  a:all  x:none  {}", count, self.items.len(), extra_hint)
+            };
+            Paragraph::new(hint).style(theme::muted())
         };
         f.render_widget(status, status_area);
     }
