@@ -1,4 +1,10 @@
 pub mod error;
+
+/// Set to true by the TUI before entering alternate-screen mode.
+/// The manifest loader checks this to suppress stderr warnings that would
+/// corrupt the TUI display.
+pub static TUI_MODE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 pub mod manifest;
 pub mod policy;
 pub mod schema;

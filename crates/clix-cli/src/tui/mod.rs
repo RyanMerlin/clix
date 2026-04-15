@@ -16,6 +16,10 @@ pub mod theme;
 pub mod widgets;
 
 pub fn run() -> Result<()> {
+    // Suppress loader warnings for the duration of the TUI session —
+    // eprintln! in alternate-screen mode corrupts the display.
+    clix_core::TUI_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
+
     let mut app = App::new()?;
 
     enable_raw_mode()?;

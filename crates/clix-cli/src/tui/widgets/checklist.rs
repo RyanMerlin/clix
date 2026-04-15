@@ -130,7 +130,7 @@ impl Checklist {
                 self.select_all_visible();
                 return true;
             }
-            KeyCode::Char('A') => {
+            KeyCode::Char('x') => {
                 self.deselect_all_visible();
                 return true;
             }
@@ -200,7 +200,7 @@ impl Checklist {
             Paragraph::new("esc: exit filter  enter: confirm")
                 .style(theme::muted())
         } else {
-            Paragraph::new(format!("{} of {} selected  ·  space:toggle  /:filter  a:all  A:none",
+            Paragraph::new(format!("{} of {} selected  ·  space:toggle  /:filter  a:all  x:none",
                 count, self.items.len()))
                 .style(theme::muted())
         };
