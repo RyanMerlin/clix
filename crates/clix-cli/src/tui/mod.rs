@@ -1,4 +1,5 @@
 use std::io;
+use std::time::Duration;
 use crossterm::{
     event::{self, Event, KeyEventKind},
     execute,
@@ -6,22 +7,23 @@ use crossterm::{
 };
 use ratatui::{prelude::*, widgets::*};
 use anyhow::Result;
-use crate::tui::app::{App, ModalKind, Screen};
+
+use crate::tui::app::{App, Screen, Overlay};
+
 pub mod app;
 pub mod screens;
+pub mod theme;
+pub mod widgets;
 
 pub fn run() -> Result<()> {
-    // Load app data BEFORE touching terminal
     let mut app = App::new()?;
 
-    // terminal setup
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Restore terminal on panic
     let orig_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
@@ -31,7 +33,6 @@ pub fn run() -> Result<()> {
 
     let result = run_loop(&mut terminal, &mut app);
 
-    // cleanup (always runs, ignore errors to ensure cleanup proceeds)
     let _ = disable_raw_mode();
     let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
     let _ = terminal.show_cursor();
@@ -41,10 +42,14 @@ pub fn run() -> Result<()> {
 
 fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> Result<()> {
     loop {
+        app.tick();
         terminal.draw(|f| render(f, app))?;
-        if let Event::Key(key) = event::read()? {
-            if key.kind == KeyEventKind::Press {
-                app.handle_key(key);
+        // Poll with 250ms timeout so toasts can auto-dismiss
+        if event::poll(Duration::from_millis(250))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    app.handle_key(key);
+                }
             }
         }
         if app.should_quit { break; }
@@ -53,91 +58,260 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App
 }
 
 fn render(f: &mut Frame, app: &App) {
-    // Layout: 1-line tab bar, content area, 1-line status bar
-    let chunks = Layout::default()
+    let full = f.area();
+
+    // Three vertical bands: header (1), body (min), legend (1)
+    let bands = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(0), Constraint::Length(1)])
-        .split(f.area());
+        .split(full);
 
-    // Tab bar
-    let titles = vec!["[1] Profiles", "[2] Capabilities", "[3] Packs"];
-    let selected = match app.screen {
-        Screen::Profiles => 0,
-        Screen::Capabilities => 1,
-        Screen::Packs => 2,
-    };
-    let tabs = Tabs::new(titles)
-        .select(selected)
-        .highlight_style(Style::default().bold().fg(Color::Rgb(231, 91, 42)));
-    f.render_widget(tabs, chunks[0]);
+    render_header(f, app, bands[0]);
 
-    // Screen content
-    match app.screen {
-        Screen::Profiles => screens::profiles::render(f, app, chunks[1]),
-        Screen::Capabilities => screens::capabilities::render(f, app, chunks[1]),
-        Screen::Packs => screens::packs::render(f, app, chunks[1]),
-    }
+    // Body: sidebar (20) + content
+    let body = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(20), Constraint::Min(0)])
+        .split(bands[1]);
 
-    // Status bar
-    let status = app.last_error.as_deref()
-        .unwrap_or("q:quit  r:reload  ←/→:tabs  ↑/↓:select  Enter:action  n:new  i:install(packs)  Esc:back");
-    let style = if app.last_error.is_some() {
-        Style::default().fg(Color::Red)
+    render_sidebar(f, app, body[0]);
+    render_content(f, app, body[1]);
+
+    render_legend(f, app, bands[2]);
+
+    // Overlays (on top of everything)
+    render_overlay(f, app, full);
+}
+
+// ─── header ──────────────────────────────────────────────────────────────────
+
+fn render_header(f: &mut Frame, app: &App, area: Rect) {
+    let active = if app.active_profiles.is_empty() {
+        "no profile".to_string()
     } else {
-        Style::default().fg(Color::DarkGray)
+        app.active_profiles.join(", ")
     };
-    let status_bar = Paragraph::new(status).style(style);
-    f.render_widget(status_bar, chunks[2]);
 
-    // Render modal overlay if open
-    if app.modal.is_open() {
-        render_modal(f, app);
+    let left = Span::styled(" clix ", theme::accent_bold());
+    let spacer = Span::styled("─".repeat(area.width.saturating_sub(12 + active.len() as u16 + 2) as usize), theme::muted());
+    let right = Span::styled(format!(" {} ", active), theme::dim());
+
+    let line = Line::from(vec![left, spacer, right]);
+    f.render_widget(Paragraph::new(line), area);
+}
+
+// ─── sidebar ─────────────────────────────────────────────────────────────────
+
+static SIDEBAR_ITEMS: &[(&str, &str)] = &[
+    ("0", "Dashboard"),
+    ("1", "Profiles"),
+    ("2", "Capabilities"),
+    ("3", "Packs"),
+    ("4", "Receipts"),
+    ("5", "Workflows"),
+    ("6", "Broker"),
+];
+
+static STUB_SCREENS: &[Screen] = &[Screen::Receipts, Screen::Workflows, Screen::Broker];
+
+fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
+    let active_idx = app.screen.sidebar_index();
+
+    let items: Vec<ListItem> = SIDEBAR_ITEMS.iter().enumerate().map(|(i, (key, label))| {
+        let is_active = i == active_idx;
+        let is_stub = STUB_SCREENS.contains(&Screen::from_index(i));
+
+        if is_active {
+            ListItem::new(Line::from(vec![
+                Span::styled("▸ ", theme::accent()),
+                Span::styled(*label, theme::accent_bold()),
+            ]))
+        } else if is_stub {
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("  {} ", key), theme::inactive()),
+                Span::styled(format!("{}", label), theme::inactive()),
+            ]))
+        } else {
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("  {} ", key), theme::muted()),
+                Span::styled(*label, theme::dim()),
+            ]))
+        }
+    }).collect();
+
+    let list = List::new(items)
+        .block(Block::default()
+            .borders(Borders::RIGHT)
+            .border_style(theme::border_dim()));
+    f.render_widget(list, area);
+}
+
+// ─── content ─────────────────────────────────────────────────────────────────
+
+fn render_content(f: &mut Frame, app: &App, area: Rect) {
+    match app.screen {
+        Screen::Dashboard => screens::dashboard::render(f, app, area),
+        Screen::Profiles => screens::profiles::render(f, app, area),
+        Screen::Capabilities => screens::capabilities::render(f, app, area),
+        Screen::Packs => screens::packs::render(f, app, area),
+        _ => render_stub(f, app, area),
     }
 }
 
-fn render_modal(f: &mut Frame, app: &App) {
-    let area = f.area();
-    let (title, field_labels): (&str, &[&str]) = match app.modal.kind.as_ref().unwrap() {
-        ModalKind::CreateProfile => ("Create Profile", &["Name", "Description (optional)"]),
-        ModalKind::CreateCapability => ("Create Capability", &["Name (e.g. git.status)", "Description (optional)", "Command (e.g. git)"]),
-        ModalKind::CreatePack => ("Create Pack", &["Name", "Description (optional)"]),
-        ModalKind::InstallPack => ("Install Pack", &["Path to directory or .clixpack.zip"]),
+fn render_stub(f: &mut Frame, app: &App, area: Rect) {
+    let name = match app.screen {
+        Screen::Receipts => "Receipts",
+        Screen::Workflows => "Workflows",
+        Screen::Broker => "Broker",
+        _ => "",
     };
-    let mut height = (field_labels.len() as u16) * 3 + 4;
-    let mut width = area.width * 6 / 10;
-    height = height.min(area.height);
-    width = width.min(area.width);
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(format!("  {} — coming soon", name), theme::muted())),
+        Line::from(""),
+        Line::from(Span::styled("  This surface is under construction.", theme::inactive())),
+    ];
+    let para = Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL).border_style(theme::border_dim()));
+    f.render_widget(para, area);
+}
+
+// ─── legend ───────────────────────────────────────────────────────────────────
+
+fn render_legend(f: &mut Frame, app: &App, area: Rect) {
+    let has_overlay = matches!(app.overlay, Overlay::ProfileCreate(_) | Overlay::CapabilityCreate(_) | Overlay::PackCreate(_) | Overlay::InstallPack(_) | Overlay::Help);
+    if has_overlay { return; }
+
+    let hints: Vec<Span> = match app.screen {
+        Screen::Profiles => legend_spans(&[
+            ("↑↓", "move"), ("enter", "toggle"), ("n", "new"), ("tab", "next screen"), ("?", "help"), ("q", "quit"),
+        ]),
+        Screen::Capabilities => legend_spans(&[
+            ("↑↓", "move"), ("enter", "drill in"), ("esc", "back"), ("n", "new"), ("tab", "next screen"), ("q", "quit"),
+        ]),
+        Screen::Packs => legend_spans(&[
+            ("↑↓", "move"), ("n", "new pack"), ("i", "install"), ("tab", "next screen"), ("q", "quit"),
+        ]),
+        _ => legend_spans(&[
+            ("0-6", "switch"), ("tab", "next"), ("n", "new"), ("r", "reload"), ("?", "help"), ("q", "quit"),
+        ]),
+    };
+
+    f.render_widget(Paragraph::new(Line::from(hints)).style(theme::muted()), area);
+}
+
+fn legend_spans(pairs: &[(&str, &str)]) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    spans.push(Span::raw(" "));
+    for (i, (key, desc)) in pairs.iter().enumerate() {
+        if i > 0 { spans.push(Span::styled("  ", theme::inactive())); }
+        spans.push(Span::styled(key.to_string(), theme::accent()));
+        spans.push(Span::styled(format!(":{}", desc), theme::muted()));
+    }
+    spans
+}
+
+// ─── overlay rendering ────────────────────────────────────────────────────────
+
+fn render_overlay(f: &mut Frame, app: &App, area: Rect) {
+    match &app.overlay {
+        Overlay::None => {}
+        Overlay::Toast { message, is_error, .. } => render_toast(f, message, *is_error, area),
+        Overlay::Help => render_help(f, area),
+        Overlay::ProfileCreate(wiz) => wiz.render(f, area),
+        Overlay::CapabilityCreate(wiz) => wiz.render(f, area),
+        Overlay::PackCreate(wiz) => wiz.render(f, area),
+        Overlay::InstallPack(buf) => render_install_pack(f, buf, area),
+    }
+}
+
+fn render_toast(f: &mut Frame, message: &str, is_error: bool, area: Rect) {
+    let style = if is_error { theme::danger() } else { theme::ok() };
+    let icon = if is_error { "✗ " } else { "✓ " };
+    let text = format!("{}{}", icon, message);
+    let width = (text.len() as u16 + 4).min(area.width);
+    let height = 1u16;
+    let x = area.x + area.width.saturating_sub(width);
+    let y = area.y + area.height.saturating_sub(2);
+    let toast_area = Rect::new(x, y, width, height);
+    f.render_widget(
+        Paragraph::new(Span::styled(format!(" {} ", text), style)),
+        toast_area
+    );
+}
+
+fn render_help(f: &mut Frame, area: Rect) {
+    let width = 50u16.min(area.width);
+    let height = 22u16.min(area.height);
     let x = (area.width.saturating_sub(width)) / 2;
     let y = (area.height.saturating_sub(height)) / 2;
-    let modal_area = ratatui::layout::Rect::new(x, y, width, height);
+    let dialog = Rect::new(x, y, width, height);
 
-    f.render_widget(Clear, modal_area);
-
+    f.render_widget(Clear, dialog);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(format!(" {} ", title))
-        .border_style(Style::default().fg(Color::Rgb(231, 91, 42)));
-    let inner = block.inner(modal_area);
-    f.render_widget(block, modal_area);
+        .title(Span::styled(" Keymap ", theme::accent_bold()))
+        .border_style(theme::border_focused());
+    let inner = block.inner(dialog);
+    f.render_widget(block, dialog);
 
-    let field_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(field_labels.iter().map(|_| Constraint::Length(3)).collect::<Vec<_>>())
-        .split(inner);
+    let lines = vec![
+        Line::from(""),
+        help_line("0-6 / tab", "switch screen"),
+        help_line("↑ / ↓", "move cursor"),
+        help_line("enter", "confirm / drill in"),
+        help_line("esc", "back"),
+        help_line("n", "new (create wizard)"),
+        help_line("i", "install pack"),
+        help_line("r", "reload all"),
+        Line::from(""),
+        Line::from(Span::styled("  Profiles", theme::accent())),
+        help_line("enter", "toggle active"),
+        Line::from(""),
+        Line::from(Span::styled("  Capabilities", theme::accent())),
+        help_line("enter", "drill in / detail"),
+        help_line("esc", "navigate back"),
+        Line::from(""),
+        Line::from(Span::styled("  Wizards", theme::accent())),
+        help_line("tab / shift-tab", "next / prev field"),
+        help_line("← →", "cycle options"),
+        help_line("space", "toggle in checklist"),
+        help_line("/ then text", "filter list"),
+        Line::from(""),
+        Line::from(Span::styled("  any key to close this", theme::muted())),
+    ];
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+    f.render_widget(para, inner);
+}
 
-    for (i, (label, chunk)) in field_labels.iter().zip(field_chunks.iter()).enumerate() {
-        let value = if i == app.modal.field_idx {
-            format!("{}_", app.modal.input_buf)
-        } else {
-            app.modal.fields.get(i).cloned().unwrap_or_default()
-        };
-        let style = if i == app.modal.field_idx {
-            Style::default().fg(Color::White)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-        let field = Paragraph::new(value)
-            .block(Block::default().borders(Borders::ALL).title(*label).border_style(style));
-        f.render_widget(field, *chunk);
-    }
+fn help_line(key: &str, desc: &str) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("  {:16}", key), theme::accent()),
+        Span::styled(desc.to_string(), theme::dim()),
+    ])
+}
+
+fn render_install_pack(f: &mut Frame, buf: &str, area: Rect) {
+    let width = 60u16.min(area.width);
+    let height = 5u16;
+    let x = (area.width.saturating_sub(width)) / 2;
+    let y = (area.height.saturating_sub(height)) / 2;
+    let dialog = Rect::new(x, y, width, height);
+
+    f.render_widget(Clear, dialog);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(" Install Pack ", theme::accent_bold()))
+        .border_style(theme::border_focused());
+    let inner = block.inner(dialog);
+    f.render_widget(block, dialog);
+
+    let display = format!("{}_", buf);
+    let para = Paragraph::new(vec![
+        Line::from(""),
+        Line::from(Span::styled(display, theme::normal())),
+        Line::from(""),
+        Line::from(Span::styled("enter: install   esc: cancel", theme::muted())),
+    ]);
+    f.render_widget(para, inner);
 }

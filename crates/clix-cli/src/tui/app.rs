@@ -6,6 +6,567 @@ use clix_core::manifest::profile::ProfileManifest;
 use clix_core::registry::CapabilityRegistry;
 use clix_core::state::{home_dir, ClixState};
 use clix_core::manifest::loader::load_dir;
+use clix_core::manifest::capability::{
+    CapabilityManifest, Backend, SideEffectClass,
+};
+use clix_core::packs::scaffold::{scaffold_pack, Preset};
+
+use crate::tui::screens::wizards::pack::{PackWizard, PackWizardAction};
+use crate::tui::screens::wizards::profile::{ProfileWizard, ProfileWizardAction};
+use crate::tui::screens::wizards::capability::{CapabilityWizard, CapWizardAction};
+
+// ─── screen ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Screen {
+    Dashboard,
+    Profiles,
+    Capabilities,
+    Packs,
+    Receipts,
+    Workflows,
+    Broker,
+}
+
+impl Screen {
+    pub fn sidebar_index(&self) -> usize {
+        match self {
+            Screen::Dashboard => 0,
+            Screen::Profiles => 1,
+            Screen::Capabilities => 2,
+            Screen::Packs => 3,
+            Screen::Receipts => 4,
+            Screen::Workflows => 5,
+            Screen::Broker => 6,
+        }
+    }
+
+    pub fn from_index(i: usize) -> Self {
+        match i {
+            0 => Screen::Dashboard,
+            1 => Screen::Profiles,
+            2 => Screen::Capabilities,
+            3 => Screen::Packs,
+            4 => Screen::Receipts,
+            5 => Screen::Workflows,
+            6 => Screen::Broker,
+            _ => Screen::Dashboard,
+        }
+    }
+
+    pub fn next(&self) -> Self { Screen::from_index((self.sidebar_index() + 1) % 7) }
+    pub fn prev(&self) -> Self {
+        Screen::from_index(self.sidebar_index().checked_sub(1).unwrap_or(6))
+    }
+}
+
+// ─── capabilities drill-down ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub enum CapView {
+    Namespaces,
+    Listing(String),
+    Detail(String),
+}
+
+// ─── receipt preview row ─────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct ReceiptRow {
+    pub time: String,
+    pub capability: String,
+    pub profile: String,
+    pub outcome: String,
+    pub latency: String,
+}
+
+// ─── overlay ─────────────────────────────────────────────────────────────────
+
+pub enum Overlay {
+    None,
+    ProfileCreate(ProfileWizard),
+    CapabilityCreate(CapabilityWizard),
+    PackCreate(PackWizard),
+    InstallPack(String),  // path buffer
+    Toast { message: String, is_error: bool, expires_at: std::time::Instant },
+    Help,
+}
+
+impl Overlay {
+    pub fn is_open(&self) -> bool { !matches!(self, Overlay::None) }
+}
+
+// ─── app ─────────────────────────────────────────────────────────────────────
+
+pub struct App {
+    pub screen: Screen,
+    pub overlay: Overlay,
+    // data
+    pub profiles: Vec<ProfileManifest>,
+    pub active_profiles: Vec<String>,
+    pub registry: CapabilityRegistry,
+    pub packs: Vec<PackManifest>,
+    pub receipts_preview: Vec<ReceiptRow>,
+    // per-screen cursors
+    pub profiles_cursor: usize,
+    pub caps_view: CapView,
+    pub caps_cursor: usize,
+    pub packs_cursor: usize,
+    pub should_quit: bool,
+}
+
+impl App {
+    pub fn new() -> Result<Self> {
+        let mut state = ClixState::load(home_dir())?;
+        if state.config.active_profiles.is_empty() {
+            let base_pack_dir = state.packs_dir.join("base");
+            if base_pack_dir.exists() {
+                state.config.active_profiles.push("base".to_string());
+                let yaml = serde_yaml::to_string(&state.config)?;
+                std::fs::write(&state.config_path, yaml)?;
+            }
+        }
+        let registry = build_registry(&state)?;
+        let packs = load_packs_from_dir(&state.packs_dir);
+        let profiles = load_all_profiles(&state);
+        let active_profiles = state.config.active_profiles.clone();
+        Ok(Self {
+            screen: Screen::Dashboard,
+            overlay: Overlay::None,
+            profiles,
+            active_profiles,
+            registry,
+            packs,
+            receipts_preview: vec![],
+            profiles_cursor: 0,
+            caps_view: CapView::Namespaces,
+            caps_cursor: 0,
+            packs_cursor: 0,
+            should_quit: false,
+        })
+    }
+
+    pub fn reload(&mut self) -> Result<()> {
+        let new = Self::new()?;
+        self.profiles = new.profiles;
+        self.active_profiles = new.active_profiles;
+        self.registry = new.registry;
+        self.packs = new.packs;
+        self.profiles_cursor = 0;
+        self.caps_view = CapView::Namespaces;
+        self.caps_cursor = 0;
+        self.packs_cursor = 0;
+        Ok(())
+    }
+
+    pub fn cursor(&self) -> usize {
+        match self.screen {
+            Screen::Profiles => self.profiles_cursor,
+            Screen::Capabilities => self.caps_cursor,
+            Screen::Packs => self.packs_cursor,
+            _ => 0,
+        }
+    }
+
+    fn cursor_mut(&mut self) -> &mut usize {
+        match self.screen {
+            Screen::Profiles => &mut self.profiles_cursor,
+            Screen::Capabilities => &mut self.caps_cursor,
+            Screen::Packs => &mut self.packs_cursor,
+            _ => &mut self.profiles_cursor,  // unused placeholder
+        }
+    }
+
+    fn toast(&mut self, msg: &str, is_error: bool) {
+        self.overlay = Overlay::Toast {
+            message: msg.to_string(),
+            is_error,
+            expires_at: std::time::Instant::now() + std::time::Duration::from_secs(3),
+        };
+    }
+
+    pub fn tick(&mut self) {
+        // Dismiss expired toasts
+        if let Overlay::Toast { expires_at, .. } = &self.overlay {
+            if std::time::Instant::now() >= *expires_at {
+                self.overlay = Overlay::None;
+            }
+        }
+    }
+
+    pub fn handle_key(&mut self, key: KeyEvent) {
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+            self.should_quit = true;
+            return;
+        }
+
+        // Delegate to overlay first
+        match &self.overlay {
+            Overlay::None | Overlay::Toast { .. } => {}
+            _ => {
+                self.handle_overlay_key(key);
+                return;
+            }
+        }
+
+        match key.code {
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Char('r') => {
+                match self.reload() {
+                    Ok(_) => self.toast("Reloaded", false),
+                    Err(e) => self.toast(&format!("Reload failed: {e}"), true),
+                }
+            }
+            KeyCode::Char('?') => self.overlay = Overlay::Help,
+            // Number shortcuts
+            KeyCode::Char('1') => self.switch_to(Screen::Profiles),
+            KeyCode::Char('2') => self.switch_to(Screen::Capabilities),
+            KeyCode::Char('3') => self.switch_to(Screen::Packs),
+            KeyCode::Char('4') => self.switch_to(Screen::Receipts),
+            KeyCode::Char('5') => self.switch_to(Screen::Workflows),
+            KeyCode::Char('6') => self.switch_to(Screen::Broker),
+            KeyCode::Char('0') => self.switch_to(Screen::Dashboard),
+            // Tab / arrows for screen navigation
+            KeyCode::Tab => self.switch_to(self.screen.next()),
+            KeyCode::BackTab => self.switch_to(self.screen.prev()),
+            // n = new (create wizard)
+            KeyCode::Char('n') => self.open_create_wizard(),
+            // i = install pack
+            KeyCode::Char('i') if self.screen == Screen::Packs => {
+                self.overlay = Overlay::InstallPack(String::new());
+            }
+            // Content navigation — arrow keys
+            KeyCode::Down => self.cursor_down(),
+            KeyCode::Up => self.cursor_up(),
+            KeyCode::Enter => self.handle_enter(),
+            KeyCode::Esc | KeyCode::Backspace => self.handle_back(),
+            _ => {}
+        }
+    }
+
+    fn switch_to(&mut self, screen: Screen) {
+        self.screen = screen;
+    }
+
+    fn open_create_wizard(&mut self) {
+        match self.screen {
+            Screen::Profiles => {
+                self.overlay = Overlay::ProfileCreate(ProfileWizard::new(&self.registry));
+            }
+            Screen::Capabilities => {
+                self.overlay = Overlay::CapabilityCreate(CapabilityWizard::new());
+            }
+            Screen::Packs => {
+                self.overlay = Overlay::PackCreate(PackWizard::new());
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_overlay_key(&mut self, key: KeyEvent) {
+        // Dismiss help overlay on any key
+        if matches!(self.overlay, Overlay::Help) {
+            self.overlay = Overlay::None;
+            return;
+        }
+
+        // Install pack text buffer
+        if let Overlay::InstallPack(ref mut buf) = self.overlay {
+            match key.code {
+                KeyCode::Esc => { self.overlay = Overlay::None; }
+                KeyCode::Enter => {
+                    let path = buf.clone();
+                    if path.is_empty() {
+                        self.overlay = Overlay::None;
+                        return;
+                    }
+                    match self.do_install_pack(&path) {
+                        Ok(_) => {
+                            self.overlay = Overlay::None;
+                            let _ = self.reload();
+                            self.toast("Pack installed", false);
+                        }
+                        Err(e) => self.toast(&format!("Install failed: {e}"), true),
+                    }
+                }
+                KeyCode::Backspace => { buf.pop(); }
+                KeyCode::Char(c) => { buf.push(c); }
+                _ => {}
+            }
+            return;
+        }
+
+        // Wizard key delegation
+        let code = key.code;
+        let result: Option<Result<String>> = match &mut self.overlay {
+            Overlay::ProfileCreate(wiz) => {
+                let action = wiz.handle_key(code);
+                match action {
+                    ProfileWizardAction::Cancel => {
+                        self.overlay = Overlay::None;
+                        None
+                    }
+                    ProfileWizardAction::Submit { name, description, capabilities } => {
+                        Some(self.do_create_profile(&name, &description, &capabilities))
+                    }
+                    ProfileWizardAction::None => None,
+                }
+            }
+            Overlay::CapabilityCreate(wiz) => {
+                let action = wiz.handle_key(code);
+                match action {
+                    CapWizardAction::Cancel => {
+                        self.overlay = Overlay::None;
+                        None
+                    }
+                    CapWizardAction::Submit { name, description, command, args, risk, side_effect } => {
+                        Some(self.do_create_capability(&name, &description, &command, &args, &risk, &side_effect))
+                    }
+                    CapWizardAction::None => None,
+                }
+            }
+            Overlay::PackCreate(wiz) => {
+                let action = wiz.handle_key(code);
+                match action {
+                    PackWizardAction::Cancel => {
+                        self.overlay = Overlay::None;
+                        None
+                    }
+                    PackWizardAction::Submit { name, description, author, preset, seed_command, capability_names } => {
+                        Some(self.do_create_pack(&name, &description, &author, preset, &seed_command, &capability_names))
+                    }
+                    PackWizardAction::None => None,
+                }
+            }
+            _ => None,
+        };
+
+        if let Some(res) = result {
+            match res {
+                Ok(msg) => {
+                    self.overlay = Overlay::None;
+                    let _ = self.reload();
+                    self.toast(&msg, false);
+                }
+                Err(e) => {
+                    // Don't close wizard — show error in it if possible
+                    self.toast(&format!("Error: {e}"), true);
+                }
+            }
+        }
+    }
+
+    // ─── cursor navigation ────────────────────────────────────────────────────
+
+    fn cursor_down(&mut self) {
+        let len = self.current_list_len();
+        if len > 0 {
+            let c = self.cursor_mut();
+            *c = (*c + 1).min(len - 1);
+        }
+    }
+
+    fn cursor_up(&mut self) {
+        let c = self.cursor_mut();
+        if *c > 0 { *c -= 1; }
+    }
+
+    fn current_list_len(&self) -> usize {
+        match self.screen {
+            Screen::Profiles => self.profiles.len(),
+            Screen::Capabilities => match &self.caps_view {
+                CapView::Namespaces => self.registry.namespaces().len(),
+                CapView::Listing(ns) => self.registry.by_namespace(ns).len(),
+                CapView::Detail(_) => 0,
+            },
+            Screen::Packs => self.packs.len(),
+            _ => 0,
+        }
+    }
+
+    fn handle_enter(&mut self) {
+        match self.screen {
+            Screen::Capabilities => {
+                match self.caps_view.clone() {
+                    CapView::Namespaces => {
+                        let namespaces = self.registry.namespaces();
+                        if let Some(ns) = namespaces.get(self.caps_cursor) {
+                            self.caps_view = CapView::Listing(ns.key.clone());
+                            self.caps_cursor = 0;
+                        }
+                    }
+                    CapView::Listing(ns) => {
+                        let caps = self.registry.by_namespace(&ns);
+                        if let Some(cap) = caps.get(self.caps_cursor) {
+                            self.caps_view = CapView::Detail(cap.name.clone());
+                            self.caps_cursor = 0;
+                        }
+                    }
+                    CapView::Detail(_) => {}
+                }
+            }
+            Screen::Profiles => {
+                if let Some(profile) = self.profiles.get(self.profiles_cursor) {
+                    let name = profile.name.clone();
+                    match self.toggle_profile(&name) {
+                        Ok(_) => { let _ = self.reload(); }
+                        Err(e) => self.toast(&format!("Toggle failed: {e}"), true),
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_back(&mut self) {
+        match self.screen {
+            Screen::Capabilities => {
+                match self.caps_view.clone() {
+                    CapView::Detail(name) => {
+                        let ns = CapabilityRegistry::group_key(&name);
+                        self.caps_view = CapView::Listing(ns);
+                        self.caps_cursor = 0;
+                    }
+                    CapView::Listing(_) => {
+                        self.caps_view = CapView::Namespaces;
+                        self.caps_cursor = 0;
+                    }
+                    CapView::Namespaces => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn toggle_profile(&mut self, name: &str) -> Result<()> {
+        let mut state = ClixState::load(home_dir())?;
+        if state.config.active_profiles.contains(&name.to_string()) {
+            state.config.active_profiles.retain(|p| p != name);
+        } else {
+            state.config.active_profiles.push(name.to_string());
+        }
+        let yaml = serde_yaml::to_string(&state.config)?;
+        std::fs::write(&state.config_path, yaml)?;
+        self.active_profiles = state.config.active_profiles.clone();
+        Ok(())
+    }
+
+    // ─── write operations ─────────────────────────────────────────────────────
+
+    fn do_create_profile(&self, name: &str, description: &str, capabilities: &[String]) -> Result<String> {
+        let state = ClixState::load(home_dir())?;
+        let manifest = ProfileManifest {
+            name: name.to_string(),
+            version: 1,
+            description: if description.is_empty() { None } else { Some(description.to_string()) },
+            capabilities: capabilities.to_vec(),
+            workflows: vec![],
+            settings: serde_json::Value::Null,
+            isolation_defaults: Default::default(),
+        };
+        let yaml = serde_yaml::to_string(&manifest)?;
+        let path = state.profiles_dir.join(format!("{}.yaml", name));
+        std::fs::write(path, yaml)?;
+        Ok(format!("Profile '{}' created with {} capabilities", name, capabilities.len()))
+    }
+
+    fn do_create_capability(
+        &self, name: &str, description: &str,
+        command: &str, args: &[String],
+        risk_str: &str, side_effect_str: &str,
+    ) -> Result<String> {
+        use clix_core::manifest::capability::RiskLevel;
+        let state = ClixState::load(home_dir())?;
+        let risk = match risk_str {
+            "medium" => RiskLevel::Medium,
+            "high" => RiskLevel::High,
+            "critical" => RiskLevel::Critical,
+            _ => RiskLevel::Low,
+        };
+        let side_effect = match side_effect_str {
+            "readOnly" => SideEffectClass::ReadOnly,
+            "additive" => SideEffectClass::Additive,
+            "mutating" => SideEffectClass::Mutating,
+            "destructive" => SideEffectClass::Destructive,
+            _ => SideEffectClass::None,
+        };
+        let manifest = CapabilityManifest {
+            name: name.to_string(),
+            version: 1,
+            description: if description.is_empty() { None } else { Some(description.to_string()) },
+            backend: Backend::Subprocess {
+                command: command.to_string(),
+                args: args.to_vec(),
+                cwd_from_input: None,
+            },
+            risk,
+            side_effect_class: side_effect,
+            sandbox_profile: None,
+            isolation: Default::default(),
+            approval_policy: None,
+            input_schema: serde_json::json!({"type": "object", "properties": {}}),
+            validators: vec![],
+            credentials: vec![],
+            argv_pattern: None,
+        };
+        let yaml = serde_yaml::to_string(&manifest)?;
+        let path = state.capabilities_dir.join(format!("{}.yaml", name));
+        std::fs::write(path, yaml)?;
+        Ok(format!("Capability '{}' created", name))
+    }
+
+    fn do_create_pack(
+        &self, name: &str, description: &str, author: &str,
+        preset: Preset, seed_command: &str, capability_names: &[String],
+    ) -> Result<String> {
+        let state = ClixState::load(home_dir())?;
+        let pack_dir = scaffold_pack(name, preset, if seed_command.is_empty() { None } else { Some(seed_command) }, &state.packs_dir)?;
+
+        // Write extra capability YAML files for each selected subcommand
+        let caps_dir = pack_dir.join("capabilities");
+        for cap_name in capability_names {
+            let file_name = format!("{}.yaml", cap_name.replace('.', "_"));
+            let yaml = format!(
+                "name: {cap_name}\nversion: 1\ndescription: ''\nbackend:\n  type: subprocess\n  command: {}\nrisk: low\nsideEffectClass: readOnly\ninputSchema:\n  type: object\n  properties: {{}}\n",
+                cap_name.split('.').next().unwrap_or(name)
+            );
+            let _ = std::fs::write(caps_dir.join(&file_name), yaml);
+        }
+
+        // Patch pack.yaml to add description and author
+        if !description.is_empty() || !author.is_empty() {
+            let pack_yaml_path = pack_dir.join("pack.yaml");
+            if let Ok(existing) = std::fs::read_to_string(&pack_yaml_path) {
+                let mut val: serde_yaml::Value = serde_yaml::from_str(&existing).unwrap_or_default();
+                if let serde_yaml::Value::Mapping(ref mut m) = val {
+                    if !description.is_empty() {
+                        m.insert(serde_yaml::Value::String("description".into()),
+                            serde_yaml::Value::String(description.to_string()));
+                    }
+                    if !author.is_empty() {
+                        m.insert(serde_yaml::Value::String("author".into()),
+                            serde_yaml::Value::String(author.to_string()));
+                    }
+                }
+                if let Ok(patched) = serde_yaml::to_string(&val) {
+                    let _ = std::fs::write(&pack_yaml_path, patched);
+                }
+            }
+        }
+
+        Ok(format!("Pack '{}' created with {} capabilities", name, capability_names.len()))
+    }
+
+    fn do_install_pack(&self, path_str: &str) -> Result<String> {
+        use clix_core::packs::install::install_pack;
+        let state = ClixState::load(home_dir())?;
+        let path = std::path::PathBuf::from(path_str);
+        install_pack(&path, &state.packs_dir)?;
+        Ok(format!("Pack installed from {}", path_str))
+    }
+}
+
+// ─── loaders ─────────────────────────────────────────────────────────────────
 
 fn load_packs_from_dir(packs_dir: &std::path::Path) -> Vec<PackManifest> {
     if !packs_dir.exists() { return vec![]; }
@@ -28,469 +589,8 @@ fn load_profiles_from_packs(packs_dir: &std::path::Path) -> Vec<ProfileManifest>
         .collect()
 }
 
-fn load_all_profiles(state: &clix_core::state::ClixState) -> Vec<ProfileManifest> {
-    // Global profiles (user-created) + pack-bundled profiles
+fn load_all_profiles(state: &ClixState) -> Vec<ProfileManifest> {
     let mut all: Vec<ProfileManifest> = load_dir(&state.profiles_dir).unwrap_or_default();
     all.extend(load_profiles_from_packs(&state.packs_dir));
     all
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Screen {
-    Profiles,
-    Capabilities,
-    Packs,
-}
-
-#[derive(Debug, Clone)]
-pub enum CapView {
-    Namespaces,
-    Listing(String),
-    Detail(String),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ModalKind {
-    CreateProfile,
-    CreateCapability,
-    CreatePack,
-    InstallPack,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct ModalState {
-    pub kind: Option<ModalKind>,
-    pub fields: Vec<String>,
-    pub field_idx: usize,
-    pub input_buf: String,
-}
-
-impl ModalState {
-    pub fn is_open(&self) -> bool { self.kind.is_some() }
-    pub fn open(&mut self, kind: ModalKind, num_fields: usize) {
-        self.kind = Some(kind);
-        self.fields = vec![String::new(); num_fields];
-        self.field_idx = 0;
-        self.input_buf = String::new();
-    }
-    pub fn close(&mut self) {
-        self.kind = None;
-        self.fields.clear();
-        self.field_idx = 0;
-        self.input_buf = String::new();
-    }
-    pub fn commit_field(&mut self) {
-        if self.field_idx < self.fields.len() {
-            self.fields[self.field_idx] = self.input_buf.clone();
-        }
-    }
-    pub fn next_field(&mut self) -> bool {
-        self.commit_field();
-        if self.field_idx + 1 < self.fields.len() {
-            self.field_idx += 1;
-            self.input_buf = self.fields[self.field_idx].clone();
-            true
-        } else {
-            false
-        }
-    }
-}
-
-pub struct App {
-    pub screen: Screen,
-    pub cap_view: CapView,
-    pub profiles: Vec<ProfileManifest>,
-    pub active_profiles: Vec<String>,
-    pub registry: CapabilityRegistry,
-    pub packs: Vec<PackManifest>,
-    pub cursor: usize,
-    pub should_quit: bool,
-    pub last_error: Option<String>,
-    pub modal: ModalState,
-}
-
-impl App {
-    fn validate_name(name: &str) -> Option<&'static str> {
-        if name.is_empty() { return Some("Name is required"); }
-        if name.contains('/') || name.contains('\\') || name.contains("..") {
-            return Some("Name must not contain path separators");
-        }
-        None
-    }
-
-    pub fn new() -> Result<Self> {
-        let mut state = ClixState::load(home_dir())?;
-        if state.config.active_profiles.is_empty() {
-            let base_pack_dir = state.packs_dir.join("base");
-            if base_pack_dir.exists() {
-                state.config.active_profiles.push("base".to_string());
-                let yaml = serde_yaml::to_string(&state.config)?;
-                std::fs::write(&state.config_path, yaml)?;
-            }
-        }
-        let registry = build_registry(&state)?;
-        // Packs live at packs_dir/<name>/pack.yaml — walk subdirectories
-        let packs: Vec<PackManifest> = load_packs_from_dir(&state.packs_dir);
-        // Profiles: global (~/.clix/profiles/) + pack-bundled (packs/<name>/profiles/)
-        let profiles: Vec<ProfileManifest> = load_all_profiles(&state);
-        let active_profiles = state.config.active_profiles.clone();
-        Ok(Self {
-            screen: Screen::Profiles,
-            cap_view: CapView::Namespaces,
-            profiles,
-            active_profiles,
-            registry,
-            packs,
-            cursor: 0,
-            should_quit: false,
-            last_error: None,
-            modal: ModalState::default(),
-        })
-    }
-
-    pub fn reload(&mut self) -> Result<()> {
-        let new = Self::new()?;
-        self.profiles = new.profiles;
-        self.active_profiles = new.active_profiles;
-        self.registry = new.registry;
-        self.packs = new.packs;
-        self.cursor = 0;
-        self.cap_view = CapView::Namespaces;
-        Ok(())
-    }
-
-    pub fn handle_key(&mut self, key: KeyEvent) {
-        // Ctrl-C always quits
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-            self.should_quit = true;
-            return;
-        }
-        // If a modal is open, it gets all keys
-        if self.modal.is_open() {
-            self.handle_modal_key(key);
-            return;
-        }
-        match key.code {
-            KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Char('r') => {
-                if let Err(e) = self.reload() {
-                    self.last_error = Some(format!("Reload failed: {e}"));
-                } else {
-                    self.last_error = None;
-                }
-            }
-            KeyCode::Char('1') => { self.screen = Screen::Profiles; self.cursor = 0; }
-            KeyCode::Char('2') => { self.screen = Screen::Capabilities; self.cursor = 0; self.cap_view = CapView::Namespaces; }
-            KeyCode::Char('3') => { self.screen = Screen::Packs; self.cursor = 0; }
-            KeyCode::Char('n') => self.open_create_modal(),
-            KeyCode::Char('i') if self.screen == Screen::Packs => {
-                self.modal.open(ModalKind::InstallPack, 1);
-                self.last_error = None;
-            }
-            KeyCode::Tab => self.next_screen(),
-            KeyCode::Left => self.prev_screen(),
-            KeyCode::Right => self.next_screen(),
-            KeyCode::Down => self.cursor_down(),
-            KeyCode::Up => self.cursor_up(),
-            KeyCode::Enter => self.handle_enter(),
-            KeyCode::Esc | KeyCode::Backspace => self.handle_back(),
-            _ => {}
-        }
-    }
-
-    fn handle_modal_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc => self.modal.close(),
-            KeyCode::Tab => {
-                if !self.modal.next_field() {
-                    // Last field — wrap back to first
-                    self.modal.commit_field();
-                    self.modal.field_idx = 0;
-                    self.modal.input_buf = self.modal.fields.get(0).cloned().unwrap_or_default();
-                }
-            }
-            KeyCode::Enter => self.modal_confirm(),
-            KeyCode::Backspace => {
-                self.modal.input_buf.pop();
-            }
-            KeyCode::Char(c) => {
-                self.modal.input_buf.push(c);
-            }
-            _ => {}
-        }
-    }
-
-    fn modal_confirm(&mut self) {
-        self.modal.commit_field();
-        match self.modal.kind.clone() {
-            Some(ModalKind::CreateProfile) => {
-                let name = self.modal.fields.get(0).cloned().unwrap_or_default();
-                let desc = self.modal.fields.get(1).cloned().unwrap_or_default();
-                if let Some(err) = Self::validate_name(&name) {
-                    self.last_error = Some(err.to_string());
-                    return;
-                }
-                if let Err(e) = self.create_profile(&name, &desc) {
-                    self.last_error = Some(format!("Create failed: {e}"));
-                } else {
-                    self.modal.close();
-                    self.last_error = None;
-                    if let Err(e) = self.reload() {
-                        self.last_error = Some(format!("Reload failed: {e}"));
-                    }
-                }
-            }
-            Some(ModalKind::CreateCapability) => {
-                let name = self.modal.fields.get(0).cloned().unwrap_or_default();
-                let desc = self.modal.fields.get(1).cloned().unwrap_or_default();
-                let command = self.modal.fields.get(2).cloned().unwrap_or_default();
-                if let Some(err) = Self::validate_name(&name) {
-                    self.last_error = Some(err.to_string());
-                    return;
-                }
-                if command.is_empty() {
-                    self.last_error = Some("Command is required".to_string());
-                    return;
-                }
-                if let Err(e) = self.create_capability(&name, &desc, &command) {
-                    self.last_error = Some(format!("Create failed: {e}"));
-                } else {
-                    self.modal.close();
-                    self.last_error = None;
-                    if let Err(e) = self.reload() {
-                        self.last_error = Some(format!("Reload failed: {e}"));
-                    }
-                }
-            }
-            Some(ModalKind::CreatePack) => {
-                let name = self.modal.fields.get(0).cloned().unwrap_or_default();
-                let desc = self.modal.fields.get(1).cloned().unwrap_or_default();
-                if let Some(err) = Self::validate_name(&name) {
-                    self.last_error = Some(err.to_string());
-                    return;
-                }
-                if let Err(e) = self.create_pack(&name, &desc) {
-                    self.last_error = Some(format!("Create failed: {e}"));
-                } else {
-                    self.modal.close();
-                    self.last_error = None;
-                    if let Err(e) = self.reload() {
-                        self.last_error = Some(format!("Reload failed: {e}"));
-                    }
-                }
-            }
-            Some(ModalKind::InstallPack) => {
-                let path = self.modal.fields.get(0).cloned().unwrap_or_default();
-                if path.is_empty() {
-                    self.last_error = Some("Path is required".to_string());
-                    return;
-                }
-                if let Err(e) = self.install_pack(&path) {
-                    self.last_error = Some(format!("Install failed: {e}"));
-                } else {
-                    self.modal.close();
-                    self.last_error = None;
-                    if let Err(e) = self.reload() {
-                        self.last_error = Some(format!("Reload failed: {e}"));
-                    }
-                }
-            }
-            None => {}
-        }
-    }
-
-    fn open_create_modal(&mut self) {
-        match self.screen {
-            Screen::Profiles => self.modal.open(ModalKind::CreateProfile, 2),
-            Screen::Capabilities => self.modal.open(ModalKind::CreateCapability, 3),
-            Screen::Packs => self.modal.open(ModalKind::CreatePack, 2),
-        }
-        self.last_error = None;
-    }
-
-    fn create_profile(&self, name: &str, description: &str) -> anyhow::Result<()> {
-        use clix_core::manifest::profile::ProfileManifest;
-        let state = clix_core::state::ClixState::load(clix_core::state::home_dir())?;
-        let manifest = ProfileManifest {
-            name: name.to_string(),
-            version: 1,
-            description: if description.is_empty() { None } else { Some(description.to_string()) },
-            capabilities: vec![],
-            workflows: vec![],
-            settings: serde_json::Value::Null,
-            isolation_defaults: Default::default(),
-        };
-        let yaml = serde_yaml::to_string(&manifest)?;
-        let path = state.profiles_dir.join(format!("{}.yaml", name));
-        std::fs::write(path, yaml)?;
-        Ok(())
-    }
-
-    fn create_capability(&self, name: &str, description: &str, command: &str) -> anyhow::Result<()> {
-        use clix_core::manifest::capability::{CapabilityManifest, Backend, RiskLevel, SideEffectClass};
-        let state = clix_core::state::ClixState::load(clix_core::state::home_dir())?;
-        let manifest = CapabilityManifest {
-            name: name.to_string(),
-            version: 1,
-            description: if description.is_empty() { None } else { Some(description.to_string()) },
-            backend: Backend::Subprocess {
-                command: command.to_string(),
-                args: vec![],
-                cwd_from_input: None,
-            },
-            risk: RiskLevel::Low,
-            side_effect_class: SideEffectClass::None,
-            sandbox_profile: None,
-            isolation: Default::default(),
-            approval_policy: None,
-            input_schema: serde_json::json!({"type": "object", "properties": {}}),
-            validators: vec![],
-            credentials: vec![],
-            argv_pattern: None,
-        };
-        let yaml = serde_yaml::to_string(&manifest)?;
-        let path = state.capabilities_dir.join(format!("{}.yaml", name));
-        std::fs::write(path, yaml)?;
-        Ok(())
-    }
-
-    fn create_pack(&self, name: &str, description: &str) -> anyhow::Result<()> {
-        use clix_core::manifest::pack::PackManifest;
-        let state = clix_core::state::ClixState::load(clix_core::state::home_dir())?;
-        let pack_dir = state.packs_dir.join(name);
-        std::fs::create_dir_all(&pack_dir)?;
-        std::fs::create_dir_all(pack_dir.join("capabilities"))?;
-        std::fs::create_dir_all(pack_dir.join("profiles"))?;
-        let manifest = PackManifest {
-            name: name.to_string(),
-            version: 1,
-            description: if description.is_empty() { None } else { Some(description.to_string()) },
-            author: None,
-            homepage: None,
-            capabilities: vec![],
-            profiles: vec![],
-            workflows: vec![],
-        };
-        let yaml = serde_yaml::to_string(&manifest)?;
-        std::fs::write(pack_dir.join("pack.yaml"), yaml)?;
-        Ok(())
-    }
-
-    fn install_pack(&self, path_str: &str) -> anyhow::Result<()> {
-        use clix_core::packs::install::install_pack;
-        let state = clix_core::state::ClixState::load(clix_core::state::home_dir())?;
-        let path = std::path::PathBuf::from(path_str);
-        install_pack(&path, &state.packs_dir)?;
-        Ok(())
-    }
-
-    fn next_screen(&mut self) {
-        self.cursor = 0;
-        self.screen = match self.screen {
-            Screen::Profiles => Screen::Capabilities,
-            Screen::Capabilities => Screen::Packs,
-            Screen::Packs => Screen::Profiles,
-        };
-        self.cap_view = CapView::Namespaces;
-    }
-
-    fn prev_screen(&mut self) {
-        self.cursor = 0;
-        self.screen = match self.screen {
-            Screen::Profiles => Screen::Packs,
-            Screen::Capabilities => Screen::Profiles,
-            Screen::Packs => Screen::Capabilities,
-        };
-        self.cap_view = CapView::Namespaces;
-    }
-
-    fn cursor_down(&mut self) {
-        let len = self.current_list_len();
-        if len > 0 { self.cursor = (self.cursor + 1).min(len - 1); }
-    }
-
-    fn cursor_up(&mut self) {
-        if self.cursor > 0 { self.cursor -= 1; }
-    }
-
-    fn current_list_len(&self) -> usize {
-        match self.screen {
-            Screen::Profiles => self.profiles.len(),
-            Screen::Capabilities => match &self.cap_view {
-                CapView::Namespaces => self.registry.namespaces().len(),
-                CapView::Listing(ns) => self.registry.by_namespace(ns).len(),
-                CapView::Detail(_) => 0,
-            },
-            Screen::Packs => self.packs.len(),
-        }
-    }
-
-    fn handle_enter(&mut self) {
-        match self.screen {
-            Screen::Capabilities => {
-                match self.cap_view.clone() {
-                    CapView::Namespaces => {
-                        let namespaces = self.registry.namespaces();
-                        if let Some(ns) = namespaces.get(self.cursor) {
-                            self.cap_view = CapView::Listing(ns.key.clone());
-                            self.cursor = 0;
-                        }
-                    }
-                    CapView::Listing(ns) => {
-                        let caps = self.registry.by_namespace(&ns);
-                        if let Some(cap) = caps.get(self.cursor) {
-                            self.cap_view = CapView::Detail(cap.name.clone());
-                            self.cursor = 0;
-                        }
-                    }
-                    CapView::Detail(_) => {}
-                }
-            }
-            Screen::Profiles => {
-                if let Some(profile) = self.profiles.get(self.cursor) {
-                    let name = profile.name.clone();
-                    if let Err(e) = self.toggle_profile(&name) {
-                        self.last_error = Some(format!("Toggle failed: {e}"));
-                    } else {
-                        self.last_error = None;
-                        // Rebuild registry so Capabilities screen reflects the change
-                        if let Err(e) = self.reload() {
-                            self.last_error = Some(format!("Reload failed: {e}"));
-                        }
-                    }
-                }
-            }
-            Screen::Packs => {}
-        }
-    }
-
-    pub fn toggle_profile(&mut self, name: &str) -> Result<()> {
-        let mut state = ClixState::load(home_dir())?;
-        if state.config.active_profiles.contains(&name.to_string()) {
-            state.config.active_profiles.retain(|p| p != name);
-        } else {
-            state.config.active_profiles.push(name.to_string());
-        }
-        let yaml = serde_yaml::to_string(&state.config)?;
-        std::fs::write(&state.config_path, yaml)?;
-        self.active_profiles = state.config.active_profiles.clone();
-        Ok(())
-    }
-
-    fn handle_back(&mut self) {
-        match self.screen {
-            Screen::Capabilities => {
-                match self.cap_view.clone() {
-                    CapView::Detail(ref name) => {
-                        let ns = CapabilityRegistry::group_key(name);
-                        self.cap_view = CapView::Listing(ns);
-                        self.cursor = 0;
-                    }
-                    CapView::Listing(_) => { self.cap_view = CapView::Namespaces; self.cursor = 0; }
-                    CapView::Namespaces => {} // already at top level, no-op
-                }
-            }
-            _ => {} // Esc/Backspace is a no-op on non-drill-down screens; use q to quit
-        }
-    }
 }
