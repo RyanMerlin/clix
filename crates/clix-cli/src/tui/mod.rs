@@ -68,10 +68,10 @@ fn render(f: &mut Frame, app: &App) {
 
     render_header(f, app, bands[0]);
 
-    // Body: sidebar (20) + content
+    // Body: sidebar (16) + content — 16 fits "Capabilities" with ▸ prefix
     let body = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(20), Constraint::Min(0)])
+        .constraints([Constraint::Length(16), Constraint::Min(0)])
         .split(bands[1]);
 
     render_sidebar(f, app, body[0]);
@@ -128,12 +128,12 @@ fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
             ]))
         } else if is_stub {
             ListItem::new(Line::from(vec![
-                Span::styled(format!("  {} ", key), theme::inactive()),
-                Span::styled(format!("{}", label), theme::inactive()),
+                Span::styled("  ", theme::inactive()),
+                Span::styled(*label, theme::inactive()),
             ]))
         } else {
             ListItem::new(Line::from(vec![
-                Span::styled(format!("  {} ", key), theme::muted()),
+                Span::styled("  ", theme::muted()),
                 Span::styled(*label, theme::dim()),
             ]))
         }

@@ -30,7 +30,14 @@ where
         if matches!(ext, "yaml" | "yml" | "json") {
             match load_manifest::<T>(&path) {
                 Ok(m) => results.push(m),
-                Err(e) => eprintln!("warn: skipping {}: {e}", path.display()),
+                Err(e) => {
+                    // Only print warnings when stderr is a TTY (i.e. not inside a TUI alternate screen).
+                    // In TUI mode stderr is the alternate screen and these messages corrupt the display.
+                    use std::io::IsTerminal;
+                    if std::io::stderr().is_terminal() {
+                        eprintln!("warn: skipping {}: {e}", path.display());
+                    }
+                }
             }
         }
     }
