@@ -33,6 +33,9 @@ keyring  = { workspace = true }
 [dev-dependencies]
 tempfile  = { workspace = true }
 criterion = { workspace = true }
+insta     = { workspace = true }
+rstest    = { workspace = true }
+proptest  = { workspace = true }
 
 [[bench]]
 name    = "dispatch_latency"

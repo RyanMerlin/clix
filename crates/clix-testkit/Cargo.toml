@@ -1,0 +1,14 @@
+[package]
+name    = "clix-testkit"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+clix-core  = { path = "../clix-core" }
+clix-serve = { path = "../clix-serve" }
+serde_json = { workspace = true }
+tempfile   = { workspace = true }
+tokio      = { workspace = true }
+wiremock   = { workspace = true }
+uuid       = { workspace = true }

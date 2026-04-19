@@ -1,0 +1,29 @@
+Usage: gcloud [optional flags] <group | command>
+  group may be           access-approval | access-context-manager |
+                         active-directory | ai | ai-platform | alpha |
+                         anthos | api-gateway | apigee | app | artifacts |
+                         asset | assured-workloads | batch | beta | billing |
+                         bigtable | builds | certificate-manager | cloud-shell |
+                         code | composer | compute | config | container |
+                         data-catalog | database-migration | dataflow |
+                         dataplex | dataproc | datastore | datastream |
+                         deploy | deployment-manager | dns | domains |
+                         edge-cache | eventarc | filestore | firebase |
+                         firestore | functions | game | genomics |
+                         healthcare | iam | iap | identity | ids |
+                         kms | kuberun | logging | memcache | metastore |
+                         ml | ml-engine | monitoring | network-connectivity |
+                         network-management | network-security | network-services |
+                         notebooks | org-policies | policy-intelligence |
+                         private-catalog | pubsub | recaptcha | recommender |
+                         redis | resource-manager | run | scc | scheduler |
+                         secrets | service-directory | services | source |
+                         spanner | sql | storage | tasks | terraform |
+                         topic | trace | transcoder | transfer | vmware |
+                         workload-certificate | workflows | workspace-add-ons
+  command may be         auth | cheat-sheet | components | config | feedback |
+                         help | info | init | interactive | meta | survey |
+                         topic | version
+
+For detailed information on this command and its flags, run:
+  gcloud help

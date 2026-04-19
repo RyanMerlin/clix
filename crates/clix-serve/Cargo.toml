@@ -13,3 +13,9 @@ serde_yaml = { workspace = true }
 anyhow     = { workspace = true }
 tracing    = { workspace = true }
 prometheus = { workspace = true }
+
+[dev-dependencies]
+clix-testkit = { path = "../clix-testkit" }
+tokio        = { workspace = true }
+rstest       = { workspace = true }
+wiremock     = { workspace = true }
