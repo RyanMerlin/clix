@@ -9,3 +9,5 @@ clix.exe
 .env
 .worktrees/
 target/
+docs/.dev/
+docs/superpowers/

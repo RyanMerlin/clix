@@ -17,100 +17,120 @@ concurrency:
 
 jobs:
   test:
+    name: test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.2"
-
-      - name: Test
-        run: go test ./...
+      - uses: actions/checkout@v4
+      - run: cargo test --workspace --all-features
 
   build:
+    name: build (${{ matrix.artifact }})
     needs: test
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            ext: ""
-          - os: ubuntu-latest
-            goos: linux
-            goarch: arm64
-            ext: ""
-          - os: macos-latest
-            goos: darwin
-            goarch: amd64
-            ext: ""
-          - os: macos-latest
-            goos: darwin
-            goarch: arm64
-            ext: ""
-          - os: windows-latest
-            goos: windows
-            goarch: amd64
-            ext: ".exe"
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: linux-x86_64
+
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: linux-aarch64
+            cross_apt: gcc-aarch64-linux-gnu
+            cross_linker: aarch64-linux-gnu-gcc
+
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact: darwin-aarch64
+
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            artifact: darwin-x86_64
+
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
       attestations: write
       id-token: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.2"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install cross-compile toolchain
+        if: matrix.cross_apt != ''
+        run: sudo apt-get install -y ${{ matrix.cross_apt }}
 
       - name: Build
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.cross_linker }}
+          CC_aarch64_unknown_linux_gnu: ${{ matrix.cross_linker }}
+        run: |
+          cargo build --release --target ${{ matrix.target }} \
+            -p clix-cli -p clix-serve -p clix-worker -p clix-broker -p clix-shim
+
+      - name: Bundle
         shell: bash
         run: |
-          mkdir -p dist
           VERSION="${GITHUB_REF_NAME#v}"
-          COMMIT="${GITHUB_SHA}"
-          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          OUTPUT="dist/clix-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
-          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -trimpath \
-            -ldflags "-s -w -X github.com/RyanMerlin/clix/internal/clix.Version=${VERSION} -X github.com/RyanMerlin/clix/internal/clix.Commit=${COMMIT} -X github.com/RyanMerlin/clix/internal/clix.BuildDate=${BUILD_DATE}" \
-            -o "${OUTPUT}" ./cmd/clix
-          go run github.com/anchore/syft/cmd/syft@latest "${OUTPUT}" -o spdx-json="${OUTPUT}.spdx.json"
-          PYTHON_BIN="$(command -v python3 || command -v python)"
-          for artifact in "${OUTPUT}" "${OUTPUT}.spdx.json"; do
-            CHECKSUM="$("$PYTHON_BIN" -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$artifact")"
-            printf '%s  %s\n' "$CHECKSUM" "$(basename "$artifact")" > "${artifact}.sha256"
+          TARGET="${{ matrix.target }}"
+          ARTIFACT="clix-${VERSION}-${{ matrix.artifact }}"
+          BINDIR="target/${TARGET}/release"
+
+          mkdir -p staging
+          for bin in clix clix-serve clix-worker clix-broker clix-shim; do
+            cp "${BINDIR}/${bin}" staging/
           done
 
-      - name: Generate attestation
-        uses: actions/attest@v4
-        with:
-          subject-path: dist/clix-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
-          sbom-path: dist/clix-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}.spdx.json
+          tar czf "${ARTIFACT}.tar.gz" -C staging .
 
-      - name: Upload artifact
+          PYTHON_BIN="$(command -v python3 || command -v python)"
+          "$PYTHON_BIN" -c '
+          import hashlib, pathlib, sys
+          p = pathlib.Path(sys.argv[1])
+          print(hashlib.sha256(p.read_bytes()).hexdigest() + "  " + p.name)
+          ' "${ARTIFACT}.tar.gz" > "${ARTIFACT}.tar.gz.sha256"
+
+          echo "ARTIFACT=${ARTIFACT}" >> "$GITHUB_ENV"
+
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Generate SBOM
+        run: |
+          syft "${{ env.ARTIFACT }}.tar.gz" -o spdx-json="${{ env.ARTIFACT }}.tar.gz.spdx.json"
+
+      - name: Attest tarball
+        uses: actions/attest@v2
+        with:
+          subject-path: ${{ env.ARTIFACT }}.tar.gz
+          sbom-path: ${{ env.ARTIFACT }}.tar.gz.spdx.json
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: clix-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/*
+          name: clix-${{ matrix.artifact }}
+          path: |
+            ${{ env.ARTIFACT }}.tar.gz
+            ${{ env.ARTIFACT }}.tar.gz.sha256
+            ${{ env.ARTIFACT }}.tar.gz.spdx.json
 
   release:
+    name: publish release
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
+          merge-multiple: true
 
-      - name: Create release
+      - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           fail_on_unmatched_files: true
