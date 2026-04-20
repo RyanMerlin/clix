@@ -26,12 +26,17 @@ clix run git.status --json           # run it
 clix receipts list --json            # what ran?
 ```
 
-**Why not MCP?** MCP requires registering every tool upfront, which bloats the context
-window with a full catalogue. clix agents discover and call capabilities on demand —
-the context cost is zero until a capability is actually used.
+**Why not MCP?** MCP requires registering every tool upfront. For a gateway like clix
+with dozens of capabilities, that means injecting a full catalogue into every prompt —
+*before the agent has called a single tool*. This is the MCP anti-pattern: paying the
+context cost of every tool whether or not the agent ever uses it.
 
-MCP transport exists as an optional integration mode for editors that require it
-(`clix mcp`), but it is not the primary design and not recommended for general use.
+clix agents discover and call capabilities on demand. The context cost is zero until a
+capability is actually used.
+
+> clix does have an optional MCP transport (`clix mcp`) for editors that require it.
+> It is a compatibility shim, not the intended usage. If your editor forces MCP, use it.
+> If it doesn't, use the CLI.
 
 ---
 
