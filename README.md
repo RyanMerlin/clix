@@ -107,6 +107,22 @@ See [docs/agent-quickstart.md](docs/agent-quickstart.md) for the complete refere
 
 ---
 
+## Interactive TUI
+
+```sh
+clix tui
+```
+
+A full-screen terminal interface for managing packs, profiles, capabilities, and secrets without memorising CLI flags.
+
+- **Sidebar navigation** — up/down moves through sections; Enter enters content; Esc walks back up to the sidebar
+- **Breadcrumb header** — always shows where you are (`clix › Secrets › Configure Infisical`)
+- **Async operations** — Infisical connectivity tests, broker pings, and pack installs run off the draw thread; a spinner shows while work is in progress
+- **Confirm before discard** — Esc on a dirty form shows a `y/n` prompt before discarding unsaved input
+- **Toast notifications** — float above open dialogs so a save confirmation never ejects your wizard
+
+---
+
 ## Shims
 
 Shims let agents invoke tools as native CLI commands without any clix syntax. Once installed, `git status` in the agent's shell is a policy-enforced, sandboxed clix call.
@@ -167,7 +183,7 @@ clix pack diff ./my-pack/ --against installed
 clix pack scaffold --name my-pack --commands "mycli"
 ```
 
-Built-in packs: `base` (system utilities), `kubectl-observe`, `gcloud-readonly`, `gh-readonly`.
+Built-in packs (installed by `clix init`): `base`, `kubectl-observe`, `gcloud-readonly`, `gh-readonly`, `git-readonly`, `docker-observe`, `podman-observe`, `aws-readonly`, `az-readonly`, `helm-observe`.
 
 ---
 
@@ -268,16 +284,23 @@ Requires Rust 1.78+. The isolation features (warm worker, broker) require Linux 
 ```
 crates/
   clix-core/    # Core library — manifests, policy, execution, receipts, secrets, packs
-  clix-cli/     # CLI binary (all subcommands)
+  clix-cli/     # CLI binary (all subcommands) + interactive TUI
   clix-serve/   # MCP/JSON-RPC server (the gateway)
   clix-worker/  # Jailed worker process
   clix-broker/  # Credential daemon
   clix-shim/    # PATH shim binary
+  clix-testkit/ # Shared integration test harness
 packs/
   base/               # system.date, system.echo
-  kubectl-observe/
-  gcloud-readonly/
-  gh-readonly/
+  kubectl-observe/    # 8 read-only capabilities
+  gcloud-readonly/    # 6 read-only capabilities
+  gh-readonly/        # 5 read-only capabilities
+  git-readonly/       # 4 read-only capabilities
+  docker-observe/     # 6 read-only capabilities
+  podman-observe/     # 5 read-only capabilities
+  aws-readonly/       # 6 read-only capabilities
+  az-readonly/        # 6 read-only capabilities
+  helm-observe/       # 4 read-only capabilities
 ```
 
 ---
@@ -303,5 +326,5 @@ Set `CLIX_STRICT_VERIFY=1` to verify the SBOM and attestations during install (r
 - [Architecture](docs/architecture.md) — system design, trust model, isolation tiers
 - [Packs](docs/pack.md) — pack format reference
 - [Release process](docs/release.md)
-- [Roadmap](docs/design/TODO.md) — what's coming next
+- [Roadmap](TODO.md) — what's coming next
 - [Security / Threat Model](SECURITY.md) — what clix protects against and known limitations

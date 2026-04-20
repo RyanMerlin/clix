@@ -80,6 +80,6 @@ compromised.
 
 ## Known Limitations & In-Progress Work
 
-- `jail_config_digest` is captured in receipts but not yet verified on re-read (tracked in `docs/.dev/design/TODO.md`).
+- `jail_config_digest` is captured in receipts but not yet verified on re-read (tracked in `TODO.md`).
 - `binary_sha256` in `IsolatedDispatch` is populated with a random UUID as a placeholder in the non-Linux path (non-Linux has no real isolation anyway).
 - ARM Linux (aarch64) skips seccomp due to syscall table differences — only namespace and Landlock enforcement applies.

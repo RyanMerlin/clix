@@ -12,7 +12,7 @@ crates/
   clix-worker/  # Jailed worker process — receives dispatched commands over a Unix socket
   clix-broker/  # Credential daemon — owns credential files, mints ephemeral tokens
   clix-shim/    # PATH shim binary — forwards CLI invocations through the gateway
-packs/          # Built-in YAML packs (base, kubectl-observe, gcloud-readonly, gh-readonly)
+packs/          # Built-in YAML packs (base, kubectl-observe, gcloud-readonly, gh-readonly, git-readonly, docker-observe, podman-observe, aws-readonly, az-readonly, helm-observe)
 ```
 
 ## Core concepts
