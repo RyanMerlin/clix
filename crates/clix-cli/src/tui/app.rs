@@ -474,9 +474,30 @@ impl App {
             item
         }).collect();
 
-        // Pre-filter to pack name so user sees relevant caps immediately
+        // Pre-filter: derive a common namespace prefix from the pack's selected capabilities
+        // so the checklist opens already scoped to this pack's caps (handles gcloud.aiplatform.* etc.)
+        let filter = {
+            let mut it = current_caps.iter().map(|s| s.as_str());
+            if let Some(first) = it.next() {
+                let mut common = first.to_string();
+                for cap in it {
+                    let shared: String = common.chars().zip(cap.chars())
+                        .take_while(|(a, b)| a == b)
+                        .map(|(a, _)| a)
+                        .collect();
+                    common = if let Some(pos) = shared.rfind('.') {
+                        shared[..pos].to_string()
+                    } else {
+                        shared
+                    };
+                }
+                common
+            } else {
+                String::new()
+            }
+        };
         let mut checklist = Checklist::new(items);
-        checklist.filter = pack_name.to_lowercase();
+        checklist.filter = filter;
         self.overlay = Overlay::PackEdit { pack_name, checklist };
     }
 
@@ -783,8 +804,13 @@ impl App {
             Screen::Profiles => {
                 if let Some(profile) = self.profiles.get(self.profiles_cursor) {
                     let name = profile.name.clone();
+                    let saved_cursor = self.profiles_cursor;
                     match self.toggle_profile(&name) {
-                        Ok(_) => { let _ = self.reload(); }
+                        Ok(_) => {
+                            let _ = self.reload();
+                            // Restore cursor position after reload resets it to 0
+                            self.profiles_cursor = saved_cursor.min(self.profiles.len().saturating_sub(1));
+                        }
                         Err(e) => self.toast(&format!("Toggle failed: {e}"), true),
                     }
                 }
