@@ -1,18 +1,21 @@
 # clix
 
-**A secure control plane for giving AI agents access to your CLI tools.**
+**A sandbox for CLI tools your coding agent runs.**
 
-AI agents are increasingly capable of running real commands — deploying infrastructure, querying databases, managing cloud resources. The problem is that "give the agent access to `gcloud`" today means giving it access to *all* of `gcloud`, with your full credentials, with no audit trail.
+On Linux you get a real OS-level jail — namespaces, Landlock, seccomp, binary pinning. On macOS or Windows you get honest policy enforcement and a full audit trail with a clear `SANDBOX DISABLED` notice at startup. Either way, **unknown capabilities are denied by default** and every invocation is receipted.
 
-clix changes that. You define exactly which commands an agent may run, under what conditions, with what credentials — and enforce those boundaries at the OS level, not just in software.
+The short version: clix stops an AI agent from `rm -rf`ing your filesystem, leaking your cloud credentials, or running anything you haven't explicitly allowed — with an audit log proving it.
+
+> **Supported platforms for full isolation:** Linux x86_64 and aarch64.
+> **Policy-only mode** (no OS jail, receipts + deny rules still work): macOS, Windows.
 
 ---
 
 ## What it does
 
-**Curated tool access.** You install *packs* — bundles of capabilities that expose a safe slice of a CLI. A `gcloud-readonly` pack might allow `projects list` and `compute instances list`, but nothing that writes or deletes. The agent sees only what you've declared.
+**Default deny.** Without an explicit allow rule in your policy, no capability runs. Agents can't call what you haven't declared. This is enforced by the policy engine, not "best effort."
 
-**Policy enforcement.** Every capability call is evaluated against a policy before it runs. Rules can allow, deny, or require human approval — per capability, per side-effect class (read-only vs mutating vs destructive), or per profile. Denials are instant and logged.
+**Curated tool access.** You install *packs* — bundles of capabilities that expose a safe slice of a CLI. A `gcloud-readonly` pack might allow `projects list` and `compute instances list`, but nothing that writes or deletes. The agent sees only what you've declared.
 
 **OS-level isolation (Linux).** Subprocess capabilities run inside a jailed worker process: Linux namespaces (user, mount, network, IPC, UTS), Landlock filesystem restrictions, seccomp syscall filtering, and cgroup limits. The binary is pinned by SHA-256 at spawn time. Even if the agent tries to run the real binary directly, it won't have access to your credentials — those are owned by a separate broker process.
 
@@ -259,6 +262,10 @@ Tagged releases are built by GitHub Actions for Linux (`x86_64`, `aarch64`), mac
 Set `CLIX_STRICT_VERIFY=1` to verify the SBOM and attestations during install (requires `gh`).
 
 ---
+
+## Examples
+
+- [claude-code-gcp](examples/claude-code-gcp/) — Claude Code + GCP read-only access in under 10 minutes; shows pack, policy, and direct CLI invocation
 
 ## Docs
 

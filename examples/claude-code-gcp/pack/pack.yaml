@@ -1,0 +1,71 @@
+name: gcloud-readonly-example
+version: "1.0.0"
+description: "Read-only GCP capabilities for the claude-code-gcp example"
+author: "clix-example"
+
+capabilities:
+  - name: gcloud.projects.list
+    version: 1
+    description: "List all GCP projects the authenticated account can see"
+    risk: low
+    side_effect_class: read_only
+    isolation: warm_worker
+    backend:
+      type: subprocess
+      command: gcloud
+      args:
+        - projects
+        - list
+        - "--format={{ input.format | default('json') }}"
+    input_schema:
+      type: object
+      properties:
+        format:
+          type: string
+          enum: [json, yaml, table]
+          description: "Output format (default: json)"
+      additionalProperties: false
+
+  - name: gcloud.compute.instances.list
+    version: 1
+    description: "List Compute Engine VM instances"
+    risk: low
+    side_effect_class: read_only
+    isolation: warm_worker
+    backend:
+      type: subprocess
+      command: gcloud
+      args:
+        - compute
+        - instances
+        - list
+        - "--format={{ input.format | default('json') }}"
+    input_schema:
+      type: object
+      properties:
+        format:
+          type: string
+          enum: [json, yaml, table]
+      additionalProperties: false
+
+  - name: gcloud.run.services.list
+    version: 1
+    description: "List Cloud Run services"
+    risk: low
+    side_effect_class: read_only
+    isolation: warm_worker
+    backend:
+      type: subprocess
+      command: gcloud
+      args:
+        - run
+        - services
+        - list
+        - "--format={{ input.format | default('json') }}"
+    input_schema:
+      type: object
+      properties:
+        format:
+          type: string
+          enum: [json, yaml, table]
+      additionalProperties: false

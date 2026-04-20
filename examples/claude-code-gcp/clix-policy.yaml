@@ -1,0 +1,25 @@
+# Policy for the claude-code-gcp example.
+# Default action is "deny" — only explicitly allowed capabilities run.
+# Set defaultAction to "allow" to restore permissive mode (not recommended).
+
+defaultAction: deny
+
+rules:
+  # Allow read-only GCP queries
+  - capability: gcloud.projects.list
+    action: allow
+
+  - capability: gcloud.compute.instances.list
+    action: allow
+
+  - capability: gcloud.run.services.list
+    action: allow
+
+  # Require human approval for anything that mutates GCP resources
+  - risk: high
+    action: require_approval
+    reason: "high-risk GCP operations require human sign-off"
+
+  - risk: critical
+    action: require_approval
+    reason: "critical-risk GCP operations require human sign-off"
