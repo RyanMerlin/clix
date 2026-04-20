@@ -25,6 +25,7 @@ use sha2::Digest;
 use validators::run_validators;
 use worker_registry::WorkerRegistry;
 use std::sync::Arc;
+use tracing::warn;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,7 +56,7 @@ pub fn run_capability(registry: &CapabilityRegistry, policy: &PolicyBundle, infi
                 match approval::wait_for_broker_approval(receipt_id, &cap.name, &input, &ctx_value, reason) {
                     Ok(outcome) => return Ok(outcome),
                     Err(e) => {
-                        eprintln!("[clix] broker approval unavailable ({e}), returning pending");
+                        warn!(error = %e, "broker approval unavailable — returning pending status");
                     }
                 }
             }

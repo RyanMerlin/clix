@@ -18,6 +18,8 @@ use clix_core::state::{home_dir, ClixState};
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    init_tracing();
+
     // Load state + registry early so we can augment the clap tree dynamically.
     // If ~/.clix isn't initialised yet we fall back to a static-only command tree.
     let home = home_dir();
@@ -182,4 +184,15 @@ async fn dispatch_static(cli: Cli) -> Result<()> {
         },
     }
     Ok(())
+}
+
+fn init_tracing() {
+    use tracing_subscriber::{EnvFilter, fmt};
+    let filter = EnvFilter::try_from_env("CLIX_LOG")
+        .unwrap_or_else(|_| EnvFilter::new("warn"));
+    if std::env::var("CLIX_LOG_JSON").is_ok() {
+        fmt().json().with_env_filter(filter).with_writer(std::io::stderr).init();
+    } else {
+        fmt().with_env_filter(filter).with_writer(std::io::stderr).init();
+    }
 }

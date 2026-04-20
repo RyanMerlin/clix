@@ -1,5 +1,6 @@
 use std::path::Path;
 use crate::error::{ClixError, Result};
+use tracing::warn;
 
 pub fn load_manifest<T>(path: &Path) -> Result<T>
 where
@@ -31,9 +32,7 @@ where
             match load_manifest::<T>(&path) {
                 Ok(m) => results.push(m),
                 Err(e) => {
-                    if !crate::TUI_MODE.load(std::sync::atomic::Ordering::Relaxed) {
-                        eprintln!("warn: skipping {}: {e}", path.display());
-                    }
+                    warn!(path = %path.display(), error = %e, "skipping malformed manifest");
                 }
             }
         }

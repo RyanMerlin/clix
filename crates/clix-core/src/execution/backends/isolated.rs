@@ -12,6 +12,7 @@ use crate::execution::worker_protocol::{WorkerRequest, WorkerEvent};
 #[cfg(not(target_os = "linux"))]
 use super::subprocess::run_subprocess;
 use uuid::Uuid;
+use tracing::warn;
 
 pub struct IsolatedDispatch {
     pub exit_code: i32,
@@ -123,9 +124,8 @@ fn run_direct_fallback(
 
 #[cfg(not(target_os = "linux"))]
 fn warn_no_isolation(command: &str) {
-    eprintln!(
-        "[clix] WARNING: isolation is not available on this platform. \
-         Running `{command}` without sandboxing. \
-         This is unsafe for adversarial agents — set CLIX_ISOLATION_REQUIRE=none to acknowledge."
+    warn!(
+        command,
+        "isolation not available on this platform — running without sandboxing (unsafe for adversarial agents)"
     );
 }

@@ -8,6 +8,7 @@
 /// Errors are non-fatal: if the broker is unavailable, the gateway logs a warning and
 /// falls back to whatever static secrets are already in the request env.
 use std::collections::HashMap;
+use tracing::{warn, debug};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
@@ -39,7 +40,7 @@ pub fn mint_credentials(socket_path: &Path, cli: &str, credentials_declared: boo
                     socket_path.display()
                 )));
             }
-            eprintln!("[clix-gateway] broker not available at {}: {e}", socket_path.display());
+            warn!(path = %socket_path.display(), error = %e, "broker not available — skipping credential mint");
             return Ok(HashMap::new());
         }
     };
@@ -64,12 +65,11 @@ pub fn mint_credentials(socket_path: &Path, cli: &str, credentials_declared: boo
         Some((true, env, _)) => Ok(env),
         Some((false, _, err)) => {
             let msg = err.unwrap_or_else(|| "unknown error".to_string());
-            // Not all CLIs have broker-adopted creds — this is expected for generic tools
-            eprintln!("[clix-gateway] broker mint for '{cli}': {msg}");
+            debug!(cli, reason = %msg, "broker mint returned no credentials (expected for generic CLIs)");
             Ok(HashMap::new())
         }
         None => {
-            eprintln!("[clix-gateway] unexpected broker response type for mint request");
+            warn!(cli, "unexpected broker response type for mint request");
             Ok(HashMap::new())
         }
     }

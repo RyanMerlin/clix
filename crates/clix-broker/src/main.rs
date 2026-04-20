@@ -24,12 +24,16 @@ use std::os::unix::net::UnixListener;
 use base64::Engine as _;
 #[cfg(target_os = "linux")]
 use std::os::unix::net::UnixStream;
+#[cfg(unix)]
+use libc;
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 use uuid::Uuid;
 use clix_core::execution::worker_protocol::{BrokerMintRequest, BrokerMintResponse};
+use tracing::{debug, error, info, warn};
 
 const DEFAULT_SOCKET_PATH: &str = "/tmp/clix-broker.sock";
 
@@ -53,15 +57,45 @@ fn approvals() -> &'static Mutex<HashMap<Uuid, ApprovalState>> {
     PENDING_APPROVALS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+static SOCKET_PATH_GLOBAL: OnceLock<String> = OnceLock::new();
+
+fn init_tracing() {
+    use tracing_subscriber::{EnvFilter, fmt};
+    let filter = EnvFilter::try_from_env("CLIX_LOG")
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+    if std::env::var("CLIX_LOG_JSON").is_ok() {
+        fmt().json().with_env_filter(filter).with_writer(std::io::stderr).init();
+    } else {
+        fmt().with_env_filter(filter).with_writer(std::io::stderr).init();
+    }
+}
+
 fn main() {
+    init_tracing();
+
     let socket_path = std::env::var("CLIX_BROKER_SOCKET")
         .unwrap_or_else(|_| DEFAULT_SOCKET_PATH.to_string());
+    let _ = SOCKET_PATH_GLOBAL.set(socket_path.clone());
     let creds_dir = creds_dir();
 
     // Ensure creds dir exists with tight permissions
     if let Err(e) = ensure_creds_dir(&creds_dir) {
-        eprintln!("[clix-broker] FATAL: {e}");
+        error!(error = %e, "failed to initialise credentials directory");
         std::process::exit(1);
+    }
+
+    // Register SIGTERM handler: set shutdown flag, remove socket, exit cleanly.
+    #[cfg(unix)]
+    unsafe {
+        extern "C" fn on_sigterm(_: libc::c_int) {
+            SHUTDOWN.store(true, Ordering::SeqCst);
+            if let Some(path) = SOCKET_PATH_GLOBAL.get() {
+                let _ = fs::remove_file(path);
+            }
+            unsafe { libc::exit(0) };
+        }
+        libc::signal(libc::SIGTERM, on_sigterm as libc::sighandler_t);
     }
 
     // Remove stale socket
@@ -70,7 +104,7 @@ fn main() {
     let listener = match UnixListener::bind(&socket_path) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("[clix-broker] FATAL: bind {socket_path}: {e}");
+            error!(path = %socket_path, error = %e, "failed to bind broker socket");
             std::process::exit(1);
         }
     };
@@ -82,31 +116,35 @@ fn main() {
         let _ = fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600));
     }
 
-    eprintln!("[clix-broker] listening on {socket_path}");
-    eprintln!("[clix-broker] creds dir: {}", creds_dir.display());
+    info!(socket = %socket_path, creds = %creds_dir.display(), "clix-broker listening");
 
     for stream in listener.incoming() {
+        if SHUTDOWN.load(Ordering::SeqCst) { break; }
         match stream {
             Ok(s) => {
                 let creds_dir = creds_dir.clone();
                 std::thread::spawn(move || handle_connection(s, &creds_dir));
             }
-            Err(e) => eprintln!("[clix-broker] accept error: {e}"),
+            Err(e) => warn!(error = %e, "accept error"),
         }
     }
+
+    // Belt-and-suspenders cleanup (also done in signal handler)
+    let _ = fs::remove_file(&socket_path);
+    info!("clix-broker shut down cleanly");
 }
 
 fn handle_connection(stream: std::os::unix::net::UnixStream, creds_dir: &Path) {
     // Validate SO_PEERCRED — only the current user's processes may connect
     #[cfg(target_os = "linux")]
     if let Err(e) = validate_peer_cred(&stream) {
-        eprintln!("[clix-broker] rejected connection: {e}");
+        warn!(error = %e, "rejected connection (SO_PEERCRED mismatch)");
         return;
     }
 
     let mut writer = match stream.try_clone() {
         Ok(w) => w,
-        Err(e) => { eprintln!("[clix-broker] clone stream: {e}"); return; }
+        Err(e) => { warn!(error = %e, "failed to clone broker stream"); return; }
     };
     let reader = BufReader::new(stream);
 
@@ -151,7 +189,7 @@ fn dispatch_request(req: &BrokerMintRequest, creds_dir: &Path) -> BrokerMintResp
                 reason: reason.clone(),
                 requested_at: std::time::Instant::now(),
             });
-            eprintln!("[clix-broker] approval requested: {} ({})", receipt_id, capability);
+            info!(%receipt_id, capability, "approval requested");
             BrokerMintResponse::ApprovalPending { receipt_id: *receipt_id }
         }
         BrokerMintRequest::PollApproval { receipt_id } => {
@@ -188,7 +226,7 @@ fn dispatch_request(req: &BrokerMintRequest, creds_dir: &Path) -> BrokerMintResp
             let mut map = approvals().lock().unwrap_or_else(|e| e.into_inner());
             match map.get(receipt_id) {
                 Some(ApprovalState::Pending { .. }) => {
-                    eprintln!("[clix-broker] approved: {} by {}", receipt_id, approver);
+                    info!(%receipt_id, approver, "approval granted");
                     let _ = comment; // stored in receipt by caller if needed
                     map.insert(*receipt_id, ApprovalState::Granted { approver: approver.clone() });
                     BrokerMintResponse::ApprovalGranted { receipt_id: *receipt_id, approver: approver.clone() }
@@ -204,7 +242,7 @@ fn dispatch_request(req: &BrokerMintRequest, creds_dir: &Path) -> BrokerMintResp
             let denial = reason.clone().unwrap_or_else(|| format!("rejected by {approver}"));
             match map.get(receipt_id) {
                 Some(ApprovalState::Pending { .. }) => {
-                    eprintln!("[clix-broker] rejected: {} by {}", receipt_id, approver);
+                    info!(%receipt_id, approver, "approval rejected");
                     map.insert(*receipt_id, ApprovalState::Denied { reason: denial.clone() });
                     BrokerMintResponse::ApprovalDenied { receipt_id: *receipt_id, reason: denial }
                 }
@@ -273,7 +311,7 @@ fn mint_gcloud(creds_dir: &Path, _duration_secs: u64) -> BrokerMintResponse {
             Err(e) => {
                 // Fall back to cached token if available
                 if let Some(token) = adc["access_token"].as_str() {
-                    eprintln!("[clix-broker] WARNING: SA JWT signing failed ({e}), using cached token which may be expired");
+                    warn!(error = %e, "SA JWT signing failed — using cached token (may be expired)");
                     return BrokerMintResponse::MintResult {
                         ok: true,
                         env: [("GOOGLE_OAUTH_ACCESS_TOKEN".to_string(), token.to_string())].into(),
