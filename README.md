@@ -270,3 +270,4 @@ Set `CLIX_STRICT_VERIFY=1` to verify the SBOM and attestations during install (r
 - [Packs](docs/pack.md) — pack format reference
 - [Release process](docs/release.md)
 - [Roadmap](docs/design/TODO.md) — what's coming next
+- [Security / Threat Model](SECURITY.md) — what clix protects against and known limitations
