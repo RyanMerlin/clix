@@ -82,6 +82,7 @@ pub enum Commands {
     /// Start the JSON-RPC server
     Serve {
         #[arg(long)] socket: Option<String>,
+        /// HTTP transport (experimental, no auth/TLS — requires CLIX_HTTP_EXPERIMENTAL=1)
         #[arg(long)] http: Option<String>,
     },
     /// Manage packs

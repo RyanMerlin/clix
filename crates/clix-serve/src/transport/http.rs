@@ -3,6 +3,15 @@ use axum::{extract::State, routing::{post, get}, Json, Router};
 use crate::dispatch::{dispatch, ServeState};
 
 pub async fn serve_http(serve: Arc<ServeState>, addr: &str) -> anyhow::Result<()> {
+    if std::env::var("CLIX_HTTP_EXPERIMENTAL").is_err() {
+        anyhow::bail!(
+            "HTTP transport has no authentication or TLS and must not be exposed to untrusted networks.\n\
+             Set CLIX_HTTP_EXPERIMENTAL=1 to acknowledge this and start anyway.\n\
+             For local use, prefer the Unix socket transport (--socket) or the stdio transport (default)."
+        );
+    }
+    eprintln!("[clix-serve] WARNING: HTTP transport is experimental — no auth, no TLS");
+    eprintln!("[clix-serve] Do not expose this to untrusted networks (CLIX_HTTP_EXPERIMENTAL=1 acknowledged)");
     let app = Router::new()
         .route("/", post(handle_rpc))
         .route("/metrics", get(metrics_handler))
