@@ -172,12 +172,39 @@ fn render_stub(f: &mut Frame, app: &App, area: Rect) {
         Screen::Broker => "Broker",
         _ => "",
     };
-    let lines = vec![
-        Line::from(""),
-        Line::from(Span::styled(format!("  {} — coming soon", name), theme::muted())),
-        Line::from(""),
-        Line::from(Span::styled("  This surface is under construction.", theme::inactive())),
-    ];
+    let experimental = std::env::var("CLIX_TUI_EXPERIMENTAL").is_ok();
+    let lines = if experimental {
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                format!("  {} — experimental preview (CLIX_TUI_EXPERIMENTAL=1)", name),
+                theme::muted(),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  This screen is incomplete. Data shown may be incorrect.",
+                theme::inactive(),
+            )),
+        ]
+    } else {
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                format!("  {} — not available in this release", name),
+                theme::muted(),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Use the CLI: clix receipts list --json",
+                theme::inactive(),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Set CLIX_TUI_EXPERIMENTAL=1 to access the in-progress preview.",
+                theme::dim(),
+            )),
+        ]
+    };
     let para = Paragraph::new(lines)
         .block(Block::default().borders(Borders::ALL).border_style(theme::border_dim()));
     f.render_widget(para, area);
