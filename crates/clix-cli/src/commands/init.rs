@@ -135,14 +135,43 @@ pub fn run() -> Result<()> {
         config
     };
 
-    // Seed built-in packs
+    // Seed built-in packs — search order:
+    // 1. next to the executable (e.g. /usr/local/bin/packs or ~/.local/bin/packs)
+    // 2. XDG data home: ~/.local/share/clix/packs
+    // 3. ./packs relative to cwd (development / repo checkout)
+    let xdg_packs = dirs::data_local_dir().map(|d| d.join("clix").join("packs"));
     let packs_src = [
         std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("packs"))),
+        xdg_packs,
         Some(std::path::PathBuf::from("packs")),
     ].into_iter().flatten().find(|p| p.exists());
     if let Some(src) = packs_src {
         seed_builtin_packs(&state.packs_dir, &src)?;
         println!("Seeded built-in packs");
+    }
+
+    // Seed starter policy if none exists
+    if !state.policy_path.exists() {
+        let starter_policy = r#"# clix policy — edit this file to control what can run.
+# Rules are evaluated top-to-bottom; first match wins.
+# defaultAction: deny  means anything not explicitly allowed here is blocked.
+#
+# Starter policy: allow capabilities with no side effects or read-only side effects.
+# These are safe observation commands (list, show, status, logs, inspect).
+# Add explicit rules above to require approval for mutating or destructive operations.
+
+rules:
+  - sideEffectClass: none
+    action: allow
+    reason: No-side-effect capabilities (builtins, date, echo) are always safe.
+  - sideEffectClass: readOnly
+    action: allow
+    reason: Read-only capabilities (list, show, inspect, logs) are safe to run.
+
+defaultAction: deny
+"#;
+        std::fs::write(&state.policy_path, starter_policy)?;
+        println!("Created starter policy: {}", state.policy_path.display());
     }
 
     // Auto-activate base profile if nothing is active
