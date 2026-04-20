@@ -56,10 +56,12 @@ pub fn run(json: bool) -> Result<()> {
         "{r_total} total  ({r_allowed} allowed · {r_denied} denied · {r_failed} failed)"
     );
 
+    let sandbox_mode = if enforced { "enforced" } else { "policy-only" };
     if json {
         print_json(&serde_json::json!({
             "broker_up": broker_label.starts_with('✓'),
             "broker_status": broker_status_str,
+            "sandbox": sandbox_mode,
             "sandbox_enforced": enforced,
             "active_profile": active_profile,
             "pack_count": pack_count,
@@ -76,7 +78,7 @@ pub fn run(json: bool) -> Result<()> {
     } else {
         print_kv(&[
             ("broker",       format!("{broker_label}: {broker_status_str}")),
-            ("sandbox",      if enforced { "enforced" } else { "not enforced" }.to_string()),
+            ("sandbox",      sandbox_mode.to_string()),
             ("profile",      active_profile),
             ("packs",        pack_count.to_string()),
             ("capabilities", cap_count.to_string()),

@@ -18,6 +18,10 @@ pub fn build_serve_state() -> Result<Arc<ServeState>> {
 
 pub fn build_serve_state_opts(allow_unsandboxed: bool) -> Result<Arc<ServeState>> {
     metrics::init();
+
+    #[cfg(not(target_os = "linux"))]
+    print_sandbox_disabled_banner();
+
     let state = ClixState::load(home_dir())?;
     state.ensure_dirs()?;
     let cap_registry = build_registry(&state)?;
@@ -28,6 +32,22 @@ pub fn build_serve_state_opts(allow_unsandboxed: bool) -> Result<Arc<ServeState>
     let worker_registry = init_worker_registry(allow_unsandboxed)?;
 
     Ok(Arc::new(ServeState { cap_registry, wf_registry, policy, store, state, worker_registry }))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn print_sandbox_disabled_banner() {
+    use std::sync::OnceLock;
+    static PRINTED: OnceLock<()> = OnceLock::new();
+    PRINTED.get_or_init(|| {
+        eprintln!();
+        eprintln!("╔══════════════════════════════════════════════════════════════╗");
+        eprintln!("║  SANDBOX DISABLED — clix is running in policy-only mode      ║");
+        eprintln!("║  OS-level isolation (namespaces, seccomp, Landlock) requires  ║");
+        eprintln!("║  Linux. Capabilities run without kernel-level restrictions.   ║");
+        eprintln!("║  All receipts will carry sandbox_enforced=false.              ║");
+        eprintln!("╚══════════════════════════════════════════════════════════════╝");
+        eprintln!();
+    });
 }
 
 fn init_worker_registry(allow_unsandboxed: bool) -> Result<Option<Arc<WorkerRegistry>>> {
