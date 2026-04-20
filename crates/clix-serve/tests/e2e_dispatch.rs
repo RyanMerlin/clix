@@ -69,7 +69,7 @@ async fn call(serve: &Arc<ServeState>, name: &str) -> serde_json::Value {
 #[tokio::test]
 async fn test_readonly_cap_succeeds() {
     let caps = vec![make_cap("sys.date", SideEffectClass::ReadOnly)];
-    let serve = make_state(caps, PolicyBundle::default());
+    let serve = make_state(caps, PolicyBundle::allow_all());
 
     let resp = call(&serve, "sys.date").await;
     assert!(!resp["result"]["isError"].as_bool().unwrap_or(true),
@@ -82,7 +82,7 @@ async fn test_readonly_cap_succeeds() {
 #[tokio::test]
 async fn test_deny_policy_blocks() {
     let caps = vec![make_cap("gcloud.projects.list", SideEffectClass::ReadOnly)];
-    let mut policy = PolicyBundle::default();
+    let mut policy = PolicyBundle::allow_all();
     policy.rules.push(PolicyRule {
         capability: Some("gcloud.projects.list".to_string()),
         action:     PolicyAction::Deny,
@@ -106,7 +106,7 @@ async fn test_deny_policy_blocks() {
 #[tokio::test]
 async fn test_require_approval_blocks() {
     let caps = vec![make_cap("gcloud.compute.instances.delete", SideEffectClass::Destructive)];
-    let mut policy = PolicyBundle::default();
+    let mut policy = PolicyBundle::allow_all();
     policy.rules.push(PolicyRule {
         capability: Some("gcloud.compute.instances.delete".to_string()),
         action:     PolicyAction::RequireApproval,
@@ -127,7 +127,7 @@ async fn test_require_approval_blocks() {
 async fn test_write_profile_allows_mutating_cap() {
     // Mutating cap, but NO deny rule — should succeed
     let caps = vec![make_cap("gcloud.compute.instances.list", SideEffectClass::Mutating)];
-    let serve = make_state(caps, PolicyBundle::default());
+    let serve = make_state(caps, PolicyBundle::allow_all());
 
     let resp = call(&serve, "gcloud.compute.instances.list").await;
     assert!(!resp["result"]["isError"].as_bool().unwrap_or(true),
@@ -141,7 +141,7 @@ async fn test_side_effect_policy_denies_mutating_caps() {
         make_cap("gcloud.compute.instances.list",   SideEffectClass::ReadOnly),
         make_cap("gcloud.compute.instances.create", SideEffectClass::Mutating),
     ];
-    let mut policy = PolicyBundle::default();
+    let mut policy = PolicyBundle::allow_all();
     // Deny anything with side_effect_class = Mutating
     policy.rules.push(PolicyRule {
         side_effect_class: Some(SideEffectClass::Mutating),
@@ -166,7 +166,7 @@ async fn test_side_effect_policy_denies_mutating_caps() {
 #[tokio::test]
 async fn test_receipt_written_on_success() {
     let caps = vec![make_cap("sys.date", SideEffectClass::None)];
-    let serve = make_state(caps, PolicyBundle::default());
+    let serve = make_state(caps, PolicyBundle::allow_all());
 
     let resp = call(&serve, "sys.date").await;
     assert!(!resp["result"]["isError"].as_bool().unwrap_or(true));
@@ -176,4 +176,20 @@ async fn test_receipt_written_on_success() {
     assert!(!receipts.is_empty(), "receipt should have been written");
     let r = receipts.iter().find(|r| r.capability == "sys.date").expect("sys.date receipt");
     assert_eq!(format!("{:?}", r.status).to_lowercase(), "succeeded");
+}
+
+/// (g) M4 gate: unmatched capability with the default policy → Denied (fail-closed).
+#[tokio::test]
+async fn test_unmatched_cap_denied_by_default_policy() {
+    let caps = vec![make_cap("sys.date", SideEffectClass::None)];
+    // PolicyBundle::default() has default_action=Deny — no rules → everything denied
+    let serve = make_state(caps, PolicyBundle::default());
+
+    let resp = call(&serve, "sys.date").await;
+    assert!(resp["result"]["isError"].as_bool().unwrap_or(false),
+        "expected Denied with default policy, got: {resp}");
+
+    let store = serve.store.lock().unwrap();
+    let denied = store.list(10, Some("denied")).unwrap();
+    assert!(!denied.is_empty(), "expected a denied receipt in the store");
 }

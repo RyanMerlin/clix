@@ -46,7 +46,7 @@ fn ctx() -> ExecutionContext {
 /// This is the baseline; should be well under 1 ms.
 fn bench_builtin_dispatch(c: &mut Criterion) {
     let registry = CapabilityRegistry::from_vec(vec![date_cap()]);
-    let policy   = PolicyBundle::default();
+    let policy   = PolicyBundle::allow_all();
     let store    = ReceiptStore::open(std::path::Path::new(":memory:")).unwrap();
     let input    = serde_json::json!({});
 
@@ -69,7 +69,7 @@ fn bench_policy_deny(c: &mut Criterion) {
     let store    = ReceiptStore::open(std::path::Path::new(":memory:")).unwrap();
     let input    = serde_json::json!({});
 
-    let mut policy = PolicyBundle::default();
+    let mut policy = PolicyBundle::allow_all();
     policy.rules.push(PolicyRule {
         capability: Some("sys.date".to_string()),
         action:     PolicyAction::Deny,

@@ -13,7 +13,7 @@ use clix_testkit::{PolicyAction, PolicyBundle, PolicyRule, ReceiptStore};
 /// Receipts can be exported without filter (all statuses).
 #[tokio::test]
 async fn test_export_all() {
-    let serve = make_state(vec![builtin("sys.date")], PolicyBundle::default());
+    let serve = make_state(vec![builtin("sys.date")], PolicyBundle::allow_all());
     let _ = call(&serve, "sys.date").await;
     let store = serve.store.lock().unwrap();
     let all = store.export(None, None).unwrap();
@@ -24,7 +24,7 @@ async fn test_export_all() {
 /// Export with status filter returns only matching receipts.
 #[tokio::test]
 async fn test_export_status_filter() {
-    let mut policy = PolicyBundle::default();
+    let mut policy = PolicyBundle::allow_all();
     policy.rules.push(PolicyRule {
         capability: Some("ops.blocked".to_string()),
         action: PolicyAction::Deny,
@@ -51,7 +51,7 @@ async fn test_export_status_filter() {
 /// Exported receipts are in ascending chronological order.
 #[tokio::test]
 async fn test_export_ascending_order() {
-    let serve = make_state(vec![builtin("sys.date")], PolicyBundle::default());
+    let serve = make_state(vec![builtin("sys.date")], PolicyBundle::allow_all());
     for _ in 0..3 {
         let _ = call(&serve, "sys.date").await;
     }
@@ -66,7 +66,7 @@ async fn test_export_ascending_order() {
 /// Export serializes to valid JSON.
 #[tokio::test]
 async fn test_export_json_serializable() {
-    let serve = make_state(vec![builtin("sys.date")], PolicyBundle::default());
+    let serve = make_state(vec![builtin("sys.date")], PolicyBundle::allow_all());
     let _ = call(&serve, "sys.date").await;
     let store = serve.store.lock().unwrap();
     let all = store.export(None, None).unwrap();
@@ -84,7 +84,7 @@ async fn test_export_json_serializable() {
 /// count_by_status reflects the actual stored receipts.
 #[tokio::test]
 async fn test_count_by_status() {
-    let mut policy = PolicyBundle::default();
+    let mut policy = PolicyBundle::allow_all();
     policy.rules.push(PolicyRule {
         capability: Some("bad.op".to_string()),
         action: PolicyAction::Deny,

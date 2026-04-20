@@ -126,7 +126,7 @@ fn test_profile_policy_isolation_no_cross_contamination() {
     let registry  = CapabilityRegistry::from_vec(vec![cap]);
 
     // Profile A: readonly — deny
-    let mut policy_ro = PolicyBundle::default();
+    let mut policy_ro = PolicyBundle::allow_all();
     policy_ro.rules.push(PolicyRule {
         capability: Some("gcloud.projects.list".to_string()),
         action:     PolicyAction::Deny,
@@ -147,7 +147,7 @@ fn test_profile_policy_isolation_no_cross_contamination() {
     assert!(!outcome_ro.ok, "readonly profile should deny");
 
     // Profile B: write — allow (no deny rule)
-    let policy_rw = PolicyBundle::default();
+    let policy_rw = PolicyBundle::allow_all();
     let ctx_rw = ExecutionContext {
         env:      "test".to_string(),
         cwd:      std::path::PathBuf::from("."),

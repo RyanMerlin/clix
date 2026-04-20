@@ -158,6 +158,10 @@ mod tests {
     use crate::policy::{PolicyAction, PolicyBundle, PolicyRule};
     use std::path::PathBuf;
 
+    fn allow_all() -> PolicyBundle {
+        PolicyBundle { default_action: PolicyAction::Allow, ..Default::default() }
+    }
+
     fn store() -> ReceiptStore { ReceiptStore::open(std::path::Path::new(":memory:")).unwrap() }
 
     fn ctx() -> ExecutionContext {
@@ -171,7 +175,7 @@ mod tests {
     #[test]
     fn test_run_builtin() {
         let reg = CapabilityRegistry::from_vec(vec![date_cap()]);
-        let outcome = run_capability(&reg, &PolicyBundle::default(), None, &store(), None, "sys.date", serde_json::json!({}), ctx(), &[]).unwrap();
+        let outcome = run_capability(&reg, &allow_all(), None, &store(), None, "sys.date", serde_json::json!({}), ctx(), &[]).unwrap();
         assert!(outcome.ok);
     }
 

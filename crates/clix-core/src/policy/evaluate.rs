@@ -29,10 +29,18 @@ pub fn evaluate_policy(policy: &PolicyBundle, ctx: &ExecutionContext, cap: &Capa
             PolicyAction::RequireApproval => Decision::RequireApproval { reason },
         };
     }
-    match cap.risk {
-        RiskLevel::Low | RiskLevel::Medium => Decision::Allow,
-        RiskLevel::High | RiskLevel::Critical => Decision::RequireApproval {
-            reason: format!("{} risk capability requires approval", risk_label(&cap.risk)),
+    match &policy.default_action {
+        PolicyAction::Allow => match cap.risk {
+            RiskLevel::Low | RiskLevel::Medium => Decision::Allow,
+            RiskLevel::High | RiskLevel::Critical => Decision::RequireApproval {
+                reason: format!("{} risk capability requires approval", risk_label(&cap.risk)),
+            },
+        },
+        PolicyAction::Deny => Decision::Deny {
+            reason: format!("no policy rule matched '{}'; default action is deny", cap.name),
+        },
+        PolicyAction::RequireApproval => Decision::RequireApproval {
+            reason: format!("no policy rule matched '{}'; default action is require_approval", cap.name),
         },
     }
 }
@@ -72,10 +80,26 @@ mod tests {
         ExecutionContext { env: "default".to_string(), cwd: PathBuf::from("/tmp"), user: "agent".to_string(), profile: "base".to_string(), approver: None }
     }
 
+    fn allow_all() -> PolicyBundle {
+        PolicyBundle { default_action: PolicyAction::Allow, ..Default::default() }
+    }
+
     #[test]
-    fn test_allow_low_risk() {
+    fn unmatched_capability_is_denied_by_default() {
+        // The shipped default is fail-closed: no matching rule → Deny.
         let policy = PolicyBundle::default();
-        assert!(matches!(evaluate_policy(&policy, &ctx(), &stub_cap("sys.date", RiskLevel::Low)), Decision::Allow));
+        assert!(matches!(evaluate_policy(&policy, &ctx(), &stub_cap("sys.date", RiskLevel::Low)), Decision::Deny { .. }));
+    }
+
+    #[test]
+    fn unmatched_low_risk_allows_when_default_allow() {
+        // Opt-in: defaultAction: allow restores the old risk-based fallback.
+        assert!(matches!(evaluate_policy(&allow_all(), &ctx(), &stub_cap("sys.date", RiskLevel::Low)), Decision::Allow));
+    }
+
+    #[test]
+    fn unmatched_high_risk_requires_approval_when_default_allow() {
+        assert!(matches!(evaluate_policy(&allow_all(), &ctx(), &stub_cap("k8s.apply", RiskLevel::High)), Decision::RequireApproval { .. }));
     }
 
     #[test]
@@ -86,8 +110,9 @@ mod tests {
     }
 
     #[test]
-    fn test_require_approval_high_risk() {
-        let policy = PolicyBundle::default();
-        assert!(matches!(evaluate_policy(&policy, &ctx(), &stub_cap("k8s.apply", RiskLevel::High)), Decision::RequireApproval { .. }));
+    fn explicit_allow_rule_overrides_default_deny() {
+        let mut policy = PolicyBundle::default();
+        policy.rules.push(PolicyRule { capability: Some("sys.date".to_string()), action: PolicyAction::Allow, reason: None, ..Default::default() });
+        assert!(matches!(evaluate_policy(&policy, &ctx(), &stub_cap("sys.date", RiskLevel::Low)), Decision::Allow));
     }
 }

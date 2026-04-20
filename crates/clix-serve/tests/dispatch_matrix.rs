@@ -14,7 +14,7 @@ use rstest::rstest;
 /// A ReadOnly capability with default policy → succeeds.
 #[tokio::test]
 async fn test_allow_readonly() {
-    let serve = make_state(vec![builtin("sys.date")], PolicyBundle::default());
+    let serve = make_state(vec![builtin("sys.date")], PolicyBundle::allow_all());
     let resp = call(&serve, "sys.date").await;
     assert!(!resp["result"]["isError"].as_bool().unwrap_or(true), "expected success: {resp}");
 }
@@ -24,7 +24,7 @@ async fn test_allow_readonly() {
 async fn test_allow_mutating_no_rule() {
     let serve = make_state(
         vec![with_side_effect("k8s.pods.delete", SideEffectClass::Mutating)],
-        PolicyBundle::default(),
+        PolicyBundle::allow_all(),
     );
     let resp = call(&serve, "k8s.pods.delete").await;
     assert!(!resp["result"]["isError"].as_bool().unwrap_or(true), "expected success: {resp}");
@@ -35,7 +35,7 @@ async fn test_allow_mutating_no_rule() {
 /// Deny by capability name.
 #[tokio::test]
 async fn test_deny_by_name() {
-    let mut policy = PolicyBundle::default();
+    let mut policy = PolicyBundle::allow_all();
     policy.rules.push(PolicyRule {
         capability: Some("gcloud.projects.list".to_string()),
         action:     PolicyAction::Deny,
@@ -53,7 +53,7 @@ async fn test_deny_by_name() {
 /// Deny by side_effect_class (Mutating).
 #[tokio::test]
 async fn test_deny_by_side_effect() {
-    let mut policy = PolicyBundle::default();
+    let mut policy = PolicyBundle::allow_all();
     policy.rules.push(PolicyRule {
         side_effect_class: Some(SideEffectClass::Mutating),
         action:            PolicyAction::Deny,
@@ -76,7 +76,7 @@ async fn test_deny_by_side_effect() {
 /// Deny Destructive side_effect_class.
 #[tokio::test]
 async fn test_deny_destructive() {
-    let mut policy = PolicyBundle::default();
+    let mut policy = PolicyBundle::allow_all();
     policy.rules.push(PolicyRule {
         side_effect_class: Some(SideEffectClass::Destructive),
         action:            PolicyAction::Deny,
@@ -102,7 +102,7 @@ async fn test_require_approval_blocks(
     #[case] cap_name: &str,
     #[case] side_effect: SideEffectClass,
 ) {
-    let mut policy = PolicyBundle::default();
+    let mut policy = PolicyBundle::allow_all();
     policy.rules.push(PolicyRule {
         capability: Some(cap_name.to_string()),
         action:     PolicyAction::RequireApproval,
@@ -126,7 +126,7 @@ async fn test_require_approval_blocks(
 /// Calling an unregistered capability returns a JSON-RPC error.
 #[tokio::test]
 async fn test_unknown_capability_returns_error() {
-    let serve = make_state(vec![], PolicyBundle::default());
+    let serve = make_state(vec![], PolicyBundle::allow_all());
     let resp = call(&serve, "does.not.exist").await;
     // Either a JSON-RPC -32000 error or isError in the result
     let is_error = resp.get("error").is_some()
@@ -139,7 +139,7 @@ async fn test_unknown_capability_returns_error() {
 /// Successful call writes a receipt with status=succeeded.
 #[tokio::test]
 async fn test_receipt_on_success() {
-    let serve = make_state(vec![builtin("sys.date")], PolicyBundle::default());
+    let serve = make_state(vec![builtin("sys.date")], PolicyBundle::allow_all());
     let resp = call(&serve, "sys.date").await;
     assert!(!resp["result"]["isError"].as_bool().unwrap_or(true));
     let store = serve.store.lock().unwrap();
@@ -151,7 +151,7 @@ async fn test_receipt_on_success() {
 /// Denied call writes a receipt with status=denied.
 #[tokio::test]
 async fn test_receipt_on_deny() {
-    let mut policy = PolicyBundle::default();
+    let mut policy = PolicyBundle::allow_all();
     policy.rules.push(PolicyRule {
         capability: Some("ops.nuke".to_string()),
         action:     PolicyAction::Deny,
