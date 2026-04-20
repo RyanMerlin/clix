@@ -1,6 +1,9 @@
 # clix — agent quickstart
 
-Paste this into your system prompt or agent context. It's the complete reference for interacting with clix without MCP.
+> **clix is a plain CLI tool. Call it with `clix run <capability> --json`.
+> There is no MCP server, no tool registration, no handshake. Just shell commands.**
+
+Paste this into your system prompt or agent context. It's the complete reference for interacting with clix as a CLI.
 
 ---
 

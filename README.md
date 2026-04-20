@@ -11,6 +11,30 @@ The short version: clix stops an AI agent from `rm -rf`ing your filesystem, leak
 
 ---
 
+## How agents use clix — plain CLI, not MCP
+
+> **clix is not an MCP server. Agents call it as a plain CLI tool.**
+
+The agent runs `clix run <capability> --json` exactly like any other shell command.
+There is no tool catalogue registration, no MCP handshake, no context window overhead.
+
+```sh
+# The agent calls these directly — no MCP involved
+clix capabilities list --json        # what can I call?
+clix capabilities show git.status --json  # what does this take?
+clix run git.status --json           # run it
+clix receipts list --json            # what ran?
+```
+
+**Why not MCP?** MCP requires registering every tool upfront, which bloats the context
+window with a full catalogue. clix agents discover and call capabilities on demand —
+the context cost is zero until a capability is actually used.
+
+MCP transport exists as an optional integration mode for editors that require it
+(`clix mcp`), but it is not the primary design and not recommended for general use.
+
+---
+
 ## What it does
 
 **Default deny.** Without an explicit allow rule in your policy, no capability runs. Agents can't call what you haven't declared. This is enforced by the policy engine, not "best effort."
@@ -22,8 +46,6 @@ The short version: clix stops an AI agent from `rm -rf`ing your filesystem, leak
 **Credential mediation.** `clix-broker` owns your credential files (gcloud ADC, kubeconfig, etc.) at `0700`. It mints short-lived tokens on demand and injects them directly into the worker process at execution time, so your credentials never appear in the agent's environment or filesystem.
 
 **Full audit trail.** Every call — allowed, denied, or pending approval — is written to a local SQLite receipts database with inputs, outcome, isolation tier, and binary hash. `clix receipts list` shows you exactly what ran.
-
-**MCP-compatible.** clix speaks [Model Context Protocol](https://modelcontextprotocol.io/), so it works as a drop-in tool server for Claude, Cursor, and any other MCP-compatible agent.
 
 ---
 

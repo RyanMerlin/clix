@@ -1,10 +1,14 @@
 # clix × Claude — integration guide
 
+> **The recommended pattern is Pattern 1: direct CLI.** The agent calls `clix run <capability> --json`
+> as a plain shell command — no tool registration, no MCP, zero context overhead.
+> Patterns 2 and 3 are available for specialized use cases but are not the primary design.
+
 Three integration patterns, ordered by how much context budget you want to spend.
 
 ---
 
-## Pattern 1 — Direct CLI (zero context cost)
+## Pattern 1 — Direct CLI (zero context cost, recommended)
 
 The agent runs `clix` CLI commands directly. No tool registration needed. Works anywhere Claude can execute shell commands (Claude Code, subprocess-based agents).
 
