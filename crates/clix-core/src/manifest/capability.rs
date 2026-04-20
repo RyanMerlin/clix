@@ -45,21 +45,45 @@ pub struct CapabilityManifest {
 }
 
 /// Which isolation boundary to enforce when executing this capability.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub enum IsolationTier {
     /// No isolation — used for builtins running in-process.
-    #[serde(rename = "none")]
     None,
     /// Default: long-running worker process jailed with Linux namespaces, Landlock, seccomp, and
     /// cgroup v2. Dispatch latency <5 ms after warm-up.
     #[default]
-    #[serde(rename = "warm_worker")]
     WarmWorker,
-    /// Firecracker microVM pool. Strongest boundary; opt-in for high-risk CLIs.
-    /// Requires `feature = "firecracker"` and KVM.
-    #[serde(rename = "firecracker")]
+    /// Firecracker microVM pool — NOT YET IMPLEMENTED. Kept in the type for forward-compat
+    /// serialization only; the parser rejects it on deserialization.
+    #[doc(hidden)]
     Firecracker,
+}
+
+impl serde::Serialize for IsolationTier {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        s.serialize_str(match self {
+            IsolationTier::None       => "none",
+            IsolationTier::WarmWorker => "warm_worker",
+            IsolationTier::Firecracker => "firecracker",
+        })
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for IsolationTier {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        match s.as_str() {
+            "none"        => Ok(IsolationTier::None),
+            "warm_worker" => Ok(IsolationTier::WarmWorker),
+            "firecracker" => Err(serde::de::Error::custom(
+                "isolation: firecracker is not yet implemented. \
+                 Use warm_worker instead. Firecracker support is tracked in docs/.dev/design/TODO.md."
+            )),
+            other => Err(serde::de::Error::custom(
+                format!("unknown isolation tier '{other}'; valid values: none, warm_worker")
+            )),
+        }
+    }
 }
 
 /// Structured sandbox constraints attached to a capability or profile.
@@ -251,12 +275,21 @@ mod tests {
 
     #[test]
     fn test_isolation_tier_serde() {
-        let json = serde_json::json!({"isolation": "firecracker"});
-        let cap: serde_json::Value = json;
-        let tier: IsolationTier = serde_json::from_value(cap["isolation"].clone()).unwrap();
-        assert_eq!(tier, IsolationTier::Firecracker);
-        let default: IsolationTier = serde_json::from_value(serde_json::json!("warm_worker")).unwrap();
-        assert_eq!(default, IsolationTier::WarmWorker);
+        // warm_worker and none parse correctly
+        let ww: IsolationTier = serde_json::from_value(serde_json::json!("warm_worker")).unwrap();
+        assert_eq!(ww, IsolationTier::WarmWorker);
+        let none: IsolationTier = serde_json::from_value(serde_json::json!("none")).unwrap();
+        assert_eq!(none, IsolationTier::None);
+    }
+
+    #[test]
+    fn firecracker_tier_rejected_at_parse() {
+        // firecracker is not implemented; the parser must reject it with a clear error
+        let err = serde_json::from_value::<IsolationTier>(serde_json::json!("firecracker"))
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("not yet implemented"), "expected clear error, got: {msg}");
+        assert!(msg.contains("warm_worker"), "error should suggest warm_worker: {msg}");
     }
 
     #[test]
