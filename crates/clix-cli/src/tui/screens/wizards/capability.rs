@@ -51,6 +51,10 @@ impl CapabilityWizard {
         }
     }
 
+    pub fn is_dirty(&self) -> bool {
+        !self.name.value.is_empty() || !self.command.value.is_empty()
+    }
+
     pub fn handle_key(&mut self, code: KeyCode) -> CapWizardAction {
         match &self.step {
             CapWizardStep::Form => self.handle_form(code),

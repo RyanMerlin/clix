@@ -3,7 +3,14 @@ use ratatui::{prelude::*, widgets::*};
 use clix_core::state::InfisicalConfig;
 use crate::tui::theme;
 use crate::tui::widgets::form::FieldInput;
+use crate::tui::work::JobId;
 use super::wizards::profile::render_text_field;
+
+pub enum SubmitState {
+    Idle,
+    Saving { job_id: JobId },
+    Err(String),
+}
 
 pub struct InfisicalSetupState {
     pub site_url: FieldInput,
@@ -14,6 +21,8 @@ pub struct InfisicalSetupState {
     pub active_field: usize,
     pub status: Option<String>,
     pub status_is_error: bool,
+    pub submit_state: SubmitState,
+    pub keyring_used: bool,
 }
 
 pub enum InfisicalSetupAction {
@@ -63,10 +72,42 @@ impl InfisicalSetupState {
             active_field: 0,
             status: None,
             status_is_error: false,
+            submit_state: SubmitState::Idle,
+            keyring_used: false,
         }
     }
 
+    fn validate(&self) -> Result<(), String> {
+        if self.site_url.value.trim().is_empty() {
+            return Err("site URL is required".to_string());
+        }
+        if self.client_id.value.trim().is_empty() {
+            return Err("client ID is required".to_string());
+        }
+        if self.client_secret.value.trim().is_empty() {
+            return Err("client secret is required".to_string());
+        }
+        if self.environment.value.trim().is_empty() {
+            return Err("environment is required".to_string());
+        }
+        Ok(())
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        !self.site_url.value.is_empty()
+            || (!self.client_id.value.is_empty() && self.client_id.value != "(already set)")
+            || (!self.client_secret.value.is_empty() && self.client_secret.value != "(already set)")
+            || !self.project_id.value.is_empty()
+    }
+
     pub fn handle_key(&mut self, code: KeyCode) -> InfisicalSetupAction {
+        // Block all input except Esc while async save is in flight
+        if matches!(self.submit_state, SubmitState::Saving { .. }) {
+            if code == KeyCode::Esc {
+                return InfisicalSetupAction::Cancel;
+            }
+            return InfisicalSetupAction::None;
+        }
         match code {
             KeyCode::Esc => return InfisicalSetupAction::Cancel,
             KeyCode::Tab => {
@@ -76,6 +117,11 @@ impl InfisicalSetupState {
                 self.active_field = self.active_field.checked_sub(1).unwrap_or(4);
             }
             KeyCode::Enter => {
+                if let Err(msg) = self.validate() {
+                    self.status = Some(msg);
+                    self.status_is_error = true;
+                    return InfisicalSetupAction::None;
+                }
                 let client_id = if self.client_id.value == "(already set)" {
                     String::new() // means keep existing
                 } else {
@@ -155,12 +201,29 @@ impl InfisicalSetupState {
         render_text_field(f, &self.environment, "Default Environment", self.active_field == 4, chunks[4]);
 
         // Status / hint line
-        if let Some(ref msg) = self.status {
-            let style = if self.status_is_error { theme::danger() } else { theme::ok() };
-            f.render_widget(Paragraph::new(Span::styled(msg.clone(), style)), chunks[5]);
-        } else {
-            let hint = "tab:next  enter:save  esc:cancel  (credentials stored in keyring if available)";
-            f.render_widget(Paragraph::new(Span::styled(hint, theme::muted())), chunks[5]);
+        match &self.submit_state {
+            SubmitState::Saving { .. } => {
+                let frame = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| (d.subsec_millis() / 250) as usize % 4)
+                    .unwrap_or(0);
+                let spinner = ["⠋", "⠙", "⠹", "⠸"][frame];
+                let msg = format!("{} Testing connection… (esc to cancel)", spinner);
+                f.render_widget(Paragraph::new(Span::styled(msg, theme::accent_bold())), chunks[5]);
+            }
+            SubmitState::Err(ref msg) => {
+                let text = format!("✗ {msg} — edit and retry, or esc to cancel");
+                f.render_widget(Paragraph::new(Span::styled(text, theme::danger())), chunks[5]);
+            }
+            SubmitState::Idle => {
+                if let Some(ref msg) = self.status {
+                    let style = if self.status_is_error { theme::danger() } else { theme::ok() };
+                    f.render_widget(Paragraph::new(Span::styled(msg.clone(), style)), chunks[5]);
+                } else {
+                    let hint = "tab:next  enter:save  esc:cancel  (credentials stored in keyring if available)";
+                    f.render_widget(Paragraph::new(Span::styled(hint, theme::muted())), chunks[5]);
+                }
+            }
         }
     }
 }

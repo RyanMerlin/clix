@@ -8,12 +8,13 @@ use crossterm::{
 use ratatui::{prelude::*, widgets::*};
 use anyhow::Result;
 
-use crate::tui::app::{App, Screen, Overlay};
+use crate::tui::app::{App, Screen, Overlay, Focus};
 
 pub mod app;
 pub mod screens;
 pub mod theme;
 pub mod widgets;
+pub mod work;
 
 pub fn run() -> Result<()> {
     // Suppress loader warnings for the duration of the TUI session —
@@ -85,9 +86,47 @@ fn render(f: &mut Frame, app: &App) {
 
     // Overlays (on top of everything)
     render_overlay(f, app, full);
+
+    // Confirm-discard dialog floats above the overlay
+    if app.confirming_discard {
+        render_confirm_discard(f, full);
+    }
+
+    // Toast floats above all other layers
+    if let Some(ref t) = app.toast_state {
+        render_toast(f, &t.message, t.is_error, full);
+    }
 }
 
 // ─── header ──────────────────────────────────────────────────────────────────
+
+fn breadcrumb(app: &App) -> String {
+    let screen_name = match app.screen {
+        Screen::Dashboard => "Dashboard",
+        Screen::Profiles => "Profiles",
+        Screen::Capabilities => "Capabilities",
+        Screen::Packs => "Packs",
+        Screen::Receipts => "Receipts",
+        Screen::Workflows => "Workflows",
+        Screen::Broker => "Broker",
+        Screen::Secrets => "Secrets",
+    };
+    let overlay_name = match &app.overlay {
+        Overlay::ProfileCreate(_) => Some("New Profile"),
+        Overlay::ProfileSecrets(_) => Some("Edit Secrets"),
+        Overlay::CapabilityCreate(_) => Some("New Capability"),
+        Overlay::PackCreate(_) => Some("New Pack"),
+        Overlay::PackEdit { .. } => Some("Edit Pack"),
+        Overlay::InstallPack(_) => Some("Install Pack"),
+        Overlay::Help => Some("Help"),
+        Overlay::InfisicalSetup(_) => Some("Configure Infisical"),
+        Overlay::None => None,
+    };
+    match overlay_name {
+        Some(ov) => format!("{} › {}", screen_name, ov),
+        None => screen_name.to_string(),
+    }
+}
 
 fn render_header(f: &mut Frame, app: &App, area: Rect) {
     let active = if app.active_profiles.is_empty() {
@@ -96,11 +135,17 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
         app.active_profiles.join(", ")
     };
 
+    let crumb = breadcrumb(app);
     let left = Span::styled(" clix ", theme::accent_bold());
-    let spacer = Span::styled("─".repeat(area.width.saturating_sub(12 + active.len() as u16 + 2) as usize), theme::muted());
+    let sep = Span::styled(" › ", theme::muted());
+    let crumb_span = Span::styled(crumb.clone(), if app.focus == Focus::Content { theme::dim() } else { theme::muted() });
+
+    // Pad between breadcrumb and right-aligned profile
+    let used = 7 + 3 + crumb.len() as u16 + active.len() as u16 + 2;
+    let pad = " ".repeat(area.width.saturating_sub(used) as usize);
     let right = Span::styled(format!(" {} ", active), theme::dim());
 
-    let line = Line::from(vec![left, spacer, right]);
+    let line = Line::from(vec![left, sep, crumb_span, Span::raw(pad), right]);
     f.render_widget(Paragraph::new(line), area);
 }
 
@@ -121,15 +166,21 @@ static STUB_SCREENS: &[Screen] = &[Screen::Receipts, Screen::Workflows];
 
 fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
     let active_idx = app.screen.sidebar_index();
+    let sidebar_focused = app.focus == Focus::Sidebar && !app.overlay.is_open();
 
-    let items: Vec<ListItem> = SIDEBAR_ITEMS.iter().enumerate().map(|(i, (key, label))| {
+    let items: Vec<ListItem> = SIDEBAR_ITEMS.iter().enumerate().map(|(i, (_key, label))| {
         let is_active = i == active_idx;
         let is_stub = STUB_SCREENS.contains(&Screen::from_index(i));
 
-        if is_active {
+        if is_active && sidebar_focused {
             ListItem::new(Line::from(vec![
-                Span::styled("▸ ", theme::accent()),
+                Span::styled("▶ ", theme::accent()),
                 Span::styled(*label, theme::accent_bold()),
+            ]))
+        } else if is_active {
+            ListItem::new(Line::from(vec![
+                Span::styled("▸ ", theme::muted()),
+                Span::styled(*label, theme::dim()),
             ]))
         } else if is_stub {
             ListItem::new(Line::from(vec![
@@ -144,10 +195,11 @@ fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
         }
     }).collect();
 
+    let border_style = if sidebar_focused { theme::border_focused() } else { theme::border_dim() };
     let list = List::new(items)
         .block(Block::default()
             .borders(Borders::RIGHT)
-            .border_style(theme::border_dim()));
+            .border_style(border_style));
     f.render_widget(list, area);
 }
 
@@ -213,7 +265,7 @@ fn render_stub(f: &mut Frame, app: &App, area: Rect) {
 // ─── legend ───────────────────────────────────────────────────────────────────
 
 fn render_legend(f: &mut Frame, app: &App, area: Rect) {
-    let has_overlay = matches!(app.overlay, Overlay::ProfileCreate(_) | Overlay::ProfileSecrets(_) | Overlay::CapabilityCreate(_) | Overlay::PackCreate(_) | Overlay::PackEdit { .. } | Overlay::InstallPack(_) | Overlay::Help | Overlay::InfisicalSetup(_));
+    let has_overlay = app.overlay.is_open();
     if has_overlay { return; }
 
     let hints: Vec<Span> = match app.screen {
@@ -254,12 +306,41 @@ fn legend_spans(pairs: &[(&str, &str)]) -> Vec<Span<'static>> {
     spans
 }
 
+fn render_confirm_discard(f: &mut Frame, area: Rect) {
+    use ratatui::widgets::Clear;
+    let width = 44u16.min(area.width);
+    let height = 5u16;
+    let x = (area.width.saturating_sub(width)) / 2;
+    let y = (area.height.saturating_sub(height)) / 2;
+    let dialog = Rect::new(x, y, width, height);
+    f.render_widget(Clear, dialog);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(" Discard changes? ", theme::accent_bold()))
+        .border_style(theme::danger());
+    let inner = block.inner(dialog);
+    f.render_widget(block, dialog);
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled("  You have unsaved changes.", theme::dim())),
+        Line::from(Line::from(vec![
+            Span::raw("  "),
+            Span::styled("y", theme::accent_bold()),
+            Span::styled(" discard  ", theme::muted()),
+            Span::styled("n", theme::accent_bold()),
+            Span::styled("/", theme::inactive()),
+            Span::styled("esc", theme::accent_bold()),
+            Span::styled(" keep editing", theme::muted()),
+        ])),
+    ];
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
 // ─── overlay rendering ────────────────────────────────────────────────────────
 
 fn render_overlay(f: &mut Frame, app: &App, area: Rect) {
     match &app.overlay {
         Overlay::None => {}
-        Overlay::Toast { message, is_error, .. } => render_toast(f, message, *is_error, area),
         Overlay::Help => render_help(f, area),
         Overlay::ProfileCreate(wiz) => wiz.render(f, area),
         Overlay::ProfileSecrets(state) => state.render(f, area),

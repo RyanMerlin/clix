@@ -64,10 +64,13 @@ fn process_alive(pid: i32) -> bool {
 fn try_ping(socket_path: &str) -> Option<u64> {
     use std::os::unix::net::UnixStream;
     use std::io::{BufRead, BufReader, Write};
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
+    let timeout = Duration::from_secs(3);
     let start = Instant::now();
     let mut stream = UnixStream::connect(socket_path).ok()?;
+    stream.set_read_timeout(Some(timeout)).ok()?;
+    stream.set_write_timeout(Some(timeout)).ok()?;
     stream.write_all(b"{\"type\":\"ping\"}\n").ok()?;
     let reader = BufReader::new(&stream);
     let line = reader.lines().next()?.ok()?;

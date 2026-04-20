@@ -89,6 +89,10 @@ impl PackWizard {
         wiz
     }
 
+    pub fn is_dirty(&self) -> bool {
+        !self.name.value.is_empty()
+    }
+
     pub fn handle_key(&mut self, code: KeyCode) -> PackWizardAction {
         match &self.step {
             PackWizardStep::Identity => self.handle_identity(code),

@@ -14,7 +14,8 @@ use clix_core::packs::scaffold::{scaffold_pack, Preset};
 use crate::tui::screens::wizards::pack::{PackWizard, PackWizardAction};
 use crate::tui::screens::wizards::profile::{ProfileWizard, ProfileWizardAction};
 use crate::tui::screens::wizards::capability::{CapabilityWizard, CapWizardAction};
-use crate::tui::screens::infisical_setup::{InfisicalSetupState, InfisicalSetupAction};
+use crate::tui::screens::infisical_setup::{InfisicalSetupState, InfisicalSetupAction, SubmitState};
+use crate::tui::work::{WorkPool, WorkRequest, WorkResult, next_job_id, JobId};
 
 // ─── screen ─────────────────────────────────────────────────────────────────
 
@@ -94,13 +95,28 @@ pub enum Overlay {
     PackCreate(PackWizard),
     PackEdit { pack_name: String, checklist: crate::tui::widgets::checklist::Checklist },
     InstallPack(String),  // path buffer
-    Toast { message: String, is_error: bool, expires_at: std::time::Instant },
     Help,
     InfisicalSetup(InfisicalSetupState),
 }
 
 impl Overlay {
     pub fn is_open(&self) -> bool { !matches!(self, Overlay::None) }
+}
+
+// ─── toast ────────────────────────────────────────────────────────────────────
+
+pub struct ToastState {
+    pub message: String,
+    pub is_error: bool,
+    pub expires_at: std::time::Instant,
+}
+
+// ─── focus ───────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Focus {
+    Sidebar,
+    Content,
 }
 
 // ─── app ─────────────────────────────────────────────────────────────────────
@@ -125,6 +141,14 @@ pub struct App {
     pub caps_cursor: usize,
     pub packs_cursor: usize,
     pub should_quit: bool,
+    // async work
+    pub work: WorkPool,
+    pub dropped_jobs: std::collections::HashSet<JobId>,
+    // navigation
+    pub focus: Focus,
+    pub toast_state: Option<ToastState>,
+    // discard confirmation — rendered over the current overlay; keeps overlay intact
+    pub confirming_discard: bool,
 }
 
 impl App {
@@ -166,6 +190,11 @@ impl App {
             caps_cursor: 0,
             packs_cursor: 0,
             should_quit: false,
+            work: WorkPool::new(),
+            dropped_jobs: std::collections::HashSet::new(),
+            focus: Focus::Sidebar,
+            toast_state: None,
+            confirming_discard: false,
         })
     }
 
@@ -203,18 +232,55 @@ impl App {
     }
 
     fn toast(&mut self, msg: &str, is_error: bool) {
-        self.overlay = Overlay::Toast {
+        self.toast_state = Some(ToastState {
             message: msg.to_string(),
             is_error,
             expires_at: std::time::Instant::now() + std::time::Duration::from_secs(3),
-        };
+        });
     }
 
     pub fn tick(&mut self) {
         // Dismiss expired toasts
-        if let Overlay::Toast { expires_at, .. } = &self.overlay {
-            if std::time::Instant::now() >= *expires_at {
-                self.overlay = Overlay::None;
+        if let Some(ref t) = self.toast_state {
+            if std::time::Instant::now() >= t.expires_at {
+                self.toast_state = None;
+            }
+        }
+        // Drain async work results (collect first to free the borrow on result_rx)
+        let work_results: Vec<WorkResult> = self.work.result_rx.try_iter().collect();
+        for result in work_results {
+            match result {
+                WorkResult::ConnectivityPinged { ok, latency_ms, error, .. } => {
+                    let msg = if ok {
+                        format!("✓ Connected ({}ms)", latency_ms)
+                    } else {
+                        format!("✗ {}", error.as_deref().unwrap_or("auth failed"))
+                    };
+                    self.toast(&msg, !ok);
+                }
+                WorkResult::InfisicalTested { job_id, ok, latency_ms, keyring_used, error } => {
+                    if self.dropped_jobs.remove(&job_id) {
+                        continue; // user cancelled — discard
+                    }
+                    let is_our_job = if let Overlay::InfisicalSetup(ref state) = self.overlay {
+                        matches!(&state.submit_state, SubmitState::Saving { job_id: jid } if *jid == job_id)
+                    } else {
+                        false
+                    };
+                    if !is_our_job { continue; }
+                    if ok {
+                        self.overlay = Overlay::None;
+                        let keyring_note = if keyring_used { " — credentials in keyring" } else { " — credentials in config.yaml" };
+                        let msg = format!("✓ Infisical connected ({}ms){}", latency_ms, keyring_note);
+                        let _ = self.reload();
+                        self.toast(&msg, false);
+                    } else {
+                        let err = error.as_deref().unwrap_or("auth failed").chars().take(60).collect::<String>();
+                        if let Overlay::InfisicalSetup(ref mut state) = self.overlay {
+                            state.submit_state = SubmitState::Err(err);
+                        }
+                    }
+                }
             }
         }
     }
@@ -225,15 +291,40 @@ impl App {
             return;
         }
 
-        // Delegate to overlay first
-        match &self.overlay {
-            Overlay::None | Overlay::Toast { .. } => {}
-            _ => {
-                self.handle_overlay_key(key);
-                return;
-            }
+        // Delegate to overlay first (overlay implies Focus::Content-like routing)
+        if self.overlay.is_open() {
+            self.handle_overlay_key(key);
+            return;
         }
 
+        // Sidebar focus: up/down navigate sidebar, enter/right enters content
+        if self.focus == Focus::Sidebar {
+            match key.code {
+                KeyCode::Char('q') => self.should_quit = true,
+                KeyCode::Char('?') => self.overlay = Overlay::Help,
+                // Number shortcuts jump directly to screen (and enter content)
+                KeyCode::Char('1') => { self.switch_to(Screen::Profiles); self.focus = Focus::Content; }
+                KeyCode::Char('2') => { self.switch_to(Screen::Capabilities); self.focus = Focus::Content; }
+                KeyCode::Char('3') => { self.switch_to(Screen::Packs); self.focus = Focus::Content; }
+                KeyCode::Char('4') => { self.switch_to(Screen::Receipts); self.focus = Focus::Content; }
+                KeyCode::Char('5') => { self.switch_to(Screen::Workflows); self.focus = Focus::Content; }
+                KeyCode::Char('6') => { self.switch_to(Screen::Broker); self.focus = Focus::Content; }
+                KeyCode::Char('7') => { self.switch_to(Screen::Secrets); self.focus = Focus::Content; }
+                KeyCode::Char('0') => { self.switch_to(Screen::Dashboard); self.focus = Focus::Content; }
+                // Tab still cycles for familiarity
+                KeyCode::Tab => self.switch_to(self.screen.next()),
+                KeyCode::BackTab => self.switch_to(self.screen.prev()),
+                // Up/down navigate sidebar
+                KeyCode::Up => self.switch_to(self.screen.prev()),
+                KeyCode::Down => self.switch_to(self.screen.next()),
+                // Enter or right arrow → enter content
+                KeyCode::Enter | KeyCode::Right => self.focus = Focus::Content,
+                _ => {}
+            }
+            return;
+        }
+
+        // Content focus
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('r') if self.screen == Screen::Broker => {
@@ -256,7 +347,7 @@ impl App {
             KeyCode::Char('6') => self.switch_to(Screen::Broker),
             KeyCode::Char('7') => self.switch_to(Screen::Secrets),
             KeyCode::Char('0') => self.switch_to(Screen::Dashboard),
-            // Tab / arrows for screen navigation
+            // Tab cycles screens
             KeyCode::Tab => self.switch_to(self.screen.next()),
             KeyCode::BackTab => self.switch_to(self.screen.prev()),
             // n = new (create wizard)
@@ -281,18 +372,12 @@ impl App {
             KeyCode::Char('e') if self.screen == Screen::Secrets => {
                 self.open_infisical_setup();
             }
-            // t = test connectivity on Secrets screen
+            // t = test connectivity on Secrets screen (async)
             KeyCode::Char('t') if self.screen == Screen::Secrets => {
                 if let Some(ref cfg) = self.infisical_cfg.clone() {
-                    let report = clix_core::secrets::test_connectivity(cfg);
-                    let msg = if report.auth_ok {
-                        format!("Connected ({}ms)", report.latency_ms)
-                    } else {
-                        format!("Error: {}", report.error.as_deref().unwrap_or("unknown"))
-                    };
-                    let is_err = !report.auth_ok;
-                    self.connectivity_report = Some(report);
-                    self.toast(&msg, is_err);
+                    let job_id = next_job_id();
+                    self.work.dispatch(WorkRequest::PingConnectivity { cfg: cfg.clone(), job_id });
+                    self.toast("Testing connectivity…", false);
                 } else {
                     self.toast("Infisical not configured — press e to configure", true);
                 }
@@ -333,10 +418,11 @@ impl App {
             // Content navigation — arrow keys + page
             KeyCode::Down => self.cursor_down(),
             KeyCode::Up => self.cursor_up(),
+            KeyCode::Left => self.focus = Focus::Sidebar,
             KeyCode::PageDown => self.cursor_page(15),
             KeyCode::PageUp => self.cursor_page(-15),
             KeyCode::Enter => self.handle_enter(),
-            KeyCode::Esc | KeyCode::Backspace => self.handle_back(),
+            KeyCode::Esc | KeyCode::Backspace => self.handle_back_or_sidebar(),
             _ => {}
         }
     }
@@ -423,6 +509,21 @@ impl App {
     }
 
     fn handle_overlay_key(&mut self, key: KeyEvent) {
+        // Confirm-discard dialog takes priority
+        if self.confirming_discard {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.confirming_discard = false;
+                    self.overlay = Overlay::None;
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                    self.confirming_discard = false;
+                }
+                _ => {}
+            }
+            return;
+        }
+
         // Dismiss help overlay on any key
         if matches!(self.overlay, Overlay::Help) {
             self.overlay = Overlay::None;
@@ -498,15 +599,50 @@ impl App {
         }
 
         // Infisical setup overlay
-        if let Overlay::InfisicalSetup(ref mut state) = self.overlay {
-            let action = state.handle_key(key.code);
+        let infisical_action = if let Overlay::InfisicalSetup(ref mut state) = self.overlay {
+            Some(state.handle_key(key.code))
+        } else {
+            None
+        };
+        if let Some(action) = infisical_action {
             match action {
-                InfisicalSetupAction::Cancel => { self.overlay = Overlay::None; }
+                InfisicalSetupAction::Cancel => {
+                    let (is_dirty, is_saving) = if let Overlay::InfisicalSetup(ref state) = self.overlay {
+                        let saving = matches!(&state.submit_state, SubmitState::Saving { .. });
+                        (state.is_dirty(), saving)
+                    } else {
+                        (false, false)
+                    };
+                    if is_saving {
+                        // Drop the in-flight job and close
+                        if let Overlay::InfisicalSetup(ref state) = self.overlay {
+                            if let SubmitState::Saving { job_id } = &state.submit_state {
+                                self.dropped_jobs.insert(*job_id);
+                            }
+                        }
+                        self.overlay = Overlay::None;
+                    } else if is_dirty {
+                        self.confirming_discard = true; // show confirm dialog, keep overlay intact
+                    } else {
+                        self.overlay = Overlay::None;
+                    }
+                }
                 InfisicalSetupAction::Save { site_url, client_id, client_secret, project_id, environment } => {
-                    let res = self.do_save_infisical_config(&site_url, &client_id, &client_secret, &project_id, &environment);
-                    match res {
-                        Ok(msg) => { self.overlay = Overlay::None; let _ = self.reload(); self.toast(&msg, false); }
-                        Err(e) => { self.toast(&format!("Error: {e}"), true); }
+                    match self.do_write_infisical_config(&site_url, &client_id, &client_secret, &project_id, &environment) {
+                        Ok(effective_cfg) => {
+                            let job_id = next_job_id();
+                            if let Overlay::InfisicalSetup(ref mut state) = self.overlay {
+                                state.submit_state = SubmitState::Saving { job_id };
+                                state.status = None;
+                            }
+                            self.work.dispatch(WorkRequest::TestInfisical { cfg: effective_cfg, job_id });
+                        }
+                        Err(e) => {
+                            if let Overlay::InfisicalSetup(ref mut state) = self.overlay {
+                                state.status = Some(format!("Save failed: {e}"));
+                                state.status_is_error = true;
+                            }
+                        }
                     }
                 }
                 InfisicalSetupAction::None => {}
@@ -521,9 +657,13 @@ impl App {
             // Clone refs so we can borrow self mutably inside
             let registry = self.registry.clone();
             let infisical = self.infisical_cfg.clone();
+            let is_dirty = wiz.is_dirty();
             let action = wiz.handle_key(code, Some(&registry), infisical.as_ref());
             let result: Option<Result<String>> = match action {
-                ProfileWizardAction::Cancel => { self.overlay = Overlay::None; None }
+                ProfileWizardAction::Cancel => {
+                    if is_dirty { self.confirming_discard = true; } else { self.overlay = Overlay::None; }
+                    None
+                }
                 ProfileWizardAction::Submit { name, description, capabilities, secret_bindings, folder_bindings } => {
                     Some(self.do_create_profile(&name, &description, &capabilities, &secret_bindings, &folder_bindings))
                 }
@@ -673,6 +813,27 @@ impl App {
         }
     }
 
+    fn handle_back_or_sidebar(&mut self) {
+        // For Capabilities: pop drill level first; once at top, return to sidebar
+        if self.screen == Screen::Capabilities {
+            match self.caps_view.clone() {
+                CapView::Detail(name) => {
+                    self.caps_view = CapView::Listing(CapabilityRegistry::group_key(&name));
+                    self.caps_cursor = 0;
+                    return;
+                }
+                CapView::Listing(_) => {
+                    self.caps_view = CapView::Namespaces;
+                    self.caps_cursor = 0;
+                    return;
+                }
+                CapView::Namespaces => {} // fall through to sidebar
+            }
+        }
+        // Return focus to sidebar
+        self.focus = Focus::Sidebar;
+    }
+
     pub fn toggle_profile(&mut self, name: &str) -> Result<()> {
         let mut state = ClixState::load(home_dir())?;
         if state.config.active_profiles.contains(&name.to_string()) {
@@ -767,47 +928,46 @@ impl App {
                 "name: {cap_name}\nversion: 1\ndescription: ''\nbackend:\n  type: subprocess\n  command: {}\nrisk: low\nsideEffectClass: readOnly\ninputSchema:\n  type: object\n  properties: {{}}\n",
                 cap_name.split('.').next().unwrap_or(name)
             );
-            let _ = std::fs::write(caps_dir.join(&file_name), yaml);
+            std::fs::write(caps_dir.join(&file_name), yaml)?;
         }
 
         // Patch pack.yaml: add description, author, and capabilities list
         {
             let pack_yaml_path = pack_dir.join("pack.yaml");
-            if let Ok(existing) = std::fs::read_to_string(&pack_yaml_path) {
-                let mut val: serde_yaml::Value = serde_yaml::from_str(&existing).unwrap_or_default();
-                if let serde_yaml::Value::Mapping(ref mut m) = val {
-                    if !description.is_empty() {
-                        m.insert(serde_yaml::Value::String("description".into()),
-                            serde_yaml::Value::String(description.to_string()));
-                    }
-                    if !author.is_empty() {
-                        m.insert(serde_yaml::Value::String("author".into()),
-                            serde_yaml::Value::String(author.to_string()));
-                    }
-                    // Merge discovered capabilities into the pack's capabilities list
-                    if !capability_names.is_empty() {
-                        let existing_caps: Vec<String> = m.get("capabilities")
-                            .and_then(|v| v.as_sequence())
-                            .map(|seq| seq.iter()
-                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                                .collect())
-                            .unwrap_or_default();
-                        let mut all_caps = existing_caps;
-                        for cn in capability_names {
-                            if !all_caps.contains(cn) {
-                                all_caps.push(cn.clone());
-                            }
-                        }
-                        m.insert(serde_yaml::Value::String("capabilities".into()),
-                            serde_yaml::Value::Sequence(
-                                all_caps.iter().map(|s| serde_yaml::Value::String(s.clone())).collect()
-                            ));
-                    }
+            let existing = std::fs::read_to_string(&pack_yaml_path)?;
+            let mut val: serde_yaml::Value = serde_yaml::from_str(&existing)
+                .map_err(|e| anyhow::anyhow!("pack.yaml parse error: {e}"))?;
+            if let serde_yaml::Value::Mapping(ref mut m) = val {
+                if !description.is_empty() {
+                    m.insert(serde_yaml::Value::String("description".into()),
+                        serde_yaml::Value::String(description.to_string()));
                 }
-                if let Ok(patched) = serde_yaml::to_string(&val) {
-                    let _ = std::fs::write(&pack_yaml_path, patched);
+                if !author.is_empty() {
+                    m.insert(serde_yaml::Value::String("author".into()),
+                        serde_yaml::Value::String(author.to_string()));
+                }
+                // Merge discovered capabilities into the pack's capabilities list
+                if !capability_names.is_empty() {
+                    let existing_caps: Vec<String> = m.get("capabilities")
+                        .and_then(|v| v.as_sequence())
+                        .map(|seq| seq.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect())
+                        .unwrap_or_default();
+                    let mut all_caps = existing_caps;
+                    for cn in capability_names {
+                        if !all_caps.contains(cn) {
+                            all_caps.push(cn.clone());
+                        }
+                    }
+                    m.insert(serde_yaml::Value::String("capabilities".into()),
+                        serde_yaml::Value::Sequence(
+                            all_caps.iter().map(|s| serde_yaml::Value::String(s.clone())).collect()
+                        ));
                 }
             }
+            let patched = serde_yaml::to_string(&val)?;
+            std::fs::write(&pack_yaml_path, patched)?;
         }
 
         Ok(format!("Pack '{}' created with {} capabilities", name, capability_names.len()))
@@ -821,7 +981,8 @@ impl App {
             return Err(anyhow::anyhow!("pack.yaml not found for '{}'", pack_name));
         }
         let existing = std::fs::read_to_string(&pack_yaml_path)?;
-        let mut val: serde_yaml::Value = serde_yaml::from_str(&existing).unwrap_or_default();
+        let mut val: serde_yaml::Value = serde_yaml::from_str(&existing)
+            .map_err(|e| anyhow::anyhow!("pack.yaml parse error: {e}"))?;
         if let serde_yaml::Value::Mapping(ref mut m) = val {
             m.insert(serde_yaml::Value::String("capabilities".into()),
                 serde_yaml::Value::Sequence(
@@ -847,6 +1008,59 @@ impl App {
         }
         std::fs::write(&path, serde_yaml::to_string(&val)?)?;
         Ok(format!("Profile '{}' secrets updated ({} bindings)", profile_name, bindings.len()))
+    }
+
+    fn do_write_infisical_config(&self, site_url: &str, client_id: &str, client_secret: &str, project_id: &str, environment: &str) -> Result<clix_core::state::InfisicalConfig> {
+        let state = ClixState::load(home_dir())?;
+        #[cfg(target_os = "linux")]
+        let keyring_ok = {
+            use clix_core::secrets::keyring::{store_credentials, KeyringResult};
+            matches!(store_credentials(client_id, client_secret), KeyringResult::Ok)
+        };
+        #[cfg(not(target_os = "linux"))]
+        let keyring_ok = false;
+
+        let config_path = &state.config_path;
+        let existing = if config_path.exists() { std::fs::read_to_string(config_path)? } else { String::new() };
+        let mut val: serde_yaml::Value = if existing.is_empty() {
+            serde_yaml::Value::Mapping(Default::default())
+        } else {
+            serde_yaml::from_str(&existing)?
+        };
+        let infisical_map = {
+            let mut m = serde_yaml::Mapping::new();
+            m.insert(sv("siteUrl"), sv(site_url));
+            if !project_id.is_empty() { m.insert(sv("defaultProjectId"), sv(project_id)); }
+            m.insert(sv("defaultEnvironment"), sv(environment));
+            if !keyring_ok {
+                m.insert(sv("clientId"), sv(client_id));
+                m.insert(sv("clientSecret"), sv(client_secret));
+            }
+            serde_yaml::Value::Mapping(m)
+        };
+        if let serde_yaml::Value::Mapping(ref mut root) = val {
+            root.insert(sv("infisical"), infisical_map);
+        }
+        std::fs::create_dir_all(config_path.parent().unwrap_or(config_path))?;
+        let config_yaml = serde_yaml::to_string(&val)?;
+        std::fs::write(config_path, &config_yaml)?;
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(config_path) {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o600);
+                let _ = std::fs::set_permissions(config_path, perms);
+            }
+        }
+        let effective_cfg = clix_core::state::InfisicalConfig {
+            site_url: site_url.to_string(),
+            client_id: Some(client_id.to_string()),
+            client_secret: Some(client_secret.to_string()),
+            default_project_id: if project_id.is_empty() { None } else { Some(project_id.to_string()) },
+            default_environment: environment.to_string(),
+        };
+        Ok(effective_cfg)
     }
 
     fn do_save_infisical_config(&self, site_url: &str, client_id: &str, client_secret: &str, project_id: &str, environment: &str) -> Result<String> {
@@ -926,7 +1140,7 @@ impl App {
             Ok(msg)
         } else {
             let err_short: String = report.error.as_deref().unwrap_or("auth failed").chars().take(60).collect();
-            Ok(format!("Saved (✗ connectivity: {})", err_short))
+            Err(anyhow::anyhow!("connectivity check failed: {}", err_short))
         }
     }
 

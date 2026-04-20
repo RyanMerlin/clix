@@ -171,7 +171,11 @@ pub fn list_infisical_secrets(
         project_id, environment,
         urlencoding::encode(secret_path),
     );
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .connect_timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
     let resp = client.get(&url).bearer_auth(&token).send()
         .map_err(|e| ClixError::CredentialResolution(format!("Infisical list secrets: {e}")))?;
     if !resp.status().is_success() {
@@ -200,7 +204,11 @@ pub fn list_infisical_folders(
         project_id, environment,
         urlencoding::encode(secret_path),
     );
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .connect_timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
     let resp = client.get(&url).bearer_auth(&token).send()
         .map_err(|e| ClixError::CredentialResolution(format!("Infisical list folders: {e}")))?;
     if !resp.status().is_success() {
@@ -224,7 +232,11 @@ fn fetch_infisical_secret(cfg: &InfisicalConfig, secret_ref: &crate::manifest::c
         secret_ref.secret_name, project_id, secret_ref.environment,
         urlencoding::encode(&secret_ref.secret_path),
     );
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .connect_timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
     let resp = client.get(&url).bearer_auth(&token).send()
         .map_err(|e| ClixError::CredentialResolution(format!("Infisical HTTP: {e}")))?;
     if !resp.status().is_success() {
@@ -249,7 +261,11 @@ fn get_infisical_token_with_ttl(cfg: &InfisicalConfig) -> Result<(String, u64)> 
         .or_else(|| std::env::var("INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET").ok())
         .unwrap_or_default();
     let url = format!("{}/api/v1/auth/universal-auth/login", cfg.site_url.trim_end_matches('/'));
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .connect_timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
     let resp = client.post(&url).json(&serde_json::json!({"clientId": client_id, "clientSecret": client_secret}))
         .send().map_err(|e| ClixError::CredentialResolution(format!("Infisical auth: {e}")))?;
     let body: serde_json::Value = resp.json().map_err(|e| ClixError::CredentialResolution(e.to_string()))?;

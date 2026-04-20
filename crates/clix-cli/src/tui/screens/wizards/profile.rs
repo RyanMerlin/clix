@@ -149,6 +149,10 @@ impl ProfileWizard {
         self.secrets_cursor = 0;
     }
 
+    pub fn is_dirty(&self) -> bool {
+        !self.name.value.is_empty()
+    }
+
     pub fn handle_key(&mut self, code: KeyCode, registry: Option<&CapabilityRegistry>, infisical_cfg: Option<&InfisicalConfig>) -> ProfileWizardAction {
         // Picker sub-overlay takes priority
         if let Some((row_idx, ref mut picker)) = self.picker {
