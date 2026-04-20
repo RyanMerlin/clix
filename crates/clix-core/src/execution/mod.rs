@@ -97,6 +97,7 @@ pub fn run_capability(registry: &CapabilityRegistry, policy: &PolicyBundle, infi
                     &cap.isolation,
                     cap.sandbox_profile.as_ref(),
                     reg,
+                    !cap.credentials.is_empty(),
                 )?;
                 token_mint_id = dispatch.token_mint_id.map(|u| u.to_string());
                 (dispatch.exit_code, dispatch.stdout, dispatch.stderr, dispatch.isolation_tier)

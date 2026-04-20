@@ -25,13 +25,20 @@ pub fn broker_socket_path() -> std::path::PathBuf {
 
 /// Try to mint credentials from the broker for the given CLI name (e.g. "gcloud", "kubectl").
 ///
-/// Returns an empty map on any error (broker down, no creds for this CLI, etc.) — the caller
-/// should log the warning already printed here and continue with static secrets only.
-pub fn mint_credentials(socket_path: &Path, cli: &str) -> Result<HashMap<String, String>> {
+/// If `credentials_declared` is `true` (the capability declares at least one credential),
+/// broker unavailability is treated as a hard error — a capability that requires credentials
+/// should not silently run without them. If `false`, broker failure is non-fatal and returns
+/// an empty map so the capability can proceed with whatever static secrets it already has.
+pub fn mint_credentials(socket_path: &Path, cli: &str, credentials_declared: bool) -> Result<HashMap<String, String>> {
     let stream = match UnixStream::connect(socket_path) {
         Ok(s) => s,
         Err(e) => {
-            // Broker not running — not a hard failure, may be using static secrets
+            if credentials_declared {
+                return Err(crate::error::ClixError::Broker(format!(
+                    "broker unavailable at {} and capability declares credentials: {e}",
+                    socket_path.display()
+                )));
+            }
             eprintln!("[clix-gateway] broker not available at {}: {e}", socket_path.display());
             return Ok(HashMap::new());
         }
@@ -189,5 +196,20 @@ mod tests {
         assert_eq!(cli_name_from_command("/usr/bin/gcloud"), "gcloud");
         assert_eq!(cli_name_from_command("kubectl"), "kubectl");
         assert_eq!(cli_name_from_command("/usr/local/bin/kubectl"), "kubectl");
+    }
+
+    #[test]
+    fn broker_unavailable_hard_fails_when_credentials_declared() {
+        let bogus = std::path::Path::new("/tmp/clix-test-no-broker-socket-definitely-absent");
+        let err = mint_credentials(bogus, "gcloud", true).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("broker unavailable"), "expected broker error, got: {msg}");
+    }
+
+    #[test]
+    fn broker_unavailable_soft_fails_when_no_credentials() {
+        let bogus = std::path::Path::new("/tmp/clix-test-no-broker-socket-definitely-absent");
+        let env = mint_credentials(bogus, "gcloud", false).unwrap();
+        assert!(env.is_empty(), "should return empty map when broker is absent and no creds declared");
     }
 }

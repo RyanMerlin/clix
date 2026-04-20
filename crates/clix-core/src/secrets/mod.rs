@@ -132,7 +132,13 @@ pub fn resolve_credentials(
     for (key, cred) in &effective {
         let value = match cred {
             CredentialSource::Literal { value, .. } => value.clone(),
-            CredentialSource::Env { env_var, .. } => std::env::var(env_var).unwrap_or_default(),
+            CredentialSource::Env { env_var, inject_as } => {
+                std::env::var(env_var).map_err(|_| {
+                    ClixError::CredentialResolution(format!(
+                        "env var `{env_var}` is not set (required to inject as `{inject_as}`)"
+                    ))
+                })?
+            }
             CredentialSource::Infisical { secret_ref, .. } => {
                 let cfg = infisical_cfg.ok_or_else(|| ClixError::CredentialResolution("Infisical requires config".to_string()))?;
                 fetch_infisical_secret(cfg, secret_ref)?
@@ -277,14 +283,40 @@ mod tests {
     #[test]
     fn test_profile_binding_overrides_capability() {
         use crate::manifest::profile::ProfileSecretBinding;
-        // Capability declares literal "cap-default"
         let creds = vec![CredentialSource::Literal { value: "cap-default".to_string(), inject_as: "MY_TOKEN".to_string() }];
-        // Profile overrides with literal "profile-override"
         let bindings = vec![ProfileSecretBinding {
             inject_as: "MY_TOKEN".to_string(),
             source: CredentialSource::Literal { value: "profile-override".to_string(), inject_as: "MY_TOKEN".to_string() },
         }];
         let resolved = resolve_credentials(&creds, None, &bindings, &[]).unwrap();
         assert_eq!(resolved.get("MY_TOKEN").unwrap(), "profile-override");
+    }
+
+    #[test]
+    fn env_credential_missing_var_is_error() {
+        // An unset env var must produce a named error, not an empty string.
+        let var_name = "CLIX_TEST_VAR_DEFINITELY_NOT_SET_12345";
+        std::env::remove_var(var_name);
+        let creds = vec![CredentialSource::Env {
+            env_var: var_name.to_string(),
+            inject_as: "TARGET_VAR".to_string(),
+        }];
+        let err = resolve_credentials(&creds, None, &[], &[]).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains(var_name), "error should name the missing var: {msg}");
+        assert!(msg.contains("TARGET_VAR"), "error should name the inject_as key: {msg}");
+    }
+
+    #[test]
+    fn env_credential_set_var_resolves() {
+        let var_name = "CLIX_TEST_VAR_PRESENT_12345";
+        std::env::set_var(var_name, "test-value");
+        let creds = vec![CredentialSource::Env {
+            env_var: var_name.to_string(),
+            inject_as: "TARGET_VAR".to_string(),
+        }];
+        let resolved = resolve_credentials(&creds, None, &[], &[]).unwrap();
+        assert_eq!(resolved.get("TARGET_VAR").unwrap(), "test-value");
+        std::env::remove_var(var_name);
     }
 }

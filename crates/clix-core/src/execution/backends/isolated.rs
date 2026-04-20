@@ -38,6 +38,7 @@ pub fn run_isolated(
     tier: &IsolationTier,
     sandbox_profile: Option<&SandboxProfile>,
     registry: &Arc<WorkerRegistry>,
+    credentials_declared: bool,
 ) -> Result<IsolatedDispatch> {
     match tier {
         IsolationTier::None => {
@@ -46,7 +47,7 @@ pub fn run_isolated(
         IsolationTier::WarmWorker => {
             #[cfg(target_os = "linux")]
             {
-                run_via_worker(profile, command, args, cwd, secrets, sandbox_profile, registry)
+                run_via_worker(profile, command, args, cwd, secrets, sandbox_profile, registry, credentials_declared)
             }
             #[cfg(not(target_os = "linux"))]
             {
@@ -71,6 +72,7 @@ fn run_via_worker(
     secrets: &HashMap<String, String>,
     sandbox_profile: Option<&SandboxProfile>,
     registry: &Arc<WorkerRegistry>,
+    credentials_declared: bool,
 ) -> Result<IsolatedDispatch> {
     let request_id = Uuid::new_v4().to_string();
     let mut full_argv = vec![command.to_string()];
@@ -84,7 +86,7 @@ fn run_via_worker(
         streaming: false,
     };
 
-    let event = registry.dispatch(profile, command, &IsolationTier::WarmWorker, sandbox_profile, request)?;
+    let event = registry.dispatch(profile, command, &IsolationTier::WarmWorker, sandbox_profile, request, credentials_declared)?;
 
     match event {
         WorkerEvent::Exit { exit_code, stdout, stderr, .. } => Ok(IsolatedDispatch {

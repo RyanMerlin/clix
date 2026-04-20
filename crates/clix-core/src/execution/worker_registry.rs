@@ -92,6 +92,9 @@ impl WorkerRegistry {
 
     /// Dispatch a capability execution to the appropriate worker. Spawns a new worker if none
     /// exists for the key, or if the existing worker has died.
+    ///
+    /// `credentials_declared`: true if the capability manifest declares at least one credential.
+    /// When true, broker unavailability is a hard error rather than a silent fallback.
     pub fn dispatch(
         self: &Arc<Self>,
         profile: &str,
@@ -99,6 +102,7 @@ impl WorkerRegistry {
         tier: &IsolationTier,
         sandbox_profile: Option<&SandboxProfile>,
         request: WorkerRequest,
+        credentials_declared: bool,
     ) -> Result<WorkerEvent> {
         if matches!(tier, IsolationTier::None) {
             return Err(ClixError::Worker("dispatch called with tier=none; use builtin handler".to_string()));
@@ -126,19 +130,14 @@ impl WorkerRegistry {
             };
 
             // Mint ephemeral credentials from the broker and merge into request env.
-            // This is done BEFORE dispatch so the worker receives them without needing
-            // to reach out of its jail. Non-fatal: if the broker is down or has no
-            // creds for this CLI, we continue with whatever is already in request.env.
+            // Fatal when the capability declares credentials (credentials_declared=true) and
+            // the broker is unreachable — running without expected credentials is unsafe.
             let mut request = request;
             if let Some(broker_path) = &self.broker_socket {
                 let cli = super::broker_client::cli_name_from_command(binary_command);
-                match super::broker_client::mint_credentials(broker_path, cli) {
-                    Ok(broker_env) => {
-                        for (k, v) in broker_env {
-                            request.env.insert(k, v);
-                        }
-                    }
-                    Err(e) => eprintln!("[clix-gateway] broker mint error for {binary_command}: {e}"),
+                let broker_env = super::broker_client::mint_credentials(broker_path, cli, credentials_declared)?;
+                for (k, v) in broker_env {
+                    request.env.insert(k, v);
                 }
             }
 
