@@ -56,7 +56,7 @@ pub struct ProfileWizard {
     pub env_input: Option<(usize, FieldInput)>,
     /// "l" sub-mode: user is typing a literal value
     pub literal_input: Option<(usize, FieldInput)>,
-    /// Folder-level bindings added via the F key in SecretPicker
+    /// Folder-level bindings added via the F key in the secrets tree (Bind mode)
     pub folder_bindings: Vec<ProfileFolderBinding>,
     // Shared error/info
     pub error: Option<String>,
