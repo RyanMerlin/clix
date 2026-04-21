@@ -157,6 +157,17 @@ pub struct App {
     pub toast_state: Option<ToastState>,
     // discard confirmation — rendered over the current overlay; keeps overlay intact
     pub confirming_discard: bool,
+    // git sync badge — polled async on startup and after each sync
+    pub git_badge: Option<GitBadge>,
+    pub git_syncing: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitBadge {
+    pub configured: bool,
+    pub dirty: usize,
+    pub ahead: usize,
+    pub behind: usize,
 }
 
 impl App {
@@ -179,6 +190,9 @@ impl App {
         let infisical_cfg = state.config.infisical().active_profile().cloned();
         // Load receipts from DB for the Receipts screen and pending-approval banner
         let (receipts_preview, pending_approval_ids) = load_receipts(&state.receipts_db);
+        let work = WorkPool::new();
+        // Kick off initial git status poll immediately
+        work.dispatch(WorkRequest::GitPoll { home: state.home.clone() });
         Ok(Self {
             screen: Screen::Dashboard,
             overlay: Overlay::None,
@@ -200,12 +214,14 @@ impl App {
             receipts_cursor: 0,
             workflows_cursor: 0,
             should_quit: false,
-            work: WorkPool::new(),
+            work,
             dropped_jobs: std::collections::HashSet::new(),
             approving_receipt: None,
             focus: Focus::Sidebar,
             toast_state: None,
             confirming_discard: false,
+            git_badge: None,
+            git_syncing: false,
         })
     }
 
@@ -270,6 +286,17 @@ impl App {
         let work_results: Vec<WorkResult> = self.work.result_rx.try_iter().collect();
         for result in work_results {
             match result {
+                WorkResult::GitPolled { configured, dirty, ahead, behind } => {
+                    self.git_badge = Some(GitBadge { configured, dirty, ahead, behind });
+                }
+                WorkResult::GitSynced { push: _, ok, message } => {
+                    self.git_syncing = false;
+                    let short = message.lines().next().unwrap_or("done").chars().take(70).collect::<String>();
+                    self.toast(&short, !ok);
+                    // Re-poll git status after sync
+                    let home = home_dir();
+                    self.work.dispatch(WorkRequest::GitPoll { home });
+                }
                 WorkResult::ConnectivityPinged { ok, latency_ms, error } => {
                     let msg = if ok {
                         format!("✓ Connected ({}ms)", latency_ms)
@@ -385,6 +412,14 @@ impl App {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             self.should_quit = true;
             return;
+        }
+        // Ctrl+P = git push,  Ctrl+L = git pull  (global — works from any screen/focus)
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            match key.code {
+                KeyCode::Char('p') => { self.git_push(); return; }
+                KeyCode::Char('l') => { self.git_pull(); return; }
+                _ => {}
+            }
         }
 
         // Delegate to overlay first (overlay implies Focus::Content-like routing)
@@ -643,6 +678,36 @@ impl App {
             environment: cfg.default_environment.clone(), path: "/".to_string(), job_id: nid,
         });
         self.overlay = Overlay::SecretsTreeBrowser(tree);
+    }
+
+    fn git_push(&mut self) {
+        if self.git_syncing { return; }
+        let home = home_dir();
+        if !home.join(".git").exists() {
+            self.toast("Git sync not configured — run `clix sync init <url>`", true);
+            return;
+        }
+        let branch = ClixState::load(home_dir()).ok()
+            .map(|s| s.config.git_branch.clone())
+            .unwrap_or_else(|| "main".to_string());
+        self.git_syncing = true;
+        self.toast("Pushing to git remote…", false);
+        self.work.dispatch(WorkRequest::GitPush { home, branch });
+    }
+
+    fn git_pull(&mut self) {
+        if self.git_syncing { return; }
+        let home = home_dir();
+        if !home.join(".git").exists() {
+            self.toast("Git sync not configured — run `clix sync init <url>`", true);
+            return;
+        }
+        let branch = ClixState::load(home_dir()).ok()
+            .map(|s| s.config.git_branch.clone())
+            .unwrap_or_else(|| "main".to_string());
+        self.git_syncing = true;
+        self.toast("Pulling from git remote…", false);
+        self.work.dispatch(WorkRequest::GitPull { home, branch });
     }
 
     fn open_infisical_accounts(&mut self) {

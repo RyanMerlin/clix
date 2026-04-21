@@ -137,18 +137,42 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
         app.active_profiles.join(", ")
     };
 
+    // Git badge: only show when configured and there's something to report
+    let git_badge: Option<(String, ratatui::style::Style)> = app.git_badge.as_ref().and_then(|b| {
+        if !b.configured { return None; }
+        if app.git_syncing {
+            return Some((" ⟳ syncing ".to_string(), theme::dim()));
+        }
+        if b.dirty > 0 || b.ahead > 0 || b.behind > 0 {
+            let mut parts = Vec::new();
+            if b.behind > 0 { parts.push(format!("↓{}", b.behind)); }
+            if b.ahead  > 0 { parts.push(format!("↑{}", b.ahead)); }
+            if b.dirty  > 0 { parts.push(format!("~{}", b.dirty)); }
+            let label = format!(" git:{} ", parts.join(" "));
+            let style = if b.dirty > 0 { theme::warn() } else { theme::ok() };
+            Some((label, style))
+        } else {
+            None // clean + no divergence — no badge needed
+        }
+    });
+
     let crumb = breadcrumb(app);
     let left = Span::styled(" clix ", theme::accent_bold());
     let sep = Span::styled(" › ", theme::muted());
     let crumb_span = Span::styled(crumb.clone(), if app.focus == Focus::Content { theme::dim() } else { theme::muted() });
 
-    // Pad between breadcrumb and right-aligned profile
-    let used = 7 + 3 + crumb.len() as u16 + active.len() as u16 + 2;
+    let right_profile = format!(" {} ", active);
+    let badge_len = git_badge.as_ref().map(|(s, _)| s.len() as u16).unwrap_or(0);
+    let used = 7 + 3 + crumb.len() as u16 + right_profile.len() as u16 + badge_len;
     let pad = " ".repeat(area.width.saturating_sub(used) as usize);
-    let right = Span::styled(format!(" {} ", active), theme::dim());
 
-    let line = Line::from(vec![left, sep, crumb_span, Span::raw(pad), right]);
-    f.render_widget(Paragraph::new(line), area);
+    let mut spans = vec![left, sep, crumb_span, Span::raw(pad)];
+    if let Some((label, style)) = git_badge {
+        spans.push(Span::styled(label, style));
+    }
+    spans.push(Span::styled(right_profile, theme::dim()));
+
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 // ─── sidebar ─────────────────────────────────────────────────────────────────
@@ -232,7 +256,8 @@ fn render_legend(f: &mut Frame, app: &App, area: Rect) {
             ("r", "refresh"), ("s", "start"), ("x", "stop"), ("0-7", "switch"), ("q", "quit"),
         ]),
         Screen::Dashboard => legend_spans(&[
-            ("0-7", "switch"), ("tab", "next"), ("c", "config"), ("n", "new"), ("r", "reload"), ("?", "help"), ("q", "quit"),
+            ("0-7", "switch"), ("tab", "next"), ("n", "new"), ("r", "reload"),
+            ("^P", "git push"), ("^L", "git pull"), ("?", "help"), ("q", "quit"),
         ]),
         Screen::Secrets => legend_spans(&[
             ("m", "accounts"), ("e", "edit"), ("t", "test"), ("b", "browse"), ("r", "reset"), ("?", "help"), ("q", "quit"),

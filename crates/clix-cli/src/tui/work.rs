@@ -10,6 +10,9 @@ pub fn next_job_id() -> JobId {
 }
 
 pub enum WorkRequest {
+    GitPoll { home: std::path::PathBuf },
+    GitPush { home: std::path::PathBuf, branch: String },
+    GitPull { home: std::path::PathBuf, branch: String },
     TestInfisical {
         cfg: clix_core::state::InfisicalConfig,
         job_id: JobId,
@@ -43,6 +46,17 @@ pub enum WorkRequest {
 }
 
 pub enum WorkResult {
+    GitPolled {
+        configured: bool,
+        dirty: usize,
+        ahead: usize,
+        behind: usize,
+    },
+    GitSynced {
+        push: bool,
+        ok: bool,
+        message: String,
+    },
     InfisicalTested {
         job_id: JobId,
         ok: bool,
@@ -92,6 +106,48 @@ impl WorkPool {
     pub fn dispatch(&self, req: WorkRequest) {
         let tx = self.result_tx.clone();
         std::thread::spawn(move || match req {
+            WorkRequest::GitPoll { home } => {
+                use clix_core::storage::git as gs;
+                let configured = home.join(".git").exists();
+                if !configured {
+                    let _ = tx.send(WorkResult::GitPolled { configured: false, dirty: 0, ahead: 0, behind: 0 });
+                    return;
+                }
+                let dirty = std::process::Command::new("git")
+                    .args(["status", "--short"])
+                    .current_dir(&home)
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).lines().count())
+                    .unwrap_or(0);
+                // ahead/behind relative to upstream
+                let (ahead, behind) = std::process::Command::new("git")
+                    .args(["rev-list", "--left-right", "--count", "@{u}...HEAD"])
+                    .current_dir(&home)
+                    .output()
+                    .ok()
+                    .and_then(|o| if o.status.success() {
+                        let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                        let mut parts = s.split_whitespace();
+                        let behind = parts.next()?.parse::<usize>().ok()?;
+                        let ahead  = parts.next()?.parse::<usize>().ok()?;
+                        Some((ahead, behind))
+                    } else { None })
+                    .unwrap_or((0, 0));
+                let _ = gs::status(&home); // warm cache
+                let _ = tx.send(WorkResult::GitPolled { configured, dirty, ahead, behind });
+            }
+            WorkRequest::GitPush { home, branch } => {
+                match clix_core::storage::git::push(&home, &branch) {
+                    Ok(msg) => { let _ = tx.send(WorkResult::GitSynced { push: true, ok: true, message: msg }); }
+                    Err(e) => { let _ = tx.send(WorkResult::GitSynced { push: true, ok: false, message: e.to_string() }); }
+                }
+            }
+            WorkRequest::GitPull { home, branch } => {
+                match clix_core::storage::git::pull(&home, &branch) {
+                    Ok(msg) => { let _ = tx.send(WorkResult::GitSynced { push: false, ok: true, message: msg }); }
+                    Err(e) => { let _ = tx.send(WorkResult::GitSynced { push: false, ok: false, message: e.to_string() }); }
+                }
+            }
             WorkRequest::TestInfisical { cfg, job_id } => {
                 let report = clix_core::secrets::test_connectivity(&cfg);
                 let _ = tx.send(WorkResult::InfisicalTested {
