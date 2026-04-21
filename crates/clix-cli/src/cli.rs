@@ -1,11 +1,12 @@
 use clap::{Parser, Subcommand};
 pub use crate::commands::broker::BrokerCmd;
+pub use crate::commands::infisical::InfisicalCmd;
 
 /// All static top-level subcommand names. Dynamic capability subcommands must not use these.
 pub const STATIC_COMMANDS: &[&str] = &[
     "init", "status", "version", "run", "capabilities",
     "workflow", "profile", "receipts", "serve", "pack", "tui",
-    "doctor", "shim", "mcp", "tools", "secrets", "broker",
+    "doctor", "shim", "mcp", "tools", "secrets", "infisical", "broker",
     "approve", "reject",
 ];
 
@@ -104,6 +105,9 @@ pub enum Commands {
     /// Manage Infisical secrets configuration
     #[command(subcommand)]
     Secrets(crate::commands::secrets::SecretsCmd),
+    /// Manage Infisical account profiles
+    #[command(subcommand)]
+    Infisical(InfisicalCmd),
     /// Manage the credential broker daemon
     #[command(subcommand)]
     Broker(BrokerCmd),

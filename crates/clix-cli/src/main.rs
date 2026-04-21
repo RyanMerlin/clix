@@ -160,6 +160,9 @@ async fn dispatch_static(cli: Cli) -> Result<()> {
             let state = ClixState::load(home_dir())?;
             commands::secrets::run_secrets(sub, &state)?;
         }
+        Commands::Infisical(sub) => {
+            commands::infisical::run_infisical(sub)?;
+        }
         Commands::Broker(sub) => commands::broker::run_broker(sub)?,
         Commands::Approve { receipt_id, approver, comment } => {
             commands::approve::approve(&receipt_id, &approver, comment.as_deref())?;

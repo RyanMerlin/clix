@@ -1,6 +1,7 @@
 pub mod approve;
 pub mod broker;
 pub mod capabilities;
+pub mod infisical;
 pub mod secrets;
 pub mod doctor;
 pub mod init;
