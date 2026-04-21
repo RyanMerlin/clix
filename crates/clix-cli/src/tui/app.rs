@@ -325,15 +325,7 @@ impl App {
                     }
                     if !delivered {
                         if let Overlay::ProfileSecrets(ref mut state) = self.overlay {
-                            if state.tree_picker.is_some() {
-                                state.deliver_tree_folders(job_id, folders.clone(), error.clone());
-                                delivered = true;
-                            }
-                            if !delivered {
-                                if let Some((_, ref mut picker)) = state.picker {
-                                    picker.deliver_folders(job_id, folders, error);
-                                }
-                            }
+                            state.deliver_tree_folders(job_id, folders, error);
                         }
                     }
                 }
@@ -358,15 +350,7 @@ impl App {
                     }
                     if !delivered {
                         if let Overlay::ProfileSecrets(ref mut state) = self.overlay {
-                            if state.tree_picker.is_some() {
-                                state.deliver_tree_names(job_id, names.clone(), error.clone());
-                                delivered = true;
-                            }
-                            if !delivered {
-                                if let Some((_, ref mut picker)) = state.picker {
-                                    picker.deliver_names(job_id, names, error);
-                                }
-                            }
+                            state.deliver_tree_names(job_id, names, error);
                         }
                     }
                 }
@@ -906,13 +890,12 @@ impl App {
             return;
         }
 
-        // Profile secrets edit overlay — two-phase to allow dispatching picker loads
+        // Profile secrets edit overlay
         let mut handled_secrets_overlay = false;
-        let secrets_picker_load: Option<(String, String, String)> = if let Overlay::ProfileSecrets(ref mut state) = self.overlay {
+        if let Overlay::ProfileSecrets(ref mut state) = self.overlay {
             handled_secrets_overlay = true;
             let infisical = self.infisical_cfg.clone();
             let action = state.handle_key(key.code, infisical.as_ref());
-            let mut load_req = None;
             match action {
                 SecretsEditAction::Cancel => { self.overlay = Overlay::None; }
                 SecretsEditAction::Save(bindings) => {
@@ -923,32 +906,18 @@ impl App {
                         Err(e) => { self.toast(&format!("Error: {e}"), true); }
                     }
                 }
-                SecretsEditAction::PickerNeedsLoad { project_id, environment, path } => {
-                    load_req = Some((project_id, environment, path));
-                }
                 SecretsEditAction::TreeNeedsLoad { project_id, environment, path, folders_job, names_job } => {
                     if let Some(ref cfg) = self.infisical_cfg.clone() {
-                        self.work.dispatch(WorkRequest::LoadSecretFolders { cfg: cfg.clone(), project_id: project_id.clone(), environment: environment.clone(), path: path.clone(), job_id: folders_job });
-                        self.work.dispatch(WorkRequest::LoadSecretNames { cfg: cfg.clone(), project_id, environment, path, job_id: names_job });
+                        self.work.dispatch(WorkRequest::LoadSecretFolders {
+                            cfg: cfg.clone(), project_id: project_id.clone(),
+                            environment: environment.clone(), path: path.clone(), job_id: folders_job,
+                        });
+                        self.work.dispatch(WorkRequest::LoadSecretNames {
+                            cfg: cfg.clone(), project_id, environment, path, job_id: names_job,
+                        });
                     }
                 }
                 SecretsEditAction::None => {}
-            }
-            load_req
-        } else {
-            None
-        };
-        if let Some((project_id, environment, path)) = secrets_picker_load {
-            if let Some(ref cfg) = self.infisical_cfg.clone() {
-                let fj = next_job_id();
-                let nj = next_job_id();
-                if let Overlay::ProfileSecrets(ref mut state) = self.overlay {
-                    if let Some((_, ref mut picker)) = state.picker {
-                        picker.set_pending_jobs(fj, nj);
-                    }
-                }
-                self.work.dispatch(WorkRequest::LoadSecretFolders { cfg: cfg.clone(), project_id: project_id.clone(), environment: environment.clone(), path: path.clone(), job_id: fj });
-                self.work.dispatch(WorkRequest::LoadSecretNames { cfg: cfg.clone(), project_id, environment, path, job_id: nj });
             }
         }
         if handled_secrets_overlay { return; }
