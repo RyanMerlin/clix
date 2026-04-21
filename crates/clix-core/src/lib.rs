@@ -18,3 +18,4 @@ pub mod sandbox;
 pub mod packs;
 pub mod loader;
 pub mod discovery;
+pub mod storage;

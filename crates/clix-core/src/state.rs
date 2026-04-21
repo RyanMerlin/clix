@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use crate::error::Result;
+use crate::storage::{StorageRef, default_storage};
 
 pub fn home_dir() -> PathBuf {
     if let Ok(v) = std::env::var("CLIX_HOME") {
@@ -12,7 +13,7 @@ pub fn home_dir() -> PathBuf {
         .join(".clix")
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ClixState {
     pub home: PathBuf,
     pub config_path: PathBuf,
@@ -25,10 +26,27 @@ pub struct ClixState {
     pub bundles_dir: PathBuf,
     pub cache_dir: PathBuf,
     pub config: ClixConfig,
+    /// Storage backend — always `FsStorage` in production; swap for `MemStorage`
+    /// in tests.
+    pub storage: StorageRef,
+}
+
+impl std::fmt::Debug for ClixState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClixState")
+            .field("home", &self.home)
+            .field("config_path", &self.config_path)
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ClixState {
     pub fn from_home(home: PathBuf) -> Self {
+        Self::from_home_with_storage(home, default_storage())
+    }
+
+    pub fn from_home_with_storage(home: PathBuf, storage: StorageRef) -> Self {
         ClixState {
             config_path:      home.join("config.yaml"),
             policy_path:      home.join("policy.yaml"),
@@ -40,14 +58,19 @@ impl ClixState {
             bundles_dir:      home.join("bundles"),
             cache_dir:        home.join("cache"),
             config:           ClixConfig::default(),
+            storage,
             home,
         }
     }
 
     pub fn load(home: PathBuf) -> Result<Self> {
-        let mut state = Self::from_home(home);
-        if state.config_path.exists() {
-            let content = std::fs::read_to_string(&state.config_path)?;
+        Self::load_with_storage(home, default_storage())
+    }
+
+    pub fn load_with_storage(home: PathBuf, storage: StorageRef) -> Result<Self> {
+        let mut state = Self::from_home_with_storage(home, storage);
+        if state.storage.exists(&state.config_path) {
+            let content = state.storage.read_to_string(&state.config_path)?;
             state.config = serde_yaml::from_str(&content)?;
         }
         // Promote legacy single-entry infisical field to named profiles map
@@ -60,7 +83,7 @@ impl ClixState {
     /// Write config.yaml and enforce 0600 permissions on Linux.
     pub fn save_config(&self) -> Result<()> {
         let yaml = serde_yaml::to_string(&self.config)?;
-        std::fs::write(&self.config_path, &yaml)?;
+        self.storage.write(&self.config_path, yaml.as_bytes())?;
         #[cfg(target_os = "linux")]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -83,7 +106,7 @@ impl ClixState {
             &self.bundles_dir,
             &self.cache_dir,
         ] {
-            std::fs::create_dir_all(dir)?;
+            self.storage.mkdir_p(dir)?;
         }
         Ok(())
     }
