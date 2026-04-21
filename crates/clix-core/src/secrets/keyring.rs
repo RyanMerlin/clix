@@ -11,6 +11,38 @@ fn key_client_secret(profile_name: &str) -> String {
     format!("infisical-client-secret:{profile_name}")
 }
 
+fn key_service_token(profile_name: &str) -> String {
+    format!("infisical-service-token:{profile_name}")
+}
+
+pub fn store_service_token(profile_name: &str, token: &str) -> KeyringResult {
+    let key = key_service_token(profile_name);
+    let entry = match keyring::Entry::new(SERVICE, &key) {
+        Ok(e) => e,
+        Err(e) => return KeyringResult::Unavailable(e.to_string()),
+    };
+    match entry.set_password(token) {
+        Ok(()) => KeyringResult::Ok,
+        Err(e) => KeyringResult::Unavailable(e.to_string()),
+    }
+}
+
+pub fn load_service_token(profile_name: &str) -> Option<String> {
+    let key = key_service_token(profile_name);
+    let entry = keyring::Entry::new(SERVICE, &key).ok()?;
+    entry.get_password().ok()
+}
+
+pub fn delete_service_token(profile_name: &str) -> KeyringResult {
+    let key = key_service_token(profile_name);
+    let entry = match keyring::Entry::new(SERVICE, &key) {
+        Ok(e) => e,
+        Err(e) => return KeyringResult::Unavailable(e.to_string()),
+    };
+    let _ = entry.delete_credential();
+    KeyringResult::Ok
+}
+
 pub enum KeyringResult {
     Ok,
     Unavailable(String),
@@ -69,6 +101,11 @@ pub fn delete_credentials(profile_name: &str) -> KeyringResult {
         Err(e) => return KeyringResult::Unavailable(e.to_string()),
     };
     let _ = secret_entry.delete_credential();
+    // Also wipe service token slot
+    let tok_key = key_service_token(profile_name);
+    if let Ok(tok_entry) = keyring::Entry::new(SERVICE, &tok_key) {
+        let _ = tok_entry.delete_credential();
+    }
     KeyringResult::Ok
 }
 
@@ -86,6 +123,10 @@ pub fn merge_keyring_into_config(config: &mut crate::state::ClixConfig) {
                 profile.client_id = Some(id);
                 profile.client_secret = Some(secret);
             }
+        }
+        // Service token overlay — takes precedence, stored in a separate slot
+        if let Some(tok) = load_service_token(name) {
+            profile.service_token = Some(tok);
         }
     }
 }
