@@ -51,8 +51,6 @@ pub struct ProfileWizard {
     // Step 2 — secrets
     pub binding_rows: Vec<BindingRow>,
     pub secrets_cursor: usize,
-    /// When Some, the old flat picker is open (legacy, kept for compatibility)
-    pub picker: Option<(usize, SecretPicker)>,
     /// When Some, the tree picker is open for that row index
     pub tree_picker: Option<(usize, SecretsTree)>,
     /// "e" sub-mode: user is typing an env var name
@@ -75,8 +73,6 @@ pub enum ProfileWizardAction {
         secret_bindings: Vec<ProfileSecretBinding>,
         folder_bindings: Vec<ProfileFolderBinding>,
     },
-    /// Flat picker navigated to a new path — caller dispatches LoadSecretFolders + LoadSecretNames.
-    PickerNeedsLoad { project_id: String, environment: String, path: String },
     /// Tree picker needs a folder loaded — caller dispatches the work jobs.
     TreeNeedsLoad { project_id: String, environment: String, path: String, folders_job: u64, names_job: u64 },
 }
@@ -120,7 +116,6 @@ impl ProfileWizard {
             checklist: Checklist::new(items),
             binding_rows: vec![],
             secrets_cursor: 0,
-            picker: None,
             tree_picker: None,
             env_input: None,
             literal_input: None,
@@ -161,15 +156,19 @@ impl ProfileWizard {
         !self.name.value.is_empty()
     }
 
-    pub fn deliver_tree_folders(&mut self, job_id: u64, folders: Vec<String>, error: Option<String>) {
+    pub fn deliver_tree_folders(&mut self, job_id: u64, folders: Vec<String>, error: Option<String>) -> bool {
         if let Some((_, ref mut tree)) = self.tree_picker {
-            tree.deliver_folders(job_id, folders, error);
+            tree.deliver_folders(job_id, folders, error)
+        } else {
+            false
         }
     }
 
-    pub fn deliver_tree_names(&mut self, job_id: u64, names: Vec<String>, error: Option<String>) {
+    pub fn deliver_tree_names(&mut self, job_id: u64, names: Vec<String>, error: Option<String>) -> bool {
         if let Some((_, ref mut tree)) = self.tree_picker {
-            tree.deliver_names(job_id, names, error);
+            tree.deliver_names(job_id, names, error)
+        } else {
+            false
         }
     }
 
@@ -222,44 +221,6 @@ impl ProfileWizard {
                     self.tree_picker = None;
                 }
                 SecretsTreeAction::None => {}
-            }
-            return ProfileWizardAction::None;
-        }
-
-        // Flat picker sub-overlay (legacy)
-        if let Some((row_idx, ref mut picker)) = self.picker {
-            let action = picker.handle_key(code, infisical_cfg);
-            match action {
-                SecretPickerAction::Cancelled => { self.picker = None; }
-                SecretPickerAction::NeedsLoad => {
-                    let project_id = picker.project_id.clone();
-                    let environment = picker.environment.clone();
-                    let path = picker.current_path();
-                    return ProfileWizardAction::PickerNeedsLoad { project_id, environment, path };
-                }
-                SecretPickerAction::Selected(iref) => {
-                    let inject_as = self.binding_rows.get(row_idx).map(|r| r.inject_as.clone()).unwrap_or_default();
-                    if let Some(row) = self.binding_rows.get_mut(row_idx) {
-                        row.binding = Some(CredentialSource::Infisical { secret_ref: iref, inject_as });
-                    }
-                    self.picker = None;
-                }
-                SecretPickerAction::SelectedMany(_) => {
-                    self.picker = None;
-                }
-                SecretPickerAction::SelectedFolder { project_id, environment, secret_path, inject_prefix, snapshot } => {
-                    self.folder_bindings.push(ProfileFolderBinding {
-                        project_id,
-                        environment,
-                        secret_path,
-                        inject_prefix,
-                        synced_at: chrono::Utc::now(),
-                        snapshot,
-                        infisical_profile: None,
-                    });
-                    self.picker = None;
-                }
-                SecretPickerAction::None => {}
             }
             return ProfileWizardAction::None;
         }
@@ -472,11 +433,9 @@ impl ProfileWizard {
             ProfileWizardStep::Confirm => self.render_confirm(f, inner),
         }
 
-        // Tree picker sub-overlay (preferred) or flat picker fallback
+        // Tree picker sub-overlay
         if let Some((_, ref tree)) = self.tree_picker {
             tree.render(f, area);
-        } else if let Some((_, ref picker)) = self.picker {
-            picker.render(f, area);
         }
         // Env input sub-overlay
         if let Some((row_idx, ref fi)) = self.env_input {

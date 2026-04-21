@@ -313,13 +313,8 @@ impl App {
                     }
                     if !delivered {
                         if let Overlay::ProfileCreate(ref mut wiz) = self.overlay {
-                            delivered = wiz.tree_picker.is_some();
-                            wiz.deliver_tree_folders(job_id, folders.clone(), error.clone());
-                            if !delivered {
-                                if let Some((_, ref mut picker)) = wiz.picker {
-                                    picker.deliver_folders(job_id, folders.clone(), error.clone());
-                                    delivered = true;
-                                }
+                            if wiz.deliver_tree_folders(job_id, folders.clone(), error.clone()) {
+                                delivered = true;
                             }
                         }
                     }
@@ -338,13 +333,8 @@ impl App {
                     }
                     if !delivered {
                         if let Overlay::ProfileCreate(ref mut wiz) = self.overlay {
-                            delivered = wiz.tree_picker.is_some();
-                            wiz.deliver_tree_names(job_id, names.clone(), error.clone());
-                            if !delivered {
-                                if let Some((_, ref mut picker)) = wiz.picker {
-                                    picker.deliver_names(job_id, names.clone(), error.clone());
-                                    delivered = true;
-                                }
+                            if wiz.deliver_tree_names(job_id, names.clone(), error.clone()) {
+                                delivered = true;
                             }
                         }
                     }
@@ -998,15 +988,14 @@ impl App {
 
         // Wizard key delegation
         let code = key.code;
-        // ProfileCreate: two-phase to allow dispatching picker loads after borrow ends
+        // ProfileCreate overlay
         let mut handled_profile_create = false;
-        let profile_picker_load: Option<(String, String, String)> = if let Overlay::ProfileCreate(ref mut wiz) = self.overlay {
+        if let Overlay::ProfileCreate(ref mut wiz) = self.overlay {
             handled_profile_create = true;
             let registry = self.registry.clone();
             let infisical = self.infisical_cfg.clone();
             let is_dirty = wiz.is_dirty();
             let action = wiz.handle_key(code, Some(&registry), infisical.as_ref());
-            let mut load_req = None;
             let result: Option<Result<String>> = match action {
                 ProfileWizardAction::Cancel => {
                     if is_dirty { self.confirming_discard = true; } else { self.overlay = Overlay::None; }
@@ -1014,10 +1003,6 @@ impl App {
                 }
                 ProfileWizardAction::Submit { name, description, capabilities, secret_bindings, folder_bindings } => {
                     Some(self.do_create_profile(&name, &description, &capabilities, &secret_bindings, &folder_bindings))
-                }
-                ProfileWizardAction::PickerNeedsLoad { project_id, environment, path } => {
-                    load_req = Some((project_id, environment, path));
-                    None
                 }
                 ProfileWizardAction::TreeNeedsLoad { project_id, environment, path, folders_job, names_job } => {
                     if let Some(ref cfg) = self.infisical_cfg.clone() {
@@ -1038,22 +1023,6 @@ impl App {
                     Ok(msg) => { self.overlay = Overlay::None; let _ = self.reload(); self.toast(&msg, false); }
                     Err(e) => { self.toast(&format!("Error: {e}"), true); }
                 }
-            }
-            load_req
-        } else {
-            None
-        };
-        if let Some((project_id, environment, path)) = profile_picker_load {
-            if let Some(ref cfg) = self.infisical_cfg.clone() {
-                let fj = next_job_id();
-                let nj = next_job_id();
-                if let Overlay::ProfileCreate(ref mut wiz) = self.overlay {
-                    if let Some((_, ref mut picker)) = wiz.picker {
-                        picker.set_pending_jobs(fj, nj);
-                    }
-                }
-                self.work.dispatch(WorkRequest::LoadSecretFolders { cfg: cfg.clone(), project_id: project_id.clone(), environment: environment.clone(), path: path.clone(), job_id: fj });
-                self.work.dispatch(WorkRequest::LoadSecretNames { cfg: cfg.clone(), project_id, environment, path, job_id: nj });
             }
         }
         if handled_profile_create { return; }
