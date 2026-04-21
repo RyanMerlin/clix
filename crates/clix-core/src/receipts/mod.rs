@@ -61,6 +61,8 @@ impl ReceiptStore {
     pub fn open(db_path: &Path) -> Result<Self> {
         let conn = rusqlite::Connection::open(db_path)
             .map_err(|e| ClixError::Config(format!("receipts db: {e}")))?;
+        conn.busy_timeout(std::time::Duration::from_millis(100))
+            .map_err(|e| ClixError::Config(format!("receipts busy_timeout: {e}")))?;
         conn.execute_batch(include_str!("schema.sql"))
             .map_err(|e| ClixError::Config(format!("receipts schema: {e}")))?;
         Ok(ReceiptStore { conn })
