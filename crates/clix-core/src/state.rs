@@ -212,10 +212,23 @@ pub struct InfisicalConfig {
     pub client_id: Option<String>,
     #[serde(default)]
     pub client_secret: Option<String>,
+    /// Infisical project-scoped service token (st.xxx) — primary auth method.
+    /// When set, used directly as a Bearer token; no exchange needed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_token: Option<String>,
     #[serde(default)]
     pub default_project_id: Option<String>,
     #[serde(default = "default_infisical_env")]
     pub default_environment: String,
+}
+
+impl InfisicalConfig {
+    /// Returns true if enough credentials are present to attempt an API call.
+    pub fn is_configured(&self) -> bool {
+        self.service_token.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false)
+            || (self.client_id.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
+                && self.client_secret.as_ref().map(|s| !s.is_empty()).unwrap_or(false))
+    }
 }
 
 fn default_infisical_url() -> String {
@@ -307,6 +320,7 @@ mod tests {
                 site_url: "https://example.com".to_string(),
                 client_id: Some("cid".to_string()),
                 client_secret: None,
+                service_token: None,
                 default_project_id: Some("proj1".to_string()),
                 default_environment: "dev".to_string(),
             }),
@@ -326,13 +340,13 @@ mod tests {
         let mut profiles = BTreeMap::new();
         profiles.insert("work".to_string(), InfisicalConfig {
             site_url: "https://work.infisical.com".to_string(),
-            client_id: None, client_secret: None,
+            client_id: None, client_secret: None, service_token: None,
             default_project_id: None,
             default_environment: "prod".to_string(),
         });
         profiles.insert("personal".to_string(), InfisicalConfig {
             site_url: "https://app.infisical.com".to_string(),
-            client_id: None, client_secret: None,
+            client_id: None, client_secret: None, service_token: None,
             default_project_id: None,
             default_environment: "dev".to_string(),
         });
