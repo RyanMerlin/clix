@@ -423,13 +423,12 @@ impl App {
                 KeyCode::Char('6') => { self.switch_to(Screen::Broker); self.focus = Focus::Content; }
                 KeyCode::Char('7') => { self.switch_to(Screen::Secrets); self.focus = Focus::Content; }
                 KeyCode::Char('0') => { self.switch_to(Screen::Dashboard); self.focus = Focus::Content; }
-                // Tab still cycles for familiarity
-                KeyCode::Tab => self.switch_to(self.screen.next()),
-                KeyCode::BackTab => self.switch_to(self.screen.prev()),
-                // Up/down navigate sidebar
-                KeyCode::Up => self.switch_to(self.screen.prev()),
-                KeyCode::Down => self.switch_to(self.screen.next()),
-                // Enter or right arrow → enter content
+                // Tab / arrow keys only move the sidebar cursor — never steal focus
+                KeyCode::Tab => self.screen = self.screen.next(),
+                KeyCode::BackTab => self.screen = self.screen.prev(),
+                KeyCode::Up => self.screen = self.screen.prev(),
+                KeyCode::Down => self.screen = self.screen.next(),
+                // Enter or right arrow → enter content (auto-focus applies here)
                 KeyCode::Enter | KeyCode::Right => self.focus = Focus::Content,
                 _ => {}
             }
