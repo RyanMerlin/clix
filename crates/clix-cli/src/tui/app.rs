@@ -97,6 +97,7 @@ pub enum Overlay {
     InstallPack(String),  // path buffer
     Help,
     InfisicalSetup(InfisicalSetupState),
+    SecretsTreeBrowser(crate::tui::widgets::secrets_tree::SecretsTree),
 }
 
 impl Overlay {
@@ -277,12 +278,19 @@ impl App {
                     self.toast(&msg, !ok);
                 }
                 WorkResult::SecretFoldersLoaded { job_id, folders, error } => {
-                    // Route to whichever picker is currently open
+                    // Route to whichever picker/tree is currently open
                     let mut delivered = false;
-                    if let Overlay::ProfileCreate(ref mut wiz) = self.overlay {
-                        if let Some((_, ref mut picker)) = wiz.picker {
-                            picker.deliver_folders(job_id, folders.clone(), error.clone());
+                    if let Overlay::SecretsTreeBrowser(ref mut tree) = self.overlay {
+                        if tree.deliver_folders(job_id, folders.clone(), error.clone()) {
                             delivered = true;
+                        }
+                    }
+                    if !delivered {
+                        if let Overlay::ProfileCreate(ref mut wiz) = self.overlay {
+                            if let Some((_, ref mut picker)) = wiz.picker {
+                                picker.deliver_folders(job_id, folders.clone(), error.clone());
+                                delivered = true;
+                            }
                         }
                     }
                     if !delivered {
@@ -295,10 +303,17 @@ impl App {
                 }
                 WorkResult::SecretNamesLoaded { job_id, names, error } => {
                     let mut delivered = false;
-                    if let Overlay::ProfileCreate(ref mut wiz) = self.overlay {
-                        if let Some((_, ref mut picker)) = wiz.picker {
-                            picker.deliver_names(job_id, names.clone(), error.clone());
+                    if let Overlay::SecretsTreeBrowser(ref mut tree) = self.overlay {
+                        if tree.deliver_names(job_id, names.clone(), error.clone()) {
                             delivered = true;
+                        }
+                    }
+                    if !delivered {
+                        if let Overlay::ProfileCreate(ref mut wiz) = self.overlay {
+                            if let Some((_, ref mut picker)) = wiz.picker {
+                                picker.deliver_names(job_id, names.clone(), error.clone());
+                                delivered = true;
+                            }
                         }
                     }
                     if !delivered {
@@ -453,6 +468,10 @@ impl App {
                     self.toast("Infisical not configured — press e to configure", true);
                 }
             }
+            // b = browse secrets tree on Secrets screen
+            KeyCode::Char('b') if self.screen == Screen::Secrets => {
+                self.open_secrets_tree();
+            }
             // A = approve first pending receipt on Receipts screen (async)
             KeyCode::Char('A') if self.screen == Screen::Receipts => {
                 if self.approving_receipt.is_some() {
@@ -582,6 +601,32 @@ impl App {
         self.overlay = Overlay::InfisicalSetup(state);
     }
 
+    fn open_secrets_tree(&mut self) {
+        use crate::tui::widgets::secrets_tree::{SecretsTree, TreeMode};
+        let Some(ref cfg) = self.infisical_cfg.clone() else {
+            self.toast("Infisical not configured — press e to configure", true);
+            return;
+        };
+        let project_id = cfg.default_project_id.clone().unwrap_or_default();
+        if project_id.is_empty() {
+            self.toast("No project_id configured — press e to set one", true);
+            return;
+        }
+        let mut tree = SecretsTree::new(&project_id, &cfg.default_environment, TreeMode::Browse);
+        let fid = next_job_id();
+        let nid = next_job_id();
+        tree.initial_load_ids(fid, nid);
+        self.work.dispatch(WorkRequest::LoadSecretFolders {
+            cfg: cfg.clone(), project_id: project_id.clone(),
+            environment: cfg.default_environment.clone(), path: "/".to_string(), job_id: fid,
+        });
+        self.work.dispatch(WorkRequest::LoadSecretNames {
+            cfg: cfg.clone(), project_id,
+            environment: cfg.default_environment.clone(), path: "/".to_string(), job_id: nid,
+        });
+        self.overlay = Overlay::SecretsTreeBrowser(tree);
+    }
+
     fn open_create_wizard(&mut self) {
         match self.screen {
             Screen::Profiles => {
@@ -616,6 +661,38 @@ impl App {
         // Dismiss help overlay on any key
         if matches!(self.overlay, Overlay::Help) {
             self.overlay = Overlay::None;
+            return;
+        }
+
+        // Secrets tree browser
+        if let Overlay::SecretsTreeBrowser(ref mut tree) = self.overlay {
+            use crate::tui::widgets::secrets_tree::SecretsTreeAction;
+            let cfg = self.infisical_cfg.clone();
+            let action = tree.handle_key(key.code, cfg.as_ref());
+            match action {
+                SecretsTreeAction::Cancelled => { self.overlay = Overlay::None; }
+                SecretsTreeAction::NeedsLoad(path) => {
+                    if let Overlay::SecretsTreeBrowser(ref mut tree) = self.overlay {
+                        let (fid, nid) = tree.request_load(&path);
+                        if let Some(ref cfg) = self.infisical_cfg.clone() {
+                            self.work.dispatch(WorkRequest::LoadSecretFolders {
+                                cfg: cfg.clone(), project_id: tree.project_id.clone(),
+                                environment: tree.environment.clone(), path: path.clone(), job_id: fid,
+                            });
+                            self.work.dispatch(WorkRequest::LoadSecretNames {
+                                cfg: cfg.clone(), project_id: tree.project_id.clone(),
+                                environment: tree.environment.clone(), path, job_id: nid,
+                            });
+                        }
+                    }
+                }
+                SecretsTreeAction::Selected(_) | SecretsTreeAction::SelectedMany(_)
+                | SecretsTreeAction::SelectedFolder { .. } => {
+                    // Browse mode — no-op for selection; Bind mode wired via profile wizard
+                    self.overlay = Overlay::None;
+                }
+                SecretsTreeAction::None => {}
+            }
             return;
         }
 

@@ -120,6 +120,7 @@ fn breadcrumb(app: &App) -> String {
         Overlay::InstallPack(_) => Some("Install Pack"),
         Overlay::Help => Some("Help"),
         Overlay::InfisicalSetup(_) => Some("Configure Infisical"),
+        Overlay::SecretsTreeBrowser(_) => Some("Browse Secrets"),
         Overlay::None => None,
     };
     match overlay_name {
@@ -300,6 +301,7 @@ fn render_overlay(f: &mut Frame, app: &App, area: Rect) {
         Overlay::PackEdit { pack_name, checklist } => render_pack_edit(f, pack_name, checklist, area),
         Overlay::InstallPack(buf) => render_install_pack(f, buf, area),
         Overlay::InfisicalSetup(state) => state.render(f, area),
+        Overlay::SecretsTreeBrowser(tree) => tree.render(f, area),
     }
 }
 
