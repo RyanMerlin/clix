@@ -154,10 +154,7 @@ impl CapabilityWizard {
     }
 
     fn render_form(&self, f: &mut Frame, area: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .margin(1)
-            .constraints([
+        let chunks = Layout::vertical([
                 Constraint::Length(3),  // name
                 Constraint::Length(3),  // description
                 Constraint::Length(3),  // command
@@ -166,6 +163,7 @@ impl CapabilityWizard {
                 Constraint::Length(1),  // error / hint
                 Constraint::Min(0),
             ])
+            .margin(1)
             .split(area);
 
         render_text_field(f, &self.name, "Name * (dot-namespaced, e.g. gh.pr.list)", self.active_field == 0, chunks[0]);
@@ -173,9 +171,7 @@ impl CapabilityWizard {
         render_text_field(f, &self.command, "Command * (e.g. gh)", self.active_field == 2, chunks[2]);
         render_text_field(f, &self.args, "Args (space-separated, ${var} ok)", self.active_field == 3, chunks[3]);
 
-        let sel_row = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        let sel_row = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(chunks[4]);
         render_select_field(f, &self.risk, "Risk", self.active_field == 4, sel_row[0]);
         render_select_field(f, &self.side_effect, "Side Effect", self.active_field == 5, sel_row[1]);

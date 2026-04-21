@@ -66,17 +66,13 @@ fn render(f: &mut Frame, app: &App) {
     let full = f.area();
 
     // Three vertical bands: header (1), body (min), legend (1)
-    let bands = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(0), Constraint::Length(1)])
+    let bands = Layout::vertical([Constraint::Length(1), Constraint::Min(0), Constraint::Length(1)])
         .split(full);
 
     render_header(f, app, bands[0]);
 
     // Body: sidebar (16) + content — 16 fits "Capabilities" with ▸ prefix
-    let body = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(16), Constraint::Min(0)])
+    let body = Layout::horizontal([Constraint::Length(16), Constraint::Min(0)])
         .split(bands[1]);
 
     render_sidebar(f, app, body[0]);

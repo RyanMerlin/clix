@@ -255,9 +255,7 @@ impl InfisicalAccountsState {
     }
 
     fn render_list(&self, f: &mut Frame, area: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(1)])
+        let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)])
             .split(area);
 
         if self.profiles.is_empty() {
@@ -296,9 +294,7 @@ impl InfisicalAccountsState {
     }
 
     fn render_add_form(&self, f: &mut Frame, area: Rect, name_input: &FieldInput, name_active: bool, setup: &InfisicalSetupState) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(0)])
+        let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(0)])
             .split(area);
 
         // Name field
@@ -310,9 +306,7 @@ impl InfisicalAccountsState {
     }
 
     fn render_edit_form(&self, f: &mut Frame, area: Rect, profile_name: &str, setup: &InfisicalSetupState) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1), Constraint::Min(0)])
+        let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(0)])
             .split(area);
 
         f.render_widget(

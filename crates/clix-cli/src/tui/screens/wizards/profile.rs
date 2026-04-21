@@ -487,15 +487,13 @@ impl ProfileWizard {
     }
 
     fn render_identity(&self, f: &mut Frame, area: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .margin(1)
-            .constraints([
+        let chunks = Layout::vertical([
                 Constraint::Length(3),
                 Constraint::Length(3),
                 Constraint::Length(1),
                 Constraint::Min(1),
             ])
+            .margin(1)
             .split(area);
 
         render_text_field(f, &self.name, "Name *", self.active_field == 0, chunks[0]);
@@ -523,9 +521,7 @@ impl ProfileWizard {
             return;
         }
 
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(1)])
+        let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)])
             .split(area);
 
         let title = format!("Capabilities ({} selected)", self.checklist.selected_count());
@@ -537,10 +533,8 @@ impl ProfileWizard {
     }
 
     fn render_secrets(&self, f: &mut Frame, area: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
+        let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(2)])
             .margin(1)
-            .constraints([Constraint::Min(0), Constraint::Length(2)])
             .split(area);
 
         // Binding rows list
@@ -689,9 +683,7 @@ fn render_inline_input(f: &mut Frame, fi: &FieldInput, label: &str, area: Rect) 
         Span::styled(cursor_ch, Style::default().bg(theme::ACCENT_BRIGHT).fg(Color::Black)),
         Span::raw(after_cursor),
     ]);
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Min(0)])
+    let chunks = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(0)])
         .split(inner);
     f.render_widget(Paragraph::new(line), chunks[0]);
     f.render_widget(Paragraph::new("enter: confirm   esc: cancel").style(theme::muted()), chunks[1]);
@@ -905,9 +897,7 @@ impl SecretsEditState {
         let inner = block.inner(dialog);
         f.render_widget(block, dialog);
 
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(1)])
+        let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)])
             .split(inner);
 
         // Binding rows

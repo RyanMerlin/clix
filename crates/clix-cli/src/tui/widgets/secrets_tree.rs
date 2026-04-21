@@ -368,9 +368,7 @@ impl SecretsTree {
         let inner = block.inner(dialog);
         f.render_widget(block, dialog);
 
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
+        let chunks = Layout::vertical([
                 Constraint::Min(0),     // tree list
                 Constraint::Length(1),  // hint
             ])

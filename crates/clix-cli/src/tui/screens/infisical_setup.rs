@@ -170,9 +170,7 @@ impl InfisicalSetupState {
     /// Render just the form fields (no outer dialog box). Used when embedded in another overlay.
     pub fn render_fields_only(&self, f: &mut Frame, area: Rect, focused: bool) {
         use super::wizards::profile::render_text_field;
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
+        let chunks = Layout::vertical([
                 Constraint::Length(3),
                 Constraint::Length(3),
                 Constraint::Length(3),
@@ -214,9 +212,7 @@ impl InfisicalSetupState {
         let inner = block.inner(dialog);
         f.render_widget(block, dialog);
 
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
+        let chunks = Layout::vertical([
                 Constraint::Length(3), // site_url
                 Constraint::Length(3), // client_id
                 Constraint::Length(3), // client_secret

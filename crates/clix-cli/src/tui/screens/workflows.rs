@@ -26,9 +26,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // Split into left list + right detail panel
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(32), Constraint::Fill(1)])
+    let chunks = Layout::horizontal([Constraint::Length(32), Constraint::Fill(1)])
         .split(area);
 
     // ── left: workflow list ──────────────────────────────────────────────────

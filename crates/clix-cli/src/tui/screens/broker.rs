@@ -161,9 +161,7 @@ fn scan_adopted_creds() -> Vec<AdoptedCred> {
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let state = app.broker_status.as_ref();
 
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(6), Constraint::Min(0)])
+    let chunks = Layout::vertical([Constraint::Length(6), Constraint::Min(0)])
         .split(area);
 
     render_status_card(f, state, chunks[0]);

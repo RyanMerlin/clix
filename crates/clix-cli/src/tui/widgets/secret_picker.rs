@@ -266,9 +266,7 @@ impl SecretPicker {
         let inner = block.inner(dialog);
         f.render_widget(block, dialog);
 
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
+        let chunks = Layout::vertical([
                 Constraint::Length(1),  // path breadcrumb
                 Constraint::Min(0),     // entry list
                 Constraint::Length(1),  // hint

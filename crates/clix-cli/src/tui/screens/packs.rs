@@ -3,9 +3,7 @@ use crate::tui::app::App;
 use crate::tui::theme;
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
+    let chunks = Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)])
         .split(area);
 
     render_list(f, app, chunks[0]);

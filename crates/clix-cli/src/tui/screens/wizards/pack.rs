@@ -349,10 +349,7 @@ impl PackWizard {
     }
 
     fn render_identity(&self, f: &mut Frame, area: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .margin(1)
-            .constraints([
+        let chunks = Layout::vertical([
                 Constraint::Length(3),  // name
                 Constraint::Length(3),  // description
                 Constraint::Length(3),  // author
@@ -361,6 +358,7 @@ impl PackWizard {
                 Constraint::Length(1),  // error/hint
                 Constraint::Min(0),
             ])
+            .margin(1)
             .split(area);
 
         render_text_field(f, &self.name, "Pack name *", self.active_field == 0, chunks[0]);
@@ -389,9 +387,7 @@ impl PackWizard {
             return;
         }
 
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(1)])
+        let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)])
             .split(area);
 
         let count_str = format!("{} executables found", self.all_binaries.len());
@@ -410,9 +406,7 @@ impl PackWizard {
             return;
         }
 
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(1)])
+        let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)])
             .split(area);
 
         let title = format!("Capabilities — {} found", self.all_subcmds.len());

@@ -38,9 +38,7 @@ fn render_namespaces(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
+    let chunks = Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)])
         .split(area);
 
     // Namespace list
@@ -101,9 +99,7 @@ fn render_namespaces(f: &mut Frame, app: &App, area: Rect) {
 fn render_listing(f: &mut Frame, app: &App, area: Rect, ns: &str) {
     let caps = app.registry.by_namespace(ns);
 
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+    let chunks = Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
         .split(area);
 
     let title = format!(" {} ({}) ", ns, caps.len());

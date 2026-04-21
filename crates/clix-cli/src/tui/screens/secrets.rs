@@ -4,9 +4,7 @@ use crate::tui::app::App;
 use crate::tui::theme;
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
+    let chunks = Layout::vertical([
             Constraint::Length(10), // config card
             Constraint::Length(7),  // connectivity card
             Constraint::Min(5),     // bindings card

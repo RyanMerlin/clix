@@ -5,9 +5,7 @@ use crate::tui::theme;
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let pending = app.pending_approval_ids.len();
     let (main_area, banner_area) = if pending > 0 {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1), Constraint::Min(0)])
+        let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(0)])
             .split(area);
         (chunks[1], Some(chunks[0]))
     } else {
@@ -26,9 +24,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         f.render_widget(banner_widget, banner);
     }
 
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+    let chunks = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
         .split(main_area);
 
     render_activity(f, app, chunks[0]);
