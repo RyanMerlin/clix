@@ -286,23 +286,18 @@ impl SecretsTree {
             }
 
             // F: folder-level bind (Bind mode only)
+            // snapshot is left empty — callers sync lazily via the existing folder-binding refresh path
             KeyCode::Char('F') => {
+                let _ = cfg;
                 if self.mode == TreeMode::Bind {
                     if let Some(row) = self.visible.get(self.cursor).cloned() {
                         if row.kind == NodeKind::Folder {
-                            let snapshot = if let Some(cfg) = cfg {
-                                clix_core::secrets::list_infisical_secrets(
-                                    cfg, &self.project_id, &self.environment, &row.full_path
-                                ).unwrap_or_default()
-                            } else {
-                                vec![]
-                            };
                             return SecretsTreeAction::SelectedFolder {
                                 project_id: self.project_id.clone(),
                                 environment: self.environment.clone(),
                                 secret_path: row.full_path.clone(),
                                 inject_prefix: None,
-                                snapshot,
+                                snapshot: vec![],
                             };
                         }
                     }
@@ -355,8 +350,8 @@ impl SecretsTree {
     // ── render ────────────────────────────────────────────────────────────────
 
     pub fn render(&self, f: &mut Frame, area: Rect) {
-        let width = area.width.saturating_sub(4).max(54).min(90);
-        let height = area.height.saturating_sub(4).max(14).min(28);
+        let width = area.width.saturating_sub(4).clamp(54, 90);
+        let height = area.height.saturating_sub(4).clamp(14, 28);
         let x = (area.width.saturating_sub(width)) / 2;
         let y = (area.height.saturating_sub(height)) / 2;
         let dialog = Rect::new(x, y, width, height);
@@ -462,7 +457,8 @@ impl SecretsTree {
     fn render_hint(&self, f: &mut Frame, area: Rect) {
         let sel_count = self.selected.len();
         let hint = if sel_count > 0 {
-            format!("{} selected  space:toggle  a:all  enter:confirm  F:folder-bind  esc:cancel", sel_count)
+            let folder_hint = if self.mode == TreeMode::Bind { "  F:folder-bind" } else { "" };
+            format!("{} selected  space:toggle  a:all  enter:confirm{}  esc:cancel", sel_count, folder_hint)
         } else if self.mode == TreeMode::Bind {
             "↑↓ move  →/enter:open  ←:close  space:toggle  a:all  F:folder-bind  esc:cancel".to_string()
         } else {

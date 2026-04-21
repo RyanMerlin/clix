@@ -772,6 +772,7 @@ impl SecretsEditState {
                     self.tree_picker = None;
                 }
                 SecretsTreeAction::SelectedMany(refs) => {
+                    // single-slot binding: only the first selected secret is applied; the rest are discarded
                     if let Some(iref) = refs.into_iter().next() {
                         let inject_as = self.binding_rows.get(row_idx).map(|r| r.inject_as.clone()).unwrap_or_default();
                         if let Some(row) = self.binding_rows.get_mut(row_idx) {
