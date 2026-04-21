@@ -204,6 +204,13 @@ impl SecretsTree {
         self.paths.get("/").map(|s| s.is_loading()).unwrap_or(true)
     }
 
+    /// Returns the parent folder path of the cursor row, or "/" if the list is empty.
+    pub fn current_path(&self) -> &str {
+        self.visible.get(self.cursor)
+            .map(|r| r.parent_path.as_str())
+            .unwrap_or("/")
+    }
+
     // ── key handling ─────────────────────────────────────────────────────────
 
     pub fn handle_key(&mut self, code: KeyCode, cfg: Option<&InfisicalConfig>) -> SecretsTreeAction {
@@ -369,13 +376,26 @@ impl SecretsTree {
         f.render_widget(block, dialog);
 
         let chunks = Layout::vertical([
+                Constraint::Length(1),  // path breadcrumb
                 Constraint::Min(0),     // tree list
                 Constraint::Length(1),  // hint
             ])
             .split(inner);
 
-        self.render_tree(f, chunks[0]);
-        self.render_hint(f, chunks[1]);
+        // Breadcrumb: shows current folder path
+        let raw = self.current_path();
+        let crumb = if raw == "/" {
+            "/".to_string()
+        } else {
+            raw.trim_start_matches('/').trim_end_matches('/').replace('/', " › ")
+        };
+        f.render_widget(
+            Paragraph::new(Span::styled(format!(" {}", crumb), theme::dim())),
+            chunks[0],
+        );
+
+        self.render_tree(f, chunks[1]);
+        self.render_hint(f, chunks[2]);
     }
 
     fn render_tree(&self, f: &mut Frame, area: Rect) {
