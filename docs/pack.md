@@ -49,6 +49,9 @@ These packs ship with clix and install via `clix init`:
 | `az-readonly` | account-list, group-list, vm-list, aks-list, storage-accounts, acr-list | Azure read-only |
 | `helm-observe` | list, status, get-values, history | Helm release inspection |
 | `gcloud-aiplatform` | datasets-list, endpoints-list, endpoints-describe, jobs-list, models-list, models-describe | Vertex AI inspection |
+| `argocd-observe` | app-list, app-get, app-diff, app-history | ArgoCD GitOps read-only |
+| `terraform-observe` | validate, plan, show, state-list, output | Terraform read-only |
+| `incus-readonly` | list, info, snapshot-list, image-list | Incus/LXD container read-only |
 
 All read-only packs use `sideEffectClass: readOnly` and `risk: low`. They cannot write, delete, or modify any resource.
 
