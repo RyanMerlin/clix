@@ -23,7 +23,7 @@ uuid               = { version = "1", features = ["v4", "serde"] }
 chrono             = { version = "0.4", features = ["serde"] }
 jsonschema         = "0.18"
 minijinja          = "2"
-axum               = "0.7"
+axum               = "0.8"
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 zip                = "2"
