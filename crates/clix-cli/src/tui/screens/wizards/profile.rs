@@ -727,6 +727,7 @@ pub struct SecretsEditState {
     pub binding_rows: Vec<BindingRow>,
     pub cursor: usize,
     pub picker: Option<(usize, SecretPicker)>,
+    pub tree_picker: Option<(usize, SecretsTree)>,
     pub env_input: Option<(usize, FieldInput)>,
     pub literal_input: Option<(usize, FieldInput)>,
 }
@@ -737,6 +738,7 @@ pub enum SecretsEditAction {
     Save(Vec<ProfileSecretBinding>),
     /// Picker navigated — caller must dispatch LoadSecretFolders + LoadSecretNames.
     PickerNeedsLoad { project_id: String, environment: String, path: String },
+    TreeNeedsLoad { project_id: String, environment: String, path: String, folders_job: u64, names_job: u64 },
 }
 
 impl SecretsEditState {
@@ -776,12 +778,61 @@ impl SecretsEditState {
             binding_rows: rows,
             cursor: 0,
             picker: None,
+            tree_picker: None,
             env_input: None,
             literal_input: None,
         }
     }
 
+    pub fn deliver_tree_folders(&mut self, job_id: u64, folders: Vec<String>, error: Option<String>) {
+        if let Some((_, ref mut tree)) = self.tree_picker {
+            tree.deliver_folders(job_id, folders, error);
+        }
+    }
+
+    pub fn deliver_tree_names(&mut self, job_id: u64, names: Vec<String>, error: Option<String>) {
+        if let Some((_, ref mut tree)) = self.tree_picker {
+            tree.deliver_names(job_id, names, error);
+        }
+    }
+
     pub fn handle_key(&mut self, code: KeyCode, infisical_cfg: Option<&InfisicalConfig>) -> SecretsEditAction {
+        // Tree picker sub-overlay (takes priority)
+        if let Some((row_idx, ref mut tree)) = self.tree_picker {
+            let action = tree.handle_key(code, infisical_cfg);
+            match action {
+                SecretsTreeAction::Cancelled => { self.tree_picker = None; }
+                SecretsTreeAction::NeedsLoad(path) => {
+                    let project_id = tree.project_id.clone();
+                    let environment = tree.environment.clone();
+                    let (fid, nid) = tree.request_load(&path);
+                    return SecretsEditAction::TreeNeedsLoad {
+                        project_id, environment, path, folders_job: fid, names_job: nid,
+                    };
+                }
+                SecretsTreeAction::Selected(iref) => {
+                    let inject_as = self.binding_rows.get(row_idx).map(|r| r.inject_as.clone()).unwrap_or_default();
+                    if let Some(row) = self.binding_rows.get_mut(row_idx) {
+                        row.binding = Some(CredentialSource::Infisical { secret_ref: iref, inject_as });
+                    }
+                    self.tree_picker = None;
+                }
+                SecretsTreeAction::SelectedMany(refs) => {
+                    if let Some(iref) = refs.into_iter().next() {
+                        let inject_as = self.binding_rows.get(row_idx).map(|r| r.inject_as.clone()).unwrap_or_default();
+                        if let Some(row) = self.binding_rows.get_mut(row_idx) {
+                            row.binding = Some(CredentialSource::Infisical { secret_ref: iref, inject_as });
+                        }
+                    }
+                    self.tree_picker = None;
+                }
+                SecretsTreeAction::SelectedFolder { .. } => {
+                    self.tree_picker = None;
+                }
+                SecretsTreeAction::None => {}
+            }
+            return SecretsEditAction::None;
+        }
         // Picker sub-overlay
         if let Some((row_idx, ref mut picker)) = self.picker {
             let action = picker.handle_key(code, infisical_cfg);
@@ -858,18 +909,31 @@ impl SecretsEditState {
             KeyCode::Char('p') | KeyCode::Char('i') => {
                 if let Some(row) = self.binding_rows.get(self.cursor) {
                     let (project_id, environment) = derive_project_env(row);
-                    let mut picker = SecretPicker::new(&project_id, &environment);
-                    if infisical_cfg.is_some() {
-                        picker.mark_loading();
-                        let path = picker.current_path();
-                        let pid = project_id.clone();
-                        let env = environment.clone();
-                        self.picker = Some((self.cursor, picker));
-                        return SecretsEditAction::PickerNeedsLoad { project_id: pid, environment: env, path };
+                    if let Some(cfg) = infisical_cfg {
+                        let proj = if project_id.is_empty() {
+                            cfg.default_project_id.clone().unwrap_or_default()
+                        } else {
+                            project_id.clone()
+                        };
+                        let env = if environment.is_empty() {
+                            cfg.default_environment.clone()
+                        } else {
+                            environment.clone()
+                        };
+                        let mut tree = SecretsTree::new(&proj, &env, TreeMode::Bind);
+                        let fid = crate::tui::work::next_job_id();
+                        let nid = crate::tui::work::next_job_id();
+                        tree.initial_load_ids(fid, nid);
+                        let row_idx = self.cursor;
+                        self.tree_picker = Some((row_idx, tree));
+                        return SecretsEditAction::TreeNeedsLoad {
+                            project_id: proj, environment: env,
+                            path: "/".to_string(), folders_job: fid, names_job: nid,
+                        };
                     } else {
-                        picker.error = Some("Infisical not configured in config.yaml".to_string());
-                        picker.loaded = true;
-                        self.picker = Some((self.cursor, picker));
+                        let mut t = SecretsTree::new(&project_id, &environment, TreeMode::Bind);
+                        t.error = Some("Infisical not configured in config.yaml".to_string());
+                        self.tree_picker = Some((self.cursor, t));
                     }
                 }
             }
@@ -931,7 +995,9 @@ impl SecretsEditState {
             chunks[1],
         );
 
-        if let Some((_, ref picker)) = self.picker {
+        if let Some((_, ref tree)) = self.tree_picker {
+            tree.render(f, area);
+        } else if let Some((_, ref picker)) = self.picker {
             picker.render(f, area);
         }
         if let Some((row_idx, ref fi)) = self.env_input {

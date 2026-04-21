@@ -325,8 +325,14 @@ impl App {
                     }
                     if !delivered {
                         if let Overlay::ProfileSecrets(ref mut state) = self.overlay {
-                            if let Some((_, ref mut picker)) = state.picker {
-                                picker.deliver_folders(job_id, folders, error);
+                            if state.tree_picker.is_some() {
+                                state.deliver_tree_folders(job_id, folders.clone(), error.clone());
+                                delivered = true;
+                            }
+                            if !delivered {
+                                if let Some((_, ref mut picker)) = state.picker {
+                                    picker.deliver_folders(job_id, folders, error);
+                                }
                             }
                         }
                     }
@@ -352,8 +358,14 @@ impl App {
                     }
                     if !delivered {
                         if let Overlay::ProfileSecrets(ref mut state) = self.overlay {
-                            if let Some((_, ref mut picker)) = state.picker {
-                                picker.deliver_names(job_id, names, error);
+                            if state.tree_picker.is_some() {
+                                state.deliver_tree_names(job_id, names.clone(), error.clone());
+                                delivered = true;
+                            }
+                            if !delivered {
+                                if let Some((_, ref mut picker)) = state.picker {
+                                    picker.deliver_names(job_id, names, error);
+                                }
                             }
                         }
                     }
@@ -913,6 +925,12 @@ impl App {
                 }
                 SecretsEditAction::PickerNeedsLoad { project_id, environment, path } => {
                     load_req = Some((project_id, environment, path));
+                }
+                SecretsEditAction::TreeNeedsLoad { project_id, environment, path, folders_job, names_job } => {
+                    if let Some(ref cfg) = self.infisical_cfg.clone() {
+                        self.work.dispatch(WorkRequest::LoadSecretFolders { cfg: cfg.clone(), project_id: project_id.clone(), environment: environment.clone(), path: path.clone(), job_id: folders_job });
+                        self.work.dispatch(WorkRequest::LoadSecretNames { cfg: cfg.clone(), project_id, environment, path, job_id: names_job });
+                    }
                 }
                 SecretsEditAction::None => {}
             }
