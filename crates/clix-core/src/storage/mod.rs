@@ -10,6 +10,7 @@ pub trait Storage: Send + Sync {
     fn read_to_string(&self, path: &Path) -> io::Result<String>;
     fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()>;
     fn exists(&self, path: &Path) -> bool;
+    fn is_dir(&self, path: &Path) -> bool;
     fn remove_file(&self, path: &Path) -> io::Result<()>;
     fn remove_dir_all(&self, path: &Path) -> io::Result<()>;
     fn mkdir_p(&self, path: &Path) -> io::Result<()>;
@@ -42,6 +43,10 @@ impl Storage for FsStorage {
 
     fn exists(&self, path: &Path) -> bool {
         path.exists()
+    }
+
+    fn is_dir(&self, path: &Path) -> bool {
+        path.is_dir()
     }
 
     fn remove_file(&self, path: &Path) -> io::Result<()> {
@@ -123,6 +128,11 @@ pub mod mem {
 
         fn exists(&self, path: &Path) -> bool {
             self.files.lock().unwrap().contains_key(path)
+        }
+
+        fn is_dir(&self, path: &Path) -> bool {
+            let files = self.files.lock().unwrap();
+            files.keys().any(|k| k.starts_with(path) && k != path)
         }
 
         fn remove_file(&self, path: &Path) -> io::Result<()> {

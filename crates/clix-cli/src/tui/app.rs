@@ -177,8 +177,7 @@ impl App {
             let base_pack_dir = state.packs_dir.join("base");
             if base_pack_dir.exists() {
                 state.config.active_profiles.push("base".to_string());
-                let yaml = serde_yaml::to_string(&state.config)?;
-                std::fs::write(&state.config_path, yaml)?;
+                state.save_config()?;
             }
         }
         let registry = build_registry(&state)?;
@@ -581,11 +580,11 @@ impl App {
         let mut all_caps: Vec<CapabilityManifest> = vec![];
         if let Some(ref s) = state {
             let _ = load_dir::<CapabilityManifest>(&s.capabilities_dir).map(|mut v| all_caps.append(&mut v));
-            if s.packs_dir.exists() {
-                if let Ok(entries) = std::fs::read_dir(&s.packs_dir) {
-                    for entry in entries.filter_map(|e| e.ok()) {
-                        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                            let _ = load_dir::<CapabilityManifest>(&entry.path().join("capabilities"))
+            if s.storage.exists(&s.packs_dir) {
+                if let Ok(paths) = s.storage.list(&s.packs_dir) {
+                    for path in paths {
+                        if s.storage.is_dir(&path) {
+                            let _ = load_dir::<CapabilityManifest>(&path.join("capabilities"))
                                 .map(|mut v| all_caps.append(&mut v));
                         }
                     }
@@ -1226,8 +1225,7 @@ impl App {
         } else {
             state.config.active_profiles.push(name.to_string());
         }
-        let yaml = serde_yaml::to_string(&state.config)?;
-        std::fs::write(&state.config_path, yaml)?;
+        state.save_config()?;
         self.active_profiles = state.config.active_profiles.clone();
         Ok(())
     }
@@ -1249,7 +1247,7 @@ impl App {
         };
         let yaml = serde_yaml::to_string(&manifest)?;
         let path = state.profiles_dir.join(format!("{}.yaml", name));
-        std::fs::write(path, yaml)?;
+        state.storage.write(&path, yaml.as_bytes())?;
         Ok(format!("Profile '{}' created with {} capabilities", name, capabilities.len()))
     }
 
@@ -1294,7 +1292,7 @@ impl App {
         };
         let yaml = serde_yaml::to_string(&manifest)?;
         let path = state.capabilities_dir.join(format!("{}.yaml", name));
-        std::fs::write(path, yaml)?;
+        state.storage.write(&path, yaml.as_bytes())?;
         Ok(format!("Capability '{}' created", name))
     }
 
@@ -1313,13 +1311,13 @@ impl App {
                 "name: {cap_name}\nversion: 1\ndescription: ''\nbackend:\n  type: subprocess\n  command: {}\nrisk: low\nsideEffectClass: readOnly\ninputSchema:\n  type: object\n  properties: {{}}\n",
                 cap_name.split('.').next().unwrap_or(name)
             );
-            std::fs::write(caps_dir.join(&file_name), yaml)?;
+            state.storage.write(&caps_dir.join(&file_name), yaml.as_bytes())?;
         }
 
         // Patch pack.yaml: add description, author, and capabilities list
         {
             let pack_yaml_path = pack_dir.join("pack.yaml");
-            let existing = std::fs::read_to_string(&pack_yaml_path)?;
+            let existing = state.storage.read_to_string(&pack_yaml_path)?;
             let mut val: serde_yaml::Value = serde_yaml::from_str(&existing)
                 .map_err(|e| anyhow::anyhow!("pack.yaml parse error: {e}"))?;
             if let serde_yaml::Value::Mapping(ref mut m) = val {
@@ -1352,7 +1350,7 @@ impl App {
                 }
             }
             let patched = serde_yaml::to_string(&val)?;
-            std::fs::write(&pack_yaml_path, patched)?;
+            state.storage.write(&pack_yaml_path, patched.as_bytes())?;
         }
 
         Ok(format!("Pack '{}' created with {} capabilities", name, capability_names.len()))
@@ -1362,10 +1360,10 @@ impl App {
         let state = ClixState::load(home_dir())?;
         let pack_dir = state.packs_dir.join(pack_name);
         let pack_yaml_path = pack_dir.join("pack.yaml");
-        if !pack_yaml_path.exists() {
+        if !state.storage.exists(&pack_yaml_path) {
             return Err(anyhow::anyhow!("pack.yaml not found for '{}'", pack_name));
         }
-        let existing = std::fs::read_to_string(&pack_yaml_path)?;
+        let existing = state.storage.read_to_string(&pack_yaml_path)?;
         let mut val: serde_yaml::Value = serde_yaml::from_str(&existing)
             .map_err(|e| anyhow::anyhow!("pack.yaml parse error: {e}"))?;
         if let serde_yaml::Value::Mapping(ref mut m) = val {
@@ -1375,23 +1373,23 @@ impl App {
                 ));
         }
         let patched = serde_yaml::to_string(&val)?;
-        std::fs::write(&pack_yaml_path, patched)?;
+        state.storage.write(&pack_yaml_path, patched.as_bytes())?;
         Ok(format!("Pack '{}' updated with {} capabilities", pack_name, capability_names.len()))
     }
 
     fn do_save_profile_secrets(&self, profile_name: &str, bindings: &[ProfileSecretBinding]) -> Result<String> {
         let state = ClixState::load(home_dir())?;
         let path = state.profiles_dir.join(format!("{}.yaml", profile_name));
-        if !path.exists() {
+        if !state.storage.exists(&path) {
             return Err(anyhow::anyhow!("Profile file not found: {}", path.display()));
         }
-        let existing = std::fs::read_to_string(&path)?;
+        let existing = state.storage.read_to_string(&path)?;
         let mut val: serde_yaml::Value = serde_yaml::from_str(&existing)?;
         if let serde_yaml::Value::Mapping(ref mut m) = val {
             let bindings_yaml = serde_yaml::to_value(bindings)?;
             m.insert(serde_yaml::Value::String("secretBindings".into()), bindings_yaml);
         }
-        std::fs::write(&path, serde_yaml::to_string(&val)?)?;
+        state.storage.write(&path, serde_yaml::to_string(&val)?.as_bytes())?;
         Ok(format!("Profile '{}' secrets updated ({} bindings)", profile_name, bindings.len()))
     }
 
@@ -1464,13 +1462,13 @@ fn load_packs_from_dir(packs_dir: &std::path::Path) -> Vec<PackManifest> {
         .collect()
 }
 
-fn load_profiles_from_packs(packs_dir: &std::path::Path) -> Vec<ProfileManifest> {
-    if !packs_dir.exists() { return vec![]; }
-    let Ok(entries) = std::fs::read_dir(packs_dir) else { return vec![]; };
-    entries
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-        .flat_map(|e| load_dir::<ProfileManifest>(&e.path().join("profiles")).unwrap_or_default())
+fn load_profiles_from_packs(state: &ClixState) -> Vec<ProfileManifest> {
+    let packs_dir = &state.packs_dir;
+    if !state.storage.exists(packs_dir) { return vec![]; }
+    let Ok(paths) = state.storage.list(packs_dir) else { return vec![]; };
+    paths.into_iter()
+        .filter(|p| state.storage.is_dir(p))
+        .flat_map(|p| load_dir::<ProfileManifest>(&p.join("profiles")).unwrap_or_default())
         .collect()
 }
 
@@ -1481,7 +1479,7 @@ fn load_all_profiles(state: &ClixState) -> Vec<ProfileManifest> {
     for p in load_dir::<ProfileManifest>(&state.profiles_dir).unwrap_or_default() {
         by_name.insert(p.name.clone(), p);
     }
-    for p in load_profiles_from_packs(&state.packs_dir) {
+    for p in load_profiles_from_packs(state) {
         by_name.entry(p.name.clone()).or_insert(p);
     }
     let mut profiles: Vec<ProfileManifest> = by_name.into_values().collect();

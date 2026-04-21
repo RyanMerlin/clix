@@ -6,11 +6,10 @@ use crate::state::ClixState;
 
 pub fn build_registry(state: &ClixState) -> Result<CapabilityRegistry> {
     let mut all_caps: Vec<crate::manifest::capability::CapabilityManifest> = load_dir(&state.capabilities_dir)?;
-    if state.packs_dir.exists() {
-        for entry in std::fs::read_dir(&state.packs_dir)? {
-            let entry = entry?;
-            if entry.file_type()?.is_dir() {
-                let mut pack_caps = load_dir(&entry.path().join("capabilities"))?;
+    if state.storage.exists(&state.packs_dir) {
+        for path in state.storage.list(&state.packs_dir)? {
+            if state.storage.is_dir(&path) {
+                let mut pack_caps = load_dir(&path.join("capabilities"))?;
                 all_caps.append(&mut pack_caps);
             }
         }
@@ -27,11 +26,10 @@ pub fn build_registry(state: &ClixState) -> Result<CapabilityRegistry> {
 
 pub fn build_workflow_registry(state: &ClixState) -> Result<WorkflowRegistry> {
     let mut all = load_dir(&state.workflows_dir)?;
-    if state.packs_dir.exists() {
-        for entry in std::fs::read_dir(&state.packs_dir)? {
-            let entry = entry?;
-            if entry.file_type()?.is_dir() {
-                let mut wfs = load_dir(&entry.path().join("workflows"))?;
+    if state.storage.exists(&state.packs_dir) {
+        for path in state.storage.list(&state.packs_dir)? {
+            if state.storage.is_dir(&path) {
+                let mut wfs = load_dir(&path.join("workflows"))?;
                 all.append(&mut wfs);
             }
         }
@@ -40,8 +38,8 @@ pub fn build_workflow_registry(state: &ClixState) -> Result<WorkflowRegistry> {
 }
 
 pub fn load_policy(state: &ClixState) -> Result<PolicyBundle> {
-    if state.policy_path.exists() {
-        let content = std::fs::read_to_string(&state.policy_path)?;
+    if state.storage.exists(&state.policy_path) {
+        let content = state.storage.read_to_string(&state.policy_path)?;
         Ok(serde_yaml::from_str(&content)?)
     } else {
         Ok(PolicyBundle::default())
@@ -51,16 +49,14 @@ pub fn load_policy(state: &ClixState) -> Result<PolicyBundle> {
 fn load_active_profiles(state: &ClixState) -> Result<Vec<crate::manifest::profile::ProfileManifest>> {
     use std::collections::HashMap;
     use crate::manifest::profile::ProfileManifest;
-    // Global profiles win over pack-shipped profiles (user override)
     let mut by_name: HashMap<String, ProfileManifest> = HashMap::new();
     for p in load_dir::<ProfileManifest>(&state.profiles_dir)? {
         by_name.insert(p.name.clone(), p);
     }
-    if state.packs_dir.exists() {
-        for entry in std::fs::read_dir(&state.packs_dir)? {
-            let entry = entry?;
-            if entry.file_type()?.is_dir() {
-                for p in load_dir::<ProfileManifest>(&entry.path().join("profiles"))? {
+    if state.storage.exists(&state.packs_dir) {
+        for path in state.storage.list(&state.packs_dir)? {
+            if state.storage.is_dir(&path) {
+                for p in load_dir::<ProfileManifest>(&path.join("profiles"))? {
                     by_name.entry(p.name.clone()).or_insert(p);
                 }
             }

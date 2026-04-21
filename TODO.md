@@ -39,29 +39,34 @@
 - **Breadcrumb header**: replaces filler dashes — shows `clix › Screen › Overlay` updated on every key
 - **Toast decoupled from Overlay**: `App::toast_state: Option<ToastState>` floats above all overlays — toasts no longer eject open wizards
 - **Confirm-before-discard**: `confirming_discard` flag shows y/n/esc dialog when Esc pressed on dirty wizard; `is_dirty()` on InfisicalSetup, ProfileWizard, CapabilityWizard, PackWizard
+- **Auto-content focus**: Secrets, Dashboard, and Broker screens auto-enter `Focus::Content` on navigation; action keys work immediately without a manual Enter
+
+### Multi-Infisical accounts (Slices 1–3)
+- **Named account profiles**: `ClixConfig.infisical_profiles: BTreeMap<String, InfisicalConfig>` + `active_infisical: Option<String>`; legacy single `infisical:` field auto-migrates to `infisical_profiles["default"]` on first load
+- **Per-profile keyring slots**: `infisical-client-id:{name}` / `infisical-client-secret:{name}`; first-load migration moves unsuffixed legacy entries to `:default`
+- **Token cache per credentials**: `HashMap<(site_url, client_id), CachedToken>` replacing global single-entry
+- **`InfisicalProfiles` resolver**: `run_capability`/`run_workflow` take `&InfisicalProfiles` instead of `Option<&InfisicalConfig>`
+- **`Overlay::InfisicalAccounts`**: list view with add/edit/remove/set-active/test; `m` opens from Secrets screen
+- **Breadcrumb badge**: active Infisical profile name shown in header when set
+
+### Git-backed sync
+- **`clix sync {init,pull,push,status}`** — full git sync CLI; `init` links or creates a git repo at `~/.clix` with `.gitignore` (excludes receipts, cache, sockets)
+- **TUI Ctrl+G** — full sync (add → commit → rebase → push) from any screen; amber "out of sync" badge when ahead/behind; hidden when clean
+- **`git_remote` + `git_branch`** persisted in `config.yaml`
+
+### Storage abstraction baseline (Phase 2 Step A)
+- **`trait Storage`** in `clix-core/src/storage/mod.rs`: `read_bytes`, `read_to_string`, `write`, `exists`, `is_dir`, `remove_file`, `remove_dir_all`, `mkdir_p`, `list`, `copy_dir`
+- **`FsStorage`**: thin `std::fs` wrapper; default backend
+- **`MemStorage`** (`#[cfg(test)]`): in-memory `HashMap<PathBuf, Vec<u8>>`; `ClixState::load_with_storage` for hermetic tests
+- **`ClixState.storage: StorageRef`** wired; `state.rs`, `loader.rs`, `tui/app.rs` do_* methods all use trait instead of raw `std::fs`
 
 ---
 
-## Next: Multi-Infisical + Secrets Tree Browser
+## Next: Secrets tree browser (Slice 4)
 
-### Core plumbing (Slice 1)
-- [ ] `ClixConfig.infisical` → `infisical_profiles: BTreeMap<String, InfisicalProfile>` + `active_infisical`; migration on load.
-- [ ] Keyring per-profile slots (`infisical-client-id:{name}`).
-- [ ] Token cache keyed on `(site_url, client_id)` instead of global single-entry.
-- [ ] `InfisicalRef` + `ProfileFolderBinding` gain `infisical_profile: Option<String>` selector.
-- [ ] `run_capability` + `run_workflow` take `&InfisicalProfiles` resolver.
-
-### CLI (Slice 2)
-- [ ] `clix infisical {list,add,use,remove,test,edit}` — named Infisical account management.
-- [ ] `--profile <name>` on all `clix secrets *` subcommands.
-
-### TUI (Slice 3)
-- [ ] `Overlay::InfisicalAccounts` — add/edit/remove/use/test accounts list.
-- [ ] `Screen::Secrets` updated: accounts section, `m`/`u`/`b` keybinds, breadcrumb badge.
-
-### Secrets tree browser (Slice 4)
-- [ ] `widgets/secrets_tree.rs` — async lazy-expanding tree; Browse + Bind modes.
+- [ ] `widgets/secrets_tree.rs` — async lazy-expanding tree; Browse + Bind modes; `▸`/`▾`/`🔑` glyphs; `WorkRequest::LoadSecretSubtree`.
 - [ ] Replace `SecretPicker` with tree browser in profile binding wizard.
+- [ ] `b` on Screen::Secrets opens Browse mode for active profile's project.
 
 ---
 
@@ -108,10 +113,7 @@
 - [x] `terraform-observe` — `validate`, `plan`, `show`, `state list`, `output` — shipped
 - [x] `argocd-observe` — `app list`, `app get`, `app diff`, `app history` — shipped
 - [x] `incus-readonly` — `list`, `info`, `snapshot list`, `image list` — shipped
-- [ ] `k9s-observe` — pass-through to k9s with `--readonly` flag
-- [ ] `pulumi-observe` — `preview`, `stack output`, `stack ls`
 - [x] `gcloud-aiplatform` — Vertex AI inspection — shipped (v0.3.0)
-- [ ] `npm-observe` — `list`, `audit`, `outdated` — read-only Node.js package inspection
 
 ### Pack authoring UX
 - [x] `clix pack onboard` — probes `--help`/`--version`, scaffolds a pack from discovered entry points.
