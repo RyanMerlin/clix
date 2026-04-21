@@ -7,7 +7,7 @@ pub const STATIC_COMMANDS: &[&str] = &[
     "init", "status", "version", "run", "capabilities",
     "workflow", "profile", "receipts", "serve", "pack", "tui",
     "doctor", "shim", "mcp", "tools", "secrets", "infisical", "broker",
-    "approve", "reject",
+    "approve", "reject", "sync",
 ];
 
 #[derive(Parser)]
@@ -111,6 +111,9 @@ pub enum Commands {
     /// Manage the credential broker daemon
     #[command(subcommand)]
     Broker(BrokerCmd),
+    /// Sync ~/.clix with a remote git repository
+    #[command(subcommand)]
+    Sync(SyncCmd),
     /// Approve a pending capability execution
     Approve {
         receipt_id: String,
@@ -200,6 +203,24 @@ pub enum ShimCmd {
     List { #[arg(long)] json: bool },
     /// Remove a shim
     Uninstall { command: String },
+}
+
+#[derive(Subcommand)]
+pub enum SyncCmd {
+    /// Initialise git sync and link to a remote repository
+    Init {
+        /// Remote URL (e.g. https://github.com/you/clix-merlin)
+        remote: String,
+        /// Branch name (default: main)
+        #[arg(long, default_value = "main")]
+        branch: String,
+    },
+    /// Stage, commit, and push local changes to origin
+    Push,
+    /// Pull latest changes from origin (rebase)
+    Pull,
+    /// Show git sync status (remote, ahead/behind, dirty files)
+    Status,
 }
 
 #[derive(Subcommand)]

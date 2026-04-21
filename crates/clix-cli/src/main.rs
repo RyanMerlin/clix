@@ -6,7 +6,7 @@ mod tui;
 
 use anyhow::Result;
 use clap::FromArgMatches;
-use cli::{Cli, Commands, CapabilitiesCmd, WorkflowCmd, ProfileCmd, ReceiptsCmd, PackCmd, ShimCmd, McpCmd, ToolsCmd};
+use cli::{Cli, Commands, CapabilitiesCmd, WorkflowCmd, ProfileCmd, ReceiptsCmd, PackCmd, ShimCmd, McpCmd, ToolsCmd, SyncCmd};
 #[allow(unused_imports)]
 use commands::approve;
 
@@ -163,6 +163,7 @@ async fn dispatch_static(cli: Cli) -> Result<()> {
         Commands::Infisical(sub) => {
             commands::infisical::run_infisical(sub)?;
         }
+        Commands::Sync(sub) => commands::sync::run_sync(sub)?,
         Commands::Broker(sub) => commands::broker::run_broker(sub)?,
         Commands::Approve { receipt_id, approver, comment } => {
             commands::approve::approve(&receipt_id, &approver, comment.as_deref())?;

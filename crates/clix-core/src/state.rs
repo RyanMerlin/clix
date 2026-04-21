@@ -158,6 +158,13 @@ pub struct ClixConfig {
     pub approval_gate: Option<ApprovalGateConfig>,
     #[serde(default)]
     pub sandbox: SandboxConfig,
+
+    /// Git remote URL for syncing ~/.clix (e.g. "https://github.com/user/clix-merlin")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_remote: Option<String>,
+    /// Branch to sync against (default: "main")
+    #[serde(default = "default_git_branch")]
+    pub git_branch: String,
 }
 
 impl ClixConfig {
@@ -183,12 +190,15 @@ impl Default for ClixConfig {
             infisical: None,
             approval_gate: None,
             sandbox: SandboxConfig::default(),
+            git_remote: None,
+            git_branch: "main".to_string(),
         }
     }
 }
 
 fn default_schema_version() -> u32 { 1 }
 fn default_env() -> String { "default".to_string() }
+fn default_git_branch() -> String { "main".to_string() }
 
 // ─── infisical profiles ───────────────────────────────────────────────────────
 

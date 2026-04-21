@@ -174,6 +174,8 @@ pub mod mem {
     }
 }
 
+pub mod git;
+
 /// Convenience alias for the shared storage handle used throughout clix-core.
 pub type StorageRef = Arc<dyn Storage>;
 

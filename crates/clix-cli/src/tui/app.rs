@@ -528,6 +528,11 @@ impl App {
     }
 
     fn switch_to(&mut self, screen: Screen) {
+        // Screens with no list to navigate have no use for sidebar focus —
+        // enter content focus automatically so action keys (e, m, t, b…) work immediately.
+        if matches!(screen, Screen::Secrets | Screen::Dashboard | Screen::Broker) {
+            self.focus = Focus::Content;
+        }
         self.screen = screen;
     }
 
