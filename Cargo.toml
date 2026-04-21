@@ -29,7 +29,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 zip                = "2"
 sha2               = { version = "0.10", features = ["oid"] }
 hex                = "0.4"
-dirs               = "5"
+dirs               = "6"
 whoami             = "1"
 urlencoding        = "2"
 rusqlite           = { version = "0.32", features = ["bundled"] }
@@ -39,8 +39,8 @@ criterion          = { version = "0.5", features = ["html_reports"] }
 keyring            = { version = "3", features = ["async-secret-service", "async-io", "crypto-rust"] }
 rpassword          = "7"
 base64             = "0.22"
-which              = "4"
-prometheus         = { version = "0.13", features = ["process"] }
+which              = "8"
+prometheus         = { version = "0.14", features = ["process"] }
 ed25519-dalek      = { version = "2", features = ["rand_core", "pem"] }
 rand_core          = { version = "0.6", features = ["getrandom"] }
 pkcs8              = { version = "0.10", features = ["pem"] }
