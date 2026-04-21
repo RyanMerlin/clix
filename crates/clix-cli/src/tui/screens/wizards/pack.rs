@@ -37,6 +37,8 @@ pub struct PackWizard {
     pub scanning: bool,
     // Step 2 — subcommands
     pub all_subcmds: Vec<DiscoveredSubcmd>,
+    pub pending_subcmds: Vec<DiscoveredSubcmd>,  // accumulates async parse results
+    pub pending_help_jobs: usize,                 // count of outstanding ParseHelp jobs
     pub subcmd_checklist: Checklist,
     pub parsing_help: bool,
     pub heuristic_filter: bool,
@@ -55,6 +57,8 @@ pub enum PackWizardAction {
         seed_command: String,
         capability_names: Vec<String>,
     },
+    /// Dispatch ParseHelp jobs for these command names (async help probing).
+    ParseHelpFor(Vec<String>),
 }
 
 impl PackWizard {
@@ -71,6 +75,8 @@ impl PackWizard {
             binary_checklist: Checklist::new(vec![]),
             scanning: false,
             all_subcmds: Vec::new(),
+            pending_subcmds: Vec::new(),
+            pending_help_jobs: 0,
             subcmd_checklist: Checklist::new(vec![]),
             parsing_help: false,
             heuristic_filter: true,
@@ -172,13 +178,52 @@ impl PackWizard {
         match code {
             KeyCode::Esc => self.step = PackWizardStep::Identity,
             KeyCode::Enter => {
-                // Parse help for selected binaries
-                self.parse_selected_help();
-                self.step = PackWizardStep::SelectSubcmds;
+                let selected_names = self.binary_checklist.selected_ids();
+                if selected_names.is_empty() {
+                    self.error = Some("Select at least one binary".into());
+                    return PackWizardAction::None;
+                }
+                self.error = None;
+                self.parsing_help = true;
+                self.pending_help_jobs = selected_names.len();
+                self.pending_subcmds.clear();
+                return PackWizardAction::ParseHelpFor(selected_names);
             }
             _ => { self.binary_checklist.handle_key(code); }
         }
         PackWizardAction::None
+    }
+
+    /// Called by App::tick() when a HelpParsed result arrives.
+    pub fn deliver_help(&mut self, job_id: crate::tui::work::JobId, command: &str, subcmds: Vec<clix_core::discovery::ParsedSubcommand>) {
+        if !self.parsing_help { return; }
+        let _ = job_id; // we don't track by job_id — any result counts toward pending
+        for p in subcmds {
+            let cls = clix_core::discovery::classify(&p.name, &p.description);
+            self.pending_subcmds.push(DiscoveredSubcmd { parsed: p, classification: cls });
+        }
+        self.pending_help_jobs = self.pending_help_jobs.saturating_sub(1);
+        if self.pending_help_jobs == 0 {
+            // If no subcommands found at all, create a fallback from the binary names
+            if self.pending_subcmds.is_empty() {
+                let selected = self.binary_checklist.selected_ids();
+                for name in &selected {
+                    let pack_name = self.name.value.trim().to_string();
+                    let cls = clix_core::discovery::classify(&format!("{}.run", name), "");
+                    self.pending_subcmds.push(DiscoveredSubcmd {
+                        parsed: clix_core::discovery::ParsedSubcommand {
+                            name: format!("{}.run", pack_name.replace('-', "_")),
+                            description: format!("Run {}", name),
+                        },
+                        classification: cls,
+                    });
+                }
+                let _ = command; // suppress warning
+            }
+            self.finalize_subcmds();
+            self.parsing_help = false;
+            self.step = PackWizardStep::SelectSubcmds;
+        }
     }
 
     fn parse_selected_help(&mut self) {
@@ -209,7 +254,19 @@ impl PackWizard {
             }
         }
 
-        // Apply heuristic filter based on preset
+        self.all_subcmds = subcmds;
+        self.finalize_subcmds();
+        self.parsing_help = false;
+    }
+
+    /// Build the subcmd_checklist from pending_subcmds (async) or all_subcmds (sync path).
+    fn finalize_subcmds(&mut self) {
+        let subcmds = if self.pending_subcmds.is_empty() {
+            &self.all_subcmds
+        } else {
+            self.all_subcmds = std::mem::take(&mut self.pending_subcmds);
+            &self.all_subcmds
+        };
         let preset_str = self.preset.current().to_string();
         let items: Vec<ChecklistItem> = subcmds.iter().map(|sc| {
             let risk_str = match sc.classification.risk {
@@ -227,7 +284,6 @@ impl PackWizard {
             };
             let tag = format!("{:<4} {}", risk_str, se_str);
             let tag_color = theme::risk_color(risk_str);
-
             let mut item = ChecklistItem::new(
                 &sc.parsed.name,
                 &sc.parsed.name,
@@ -236,7 +292,6 @@ impl PackWizard {
                 tag_color,
                 "",
             );
-            // Auto-select based on preset heuristic
             item.selected = match preset_str.as_str() {
                 "read-only" => matches!(sc.classification.side_effect,
                     clix_core::manifest::capability::SideEffectClass::ReadOnly |
@@ -247,10 +302,7 @@ impl PackWizard {
             };
             item
         }).collect();
-
-        self.all_subcmds = subcmds;
         self.subcmd_checklist = Checklist::new(items);
-        self.parsing_help = false;
     }
 
     fn handle_subcmds(&mut self, code: KeyCode) -> PackWizardAction {

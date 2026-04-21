@@ -72,6 +72,8 @@ pub enum ProfileWizardAction {
         secret_bindings: Vec<ProfileSecretBinding>,
         folder_bindings: Vec<ProfileFolderBinding>,
     },
+    /// Picker navigated to a new path — caller must dispatch LoadSecretFolders + LoadSecretNames.
+    PickerNeedsLoad { project_id: String, environment: String, path: String },
 }
 
 impl ProfileWizard {
@@ -159,6 +161,12 @@ impl ProfileWizard {
             let action = picker.handle_key(code, infisical_cfg);
             match action {
                 SecretPickerAction::Cancelled => { self.picker = None; }
+                SecretPickerAction::NeedsLoad => {
+                    let project_id = picker.project_id.clone();
+                    let environment = picker.environment.clone();
+                    let path = picker.current_path();
+                    return ProfileWizardAction::PickerNeedsLoad { project_id, environment, path };
+                }
                 SecretPickerAction::Selected(iref) => {
                     let inject_as = self.binding_rows.get(row_idx).map(|r| r.inject_as.clone()).unwrap_or_default();
                     if let Some(row) = self.binding_rows.get_mut(row_idx) {
@@ -289,13 +297,18 @@ impl ProfileWizard {
                 if let Some(row) = self.binding_rows.get(self.secrets_cursor) {
                     let (project_id, environment) = derive_project_env(row);
                     let mut picker = SecretPicker::new(&project_id, &environment);
-                    if let Some(cfg) = infisical_cfg {
-                        picker.load(cfg);
+                    if infisical_cfg.is_some() {
+                        picker.mark_loading();
+                        let path = picker.current_path();
+                        let pid = project_id.clone();
+                        let env = environment.clone();
+                        self.picker = Some((self.secrets_cursor, picker));
+                        return ProfileWizardAction::PickerNeedsLoad { project_id: pid, environment: env, path };
                     } else {
                         picker.error = Some("Infisical not configured (set site_url/client_id/client_secret in config)".to_string());
                         picker.loaded = true;
+                        self.picker = Some((self.secrets_cursor, picker));
                     }
-                    self.picker = Some((self.secrets_cursor, picker));
                 }
             }
             KeyCode::Char('e') => {
@@ -646,6 +659,8 @@ pub enum SecretsEditAction {
     None,
     Cancel,
     Save(Vec<ProfileSecretBinding>),
+    /// Picker navigated — caller must dispatch LoadSecretFolders + LoadSecretNames.
+    PickerNeedsLoad { project_id: String, environment: String, path: String },
 }
 
 impl SecretsEditState {
@@ -696,6 +711,12 @@ impl SecretsEditState {
             let action = picker.handle_key(code, infisical_cfg);
             match action {
                 SecretPickerAction::Cancelled => { self.picker = None; }
+                SecretPickerAction::NeedsLoad => {
+                    let project_id = picker.project_id.clone();
+                    let environment = picker.environment.clone();
+                    let path = picker.current_path();
+                    return SecretsEditAction::PickerNeedsLoad { project_id, environment, path };
+                }
                 SecretPickerAction::Selected(iref) => {
                     let inject_as = self.binding_rows.get(row_idx).map(|r| r.inject_as.clone()).unwrap_or_default();
                     if let Some(row) = self.binding_rows.get_mut(row_idx) {
@@ -762,13 +783,18 @@ impl SecretsEditState {
                 if let Some(row) = self.binding_rows.get(self.cursor) {
                     let (project_id, environment) = derive_project_env(row);
                     let mut picker = SecretPicker::new(&project_id, &environment);
-                    if let Some(cfg) = infisical_cfg {
-                        picker.load(cfg);
+                    if infisical_cfg.is_some() {
+                        picker.mark_loading();
+                        let path = picker.current_path();
+                        let pid = project_id.clone();
+                        let env = environment.clone();
+                        self.picker = Some((self.cursor, picker));
+                        return SecretsEditAction::PickerNeedsLoad { project_id: pid, environment: env, path };
                     } else {
                         picker.error = Some("Infisical not configured in config.yaml".to_string());
                         picker.loaded = true;
+                        self.picker = Some((self.cursor, picker));
                     }
-                    self.picker = Some((self.cursor, picker));
                 }
             }
             KeyCode::Char('e') => { self.env_input = Some((self.cursor, FieldInput::default())); }

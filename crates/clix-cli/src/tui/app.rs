@@ -12,7 +12,7 @@ use clix_core::manifest::capability::{
 use clix_core::packs::scaffold::{scaffold_pack, Preset};
 
 use crate::tui::screens::wizards::pack::{PackWizard, PackWizardAction};
-use crate::tui::screens::wizards::profile::{ProfileWizard, ProfileWizardAction};
+use crate::tui::screens::wizards::profile::{ProfileWizard, ProfileWizardAction, SecretsEditAction};
 use crate::tui::screens::wizards::capability::{CapabilityWizard, CapWizardAction};
 use crate::tui::screens::infisical_setup::{InfisicalSetupState, InfisicalSetupAction, SubmitState};
 use crate::tui::work::{WorkPool, WorkRequest, WorkResult, next_job_id, JobId};
@@ -144,6 +144,8 @@ pub struct App {
     // async work
     pub work: WorkPool,
     pub dropped_jobs: std::collections::HashSet<JobId>,
+    /// Tracks the in-flight receipt approval (receipt_id_str, job_id)
+    pub approving_receipt: Option<(String, JobId)>,
     // navigation
     pub focus: Focus,
     pub toast_state: Option<ToastState>,
@@ -192,6 +194,7 @@ impl App {
             should_quit: false,
             work: WorkPool::new(),
             dropped_jobs: std::collections::HashSet::new(),
+            approving_receipt: None,
             focus: Focus::Sidebar,
             toast_state: None,
             confirming_discard: false,
@@ -257,6 +260,60 @@ impl App {
                         format!("✗ {}", error.as_deref().unwrap_or("auth failed"))
                     };
                     self.toast(&msg, !ok);
+                }
+                WorkResult::SecretFoldersLoaded { job_id, folders, error } => {
+                    // Route to whichever picker is currently open
+                    let mut delivered = false;
+                    if let Overlay::ProfileCreate(ref mut wiz) = self.overlay {
+                        if let Some((_, ref mut picker)) = wiz.picker {
+                            picker.deliver_folders(job_id, folders.clone(), error.clone());
+                            delivered = true;
+                        }
+                    }
+                    if !delivered {
+                        if let Overlay::ProfileSecrets(ref mut state) = self.overlay {
+                            if let Some((_, ref mut picker)) = state.picker {
+                                picker.deliver_folders(job_id, folders, error);
+                            }
+                        }
+                    }
+                }
+                WorkResult::SecretNamesLoaded { job_id, names, error } => {
+                    let mut delivered = false;
+                    if let Overlay::ProfileCreate(ref mut wiz) = self.overlay {
+                        if let Some((_, ref mut picker)) = wiz.picker {
+                            picker.deliver_names(job_id, names.clone(), error.clone());
+                            delivered = true;
+                        }
+                    }
+                    if !delivered {
+                        if let Overlay::ProfileSecrets(ref mut state) = self.overlay {
+                            if let Some((_, ref mut picker)) = state.picker {
+                                picker.deliver_names(job_id, names, error);
+                            }
+                        }
+                    }
+                }
+                WorkResult::HelpParsed { job_id, command, subcmds, error: _ } => {
+                    if let Overlay::PackCreate(ref mut wiz) = self.overlay {
+                        wiz.deliver_help(job_id, &command, subcmds);
+                    }
+                }
+                WorkResult::ReceiptApproved { job_id, id, ok, error } => {
+                    if let Some((ref pending_id, pending_job)) = self.approving_receipt.clone() {
+                        if pending_job == job_id {
+                            self.approving_receipt = None;
+                            if ok {
+                                let id_str = id.to_string();
+                                self.pending_approval_ids.retain(|i| i != &id_str);
+                                self.toast(&format!("Approved: {}", &id_str[..8.min(id_str.len())]), false);
+                            } else {
+                                let err = error.as_deref().unwrap_or("unknown error");
+                                self.toast(&format!("Approve failed: {err}"), true);
+                            }
+                            let _ = pending_id; // suppress unused warning
+                        }
+                    }
                 }
                 WorkResult::InfisicalTested { job_id, ok, latency_ms, keyring_used, error } => {
                     if self.dropped_jobs.remove(&job_id) {
@@ -382,25 +439,22 @@ impl App {
                     self.toast("Infisical not configured — press e to configure", true);
                 }
             }
-            // A = approve first pending receipt on Receipts screen
+            // A = approve first pending receipt on Receipts screen (async)
             KeyCode::Char('A') if self.screen == Screen::Receipts => {
-                if let Some(id) = self.pending_approval_ids.first().cloned() {
+                if self.approving_receipt.is_some() {
+                    self.toast("Approval already in progress…", false);
+                } else if let Some(id) = self.pending_approval_ids.first().cloned() {
                     use uuid::Uuid;
-                    use clix_core::execution::broker_client::BrokerClient;
                     match id.parse::<Uuid>() {
                         Ok(uid) => {
-                            match BrokerClient::connect() {
-                                Ok(mut client) => {
-                                    match client.send_approve(uid, whoami::username(), None) {
-                                        Ok(_) => {
-                                            self.pending_approval_ids.retain(|i| i != &id);
-                                            self.toast(&format!("Approved: {id}"), false);
-                                        }
-                                        Err(e) => self.toast(&format!("Approve failed: {e}"), true),
-                                    }
-                                }
-                                Err(e) => self.toast(&format!("Broker unavailable: {e}"), true),
-                            }
+                            let job_id = next_job_id();
+                            self.approving_receipt = Some((id, job_id));
+                            self.work.dispatch(WorkRequest::ApproveReceipt {
+                                id: uid,
+                                approver: whoami::username(),
+                                job_id,
+                            });
+                            self.toast("Sending approval…", false);
                         }
                         Err(_) => self.toast("Invalid receipt id", true),
                     }
@@ -577,11 +631,13 @@ impl App {
             return;
         }
 
-        // Profile secrets edit overlay
-        if let Overlay::ProfileSecrets(ref mut state) = self.overlay {
-            use crate::tui::screens::wizards::profile::SecretsEditAction;
+        // Profile secrets edit overlay — two-phase to allow dispatching picker loads
+        let mut handled_secrets_overlay = false;
+        let secrets_picker_load: Option<(String, String, String)> = if let Overlay::ProfileSecrets(ref mut state) = self.overlay {
+            handled_secrets_overlay = true;
             let infisical = self.infisical_cfg.clone();
             let action = state.handle_key(key.code, infisical.as_ref());
+            let mut load_req = None;
             match action {
                 SecretsEditAction::Cancel => { self.overlay = Overlay::None; }
                 SecretsEditAction::Save(bindings) => {
@@ -592,10 +648,29 @@ impl App {
                         Err(e) => { self.toast(&format!("Error: {e}"), true); }
                     }
                 }
+                SecretsEditAction::PickerNeedsLoad { project_id, environment, path } => {
+                    load_req = Some((project_id, environment, path));
+                }
                 SecretsEditAction::None => {}
             }
-            return;
+            load_req
+        } else {
+            None
+        };
+        if let Some((project_id, environment, path)) = secrets_picker_load {
+            if let Some(ref cfg) = self.infisical_cfg.clone() {
+                let fj = next_job_id();
+                let nj = next_job_id();
+                if let Overlay::ProfileSecrets(ref mut state) = self.overlay {
+                    if let Some((_, ref mut picker)) = state.picker {
+                        picker.set_pending_jobs(fj, nj);
+                    }
+                }
+                self.work.dispatch(WorkRequest::LoadSecretFolders { cfg: cfg.clone(), project_id: project_id.clone(), environment: environment.clone(), path: path.clone(), job_id: fj });
+                self.work.dispatch(WorkRequest::LoadSecretNames { cfg: cfg.clone(), project_id, environment, path, job_id: nj });
+            }
         }
+        if handled_secrets_overlay { return; }
 
         // Pack edit overlay
         if let Overlay::PackEdit { ref pack_name, ref mut checklist } = self.overlay {
@@ -673,13 +748,15 @@ impl App {
 
         // Wizard key delegation
         let code = key.code;
-        // ProfileCreate: pass registry + infisical so the Secrets step can build rows + open picker
-        if let Overlay::ProfileCreate(ref mut wiz) = self.overlay {
-            // Clone refs so we can borrow self mutably inside
+        // ProfileCreate: two-phase to allow dispatching picker loads after borrow ends
+        let mut handled_profile_create = false;
+        let profile_picker_load: Option<(String, String, String)> = if let Overlay::ProfileCreate(ref mut wiz) = self.overlay {
+            handled_profile_create = true;
             let registry = self.registry.clone();
             let infisical = self.infisical_cfg.clone();
             let is_dirty = wiz.is_dirty();
             let action = wiz.handle_key(code, Some(&registry), infisical.as_ref());
+            let mut load_req = None;
             let result: Option<Result<String>> = match action {
                 ProfileWizardAction::Cancel => {
                     if is_dirty { self.confirming_discard = true; } else { self.overlay = Overlay::None; }
@@ -687,6 +764,10 @@ impl App {
                 }
                 ProfileWizardAction::Submit { name, description, capabilities, secret_bindings, folder_bindings } => {
                     Some(self.do_create_profile(&name, &description, &capabilities, &secret_bindings, &folder_bindings))
+                }
+                ProfileWizardAction::PickerNeedsLoad { project_id, environment, path } => {
+                    load_req = Some((project_id, environment, path));
+                    None
                 }
                 ProfileWizardAction::None => None,
             };
@@ -696,52 +777,71 @@ impl App {
                     Err(e) => { self.toast(&format!("Error: {e}"), true); }
                 }
             }
+            load_req
+        } else {
+            None
+        };
+        if let Some((project_id, environment, path)) = profile_picker_load {
+            if let Some(ref cfg) = self.infisical_cfg.clone() {
+                let fj = next_job_id();
+                let nj = next_job_id();
+                if let Overlay::ProfileCreate(ref mut wiz) = self.overlay {
+                    if let Some((_, ref mut picker)) = wiz.picker {
+                        picker.set_pending_jobs(fj, nj);
+                    }
+                }
+                self.work.dispatch(WorkRequest::LoadSecretFolders { cfg: cfg.clone(), project_id: project_id.clone(), environment: environment.clone(), path: path.clone(), job_id: fj });
+                self.work.dispatch(WorkRequest::LoadSecretNames { cfg: cfg.clone(), project_id, environment, path, job_id: nj });
+            }
+        }
+        if handled_profile_create { return; }
+
+        // CapabilityCreate — two-step borrow to support dirty-tracking on cancel
+        let cap_action_with_dirty = if let Overlay::CapabilityCreate(ref mut wiz) = self.overlay {
+            let dirty = wiz.is_dirty();
+            Some((wiz.handle_key(code), dirty))
+        } else { None };
+        if let Some((action, is_dirty)) = cap_action_with_dirty {
+            match action {
+                CapWizardAction::Cancel => {
+                    if is_dirty { self.confirming_discard = true; } else { self.overlay = Overlay::None; }
+                }
+                CapWizardAction::Submit { name, description, command, args, risk, side_effect } => {
+                    match self.do_create_capability(&name, &description, &command, &args, &risk, &side_effect) {
+                        Ok(msg) => { self.overlay = Overlay::None; let _ = self.reload(); self.toast(&msg, false); }
+                        Err(e) => { self.toast(&format!("Error: {e}"), true); }
+                    }
+                }
+                CapWizardAction::None => {}
+            }
             return;
         }
 
-        let result: Option<Result<String>> = match &mut self.overlay {
-            Overlay::ProfileCreate(_) => None, // handled above
-            Overlay::CapabilityCreate(wiz) => {
-                let action = wiz.handle_key(code);
-                match action {
-                    CapWizardAction::Cancel => {
-                        self.overlay = Overlay::None;
-                        None
-                    }
-                    CapWizardAction::Submit { name, description, command, args, risk, side_effect } => {
-                        Some(self.do_create_capability(&name, &description, &command, &args, &risk, &side_effect))
-                    }
-                    CapWizardAction::None => None,
+        // PackCreate — two-step borrow; also dispatches async help probes
+        let pack_action_info = if let Overlay::PackCreate(ref mut wiz) = self.overlay {
+            let dirty = wiz.is_dirty();
+            Some((wiz.handle_key(code), dirty))
+        } else { None };
+        if let Some((action, is_dirty)) = pack_action_info {
+            match action {
+                PackWizardAction::Cancel => {
+                    if is_dirty { self.confirming_discard = true; } else { self.overlay = Overlay::None; }
                 }
+                PackWizardAction::Submit { name, description, author, preset, seed_command, capability_names } => {
+                    match self.do_create_pack(&name, &description, &author, preset, &seed_command, &capability_names) {
+                        Ok(msg) => { self.overlay = Overlay::None; let _ = self.reload(); self.toast(&msg, false); }
+                        Err(e) => { self.toast(&format!("Error: {e}"), true); }
+                    }
+                }
+                PackWizardAction::ParseHelpFor(commands) => {
+                    for cmd in commands {
+                        let job_id = next_job_id();
+                        self.work.dispatch(WorkRequest::ParseHelp { command: cmd, job_id });
+                    }
+                }
+                PackWizardAction::None => {}
             }
-            Overlay::PackCreate(wiz) => {
-                let action = wiz.handle_key(code);
-                match action {
-                    PackWizardAction::Cancel => {
-                        self.overlay = Overlay::None;
-                        None
-                    }
-                    PackWizardAction::Submit { name, description, author, preset, seed_command, capability_names } => {
-                        Some(self.do_create_pack(&name, &description, &author, preset, &seed_command, &capability_names))
-                    }
-                    PackWizardAction::None => None,
-                }
-            }
-            _ => None,
-        };
-
-        if let Some(res) = result {
-            match res {
-                Ok(msg) => {
-                    self.overlay = Overlay::None;
-                    let _ = self.reload();
-                    self.toast(&msg, false);
-                }
-                Err(e) => {
-                    // Don't close wizard — show error in it if possible
-                    self.toast(&format!("Error: {e}"), true);
-                }
-            }
+            return;
         }
     }
 

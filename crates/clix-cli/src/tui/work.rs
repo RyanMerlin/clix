@@ -18,6 +18,29 @@ pub enum WorkRequest {
         cfg: clix_core::state::InfisicalConfig,
         job_id: JobId,
     },
+    LoadSecretFolders {
+        cfg: clix_core::state::InfisicalConfig,
+        project_id: String,
+        environment: String,
+        path: String,
+        job_id: JobId,
+    },
+    LoadSecretNames {
+        cfg: clix_core::state::InfisicalConfig,
+        project_id: String,
+        environment: String,
+        path: String,
+        job_id: JobId,
+    },
+    ParseHelp {
+        command: String,
+        job_id: JobId,
+    },
+    ApproveReceipt {
+        id: uuid::Uuid,
+        approver: String,
+        job_id: JobId,
+    },
 }
 
 pub enum WorkResult {
@@ -32,6 +55,28 @@ pub enum WorkResult {
         job_id: JobId,
         ok: bool,
         latency_ms: u64,
+        error: Option<String>,
+    },
+    SecretFoldersLoaded {
+        job_id: JobId,
+        folders: Vec<String>,
+        error: Option<String>,
+    },
+    SecretNamesLoaded {
+        job_id: JobId,
+        names: Vec<String>,
+        error: Option<String>,
+    },
+    HelpParsed {
+        job_id: JobId,
+        command: String,
+        subcmds: Vec<clix_core::discovery::ParsedSubcommand>,
+        error: Option<String>,
+    },
+    ReceiptApproved {
+        job_id: JobId,
+        id: uuid::Uuid,
+        ok: bool,
         error: Option<String>,
     },
 }
@@ -69,6 +114,40 @@ impl WorkPool {
                     error: report.error,
                 });
             }
+            WorkRequest::LoadSecretFolders { cfg, project_id, environment, path, job_id } => {
+                match clix_core::secrets::list_infisical_folders(&cfg, &project_id, &environment, &path) {
+                    Ok(folders) => {
+                        let _ = tx.send(WorkResult::SecretFoldersLoaded { job_id, folders, error: None });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(WorkResult::SecretFoldersLoaded { job_id, folders: vec![], error: Some(e.to_string()) });
+                    }
+                }
+            }
+            WorkRequest::LoadSecretNames { cfg, project_id, environment, path, job_id } => {
+                match clix_core::secrets::list_infisical_secrets(&cfg, &project_id, &environment, &path) {
+                    Ok(names) => {
+                        let _ = tx.send(WorkResult::SecretNamesLoaded { job_id, names, error: None });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(WorkResult::SecretNamesLoaded { job_id, names: vec![], error: Some(e.to_string()) });
+                    }
+                }
+            }
+            WorkRequest::ParseHelp { command, job_id } => {
+                let subcmds = clix_core::discovery::parse_help(&command);
+                let _ = tx.send(WorkResult::HelpParsed { job_id, command, subcmds, error: None });
+            }
+            WorkRequest::ApproveReceipt { id, approver, job_id } => {
+                use clix_core::execution::broker_client::BrokerClient;
+                match BrokerClient::connect() {
+                    Ok(mut client) => match client.send_approve(id, approver, None) {
+                        Ok(_) => { let _ = tx.send(WorkResult::ReceiptApproved { job_id, id, ok: true, error: None }); }
+                        Err(e) => { let _ = tx.send(WorkResult::ReceiptApproved { job_id, id, ok: false, error: Some(e.to_string()) }); }
+                    },
+                    Err(e) => { let _ = tx.send(WorkResult::ReceiptApproved { job_id, id, ok: false, error: Some(format!("Broker unavailable: {e}")) }); }
+                }
+            }
         });
     }
 }
@@ -97,6 +176,24 @@ mod tests {
                 assert_eq!(jid, job_id);
                 assert!(!ok, "expected connection failure");
             }
+            _ => panic!("unexpected result variant"),
+        }
+    }
+
+    #[test]
+    fn parse_help_dispatches_and_returns() {
+        let pool = WorkPool::new();
+        let job_id = next_job_id();
+        // echo is always present and exits immediately
+        pool.dispatch(WorkRequest::ParseHelp { command: "echo".to_string(), job_id });
+        let result = pool.result_rx.recv_timeout(std::time::Duration::from_secs(10));
+        assert!(result.is_ok(), "no parse_help result arrived in time");
+        match result.unwrap() {
+            WorkResult::HelpParsed { job_id: jid, command, .. } => {
+                assert_eq!(jid, job_id);
+                assert_eq!(command, "echo");
+            }
+            _ => panic!("unexpected result variant"),
         }
     }
 }

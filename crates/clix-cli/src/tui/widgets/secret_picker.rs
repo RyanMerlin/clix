@@ -2,7 +2,6 @@ use crossterm::event::KeyCode;
 use ratatui::{prelude::*, widgets::*};
 use clix_core::manifest::capability::InfisicalRef;
 use clix_core::state::InfisicalConfig;
-use clix_core::secrets::{list_infisical_folders, list_infisical_secrets};
 use crate::tui::theme;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -30,6 +29,10 @@ pub struct SecretPicker {
     pub error: Option<String>,
     /// Set after a successful load attempt (even if empty)
     pub loaded: bool,
+    /// True while async folder/secret load is in flight
+    pub loading: bool,
+    pub pending_folders_job: Option<crate::tui::work::JobId>,
+    pub pending_names_job: Option<crate::tui::work::JobId>,
     /// Multi-selected entry indices
     pub selected: std::collections::HashSet<usize>,
     /// When Some(prefix), waiting for user to confirm folder-level bind with prefix
@@ -46,6 +49,9 @@ impl SecretPicker {
             cursor: 0,
             error: None,
             loaded: false,
+            loading: false,
+            pending_folders_job: None,
+            pending_names_job: None,
             selected: std::collections::HashSet::new(),
             folder_bind_prompt: None,
         }
@@ -59,44 +65,61 @@ impl SecretPicker {
         }
     }
 
-    /// Load entries for the current path. Blocking — call before first render or after navigation.
-    pub fn load(&mut self, cfg: &InfisicalConfig) {
+    /// Mark this picker as needing a load. Call from app.rs before showing the picker,
+    /// then dispatch LoadSecretFolders + LoadSecretNames work jobs and store job ids via
+    /// set_pending_jobs(). Results arrive via deliver_folders() / deliver_names() in tick().
+    pub fn mark_loading(&mut self) {
         self.error = None;
         self.loaded = false;
-        let path = self.current_path();
-        let mut entries: Vec<Entry> = vec![];
+        self.loading = true;
+        self.entries.clear();
+        self.pending_folders_job = None;
+        self.pending_names_job = None;
+    }
 
-        // Folders first
-        match list_infisical_folders(cfg, &self.project_id, &self.environment, &path) {
-            Ok(folders) => {
-                for name in folders {
-                    entries.push(Entry { kind: EntryKind::Folder, name });
-                }
-            }
-            Err(e) => {
-                self.error = Some(format!("Folder list failed: {e}"));
-                self.loaded = true;
-                return;
-            }
+    /// Store the job IDs that were dispatched for this picker's current path.
+    pub fn set_pending_jobs(&mut self, folders_job: crate::tui::work::JobId, names_job: crate::tui::work::JobId) {
+        self.pending_folders_job = Some(folders_job);
+        self.pending_names_job = Some(names_job);
+    }
+
+    /// Called by App::tick() when SecretFoldersLoaded arrives.
+    pub fn deliver_folders(&mut self, job_id: crate::tui::work::JobId, folders: Vec<String>, error: Option<String>) {
+        if self.pending_folders_job != Some(job_id) { return; }
+        self.pending_folders_job = None;
+        if let Some(e) = error {
+            self.error = Some(format!("Folder list failed: {e}"));
+            self.loading = self.pending_names_job.is_some();
+            if !self.loading { self.loaded = true; }
+            return;
         }
+        let folder_entries: Vec<Entry> = folders.into_iter()
+            .map(|name| Entry { kind: EntryKind::Folder, name })
+            .collect();
+        self.entries.retain(|e| e.kind != EntryKind::Folder);
+        let mut combined = folder_entries;
+        combined.extend(self.entries.drain(..));
+        self.entries = combined;
+        self.loading = self.pending_names_job.is_some();
+        if !self.loading { self.loaded = true; self.cursor = 0; }
+    }
 
-        // Then secrets
-        match list_infisical_secrets(cfg, &self.project_id, &self.environment, &path) {
-            Ok(secrets) => {
-                for name in secrets {
-                    entries.push(Entry { kind: EntryKind::Secret, name });
-                }
-            }
-            Err(e) => {
-                self.error = Some(format!("Secret list failed: {e}"));
-                self.loaded = true;
-                return;
-            }
+    /// Called by App::tick() when SecretNamesLoaded arrives.
+    pub fn deliver_names(&mut self, job_id: crate::tui::work::JobId, names: Vec<String>, error: Option<String>) {
+        if self.pending_names_job != Some(job_id) { return; }
+        self.pending_names_job = None;
+        if let Some(e) = error {
+            self.error = Some(format!("Secret list failed: {e}"));
+            self.loading = self.pending_folders_job.is_some();
+            if !self.loading { self.loaded = true; }
+            return;
         }
-
-        self.entries = entries;
-        self.cursor = 0;
-        self.loaded = true;
+        self.entries.retain(|e| e.kind != EntryKind::Secret);
+        for name in names {
+            self.entries.push(Entry { kind: EntryKind::Secret, name });
+        }
+        self.loading = self.pending_folders_job.is_some();
+        if !self.loading { self.loaded = true; self.cursor = 0; }
     }
 
     /// Returns a bound `InfisicalRef` if the cursor is on a secret and Enter was pressed.
@@ -119,8 +142,10 @@ impl SecretPicker {
                 if !self.path_stack.is_empty() {
                     self.path_stack.pop();
                     self.selected.clear();
-                    if let Some(cfg) = cfg { self.load(cfg); }
+                    self.mark_loading();
+                    return SecretPickerAction::NeedsLoad;
                 }
+                let _ = cfg; // not needed for sync load anymore
             }
             // space: toggle multi-select for current entry
             KeyCode::Char(' ') => {
@@ -198,7 +223,8 @@ impl SecretPicker {
                         EntryKind::Folder => {
                             self.path_stack.push(entry.name.clone());
                             self.selected.clear();
-                            if let Some(cfg) = cfg { self.load(cfg); }
+                            self.mark_loading();
+                            return SecretPickerAction::NeedsLoad;
                         }
                         EntryKind::Secret => {
                             let path = if self.path_stack.is_empty() {
@@ -265,9 +291,14 @@ impl SecretPicker {
                 Paragraph::new(Span::styled(err.as_str(), theme::danger())),
                 chunks[1],
             );
-        } else if !self.loaded {
+        } else if self.loading || !self.loaded {
+            let frame = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| (d.subsec_millis() / 250) as usize % 4)
+                .unwrap_or(0);
+            let spinner = ["⠋", "⠙", "⠹", "⠸"][frame];
             f.render_widget(
-                Paragraph::new(Span::styled("  Loading …", theme::muted())),
+                Paragraph::new(Span::styled(format!("  {} Loading…", spinner), theme::muted())),
                 chunks[1],
             );
         } else {
@@ -337,6 +368,8 @@ pub enum SecretPickerAction {
     None,
     /// Legacy: cancel / esc
     Cancelled,
+    /// Path changed — caller must dispatch LoadSecretFolders + LoadSecretNames for current_path()
+    NeedsLoad,
     /// Single secret selected
     Selected(InfisicalRef),
     /// Multiple secrets selected via space+enter
