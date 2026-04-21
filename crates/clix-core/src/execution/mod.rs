@@ -103,6 +103,9 @@ pub fn run_capability(registry: &CapabilityRegistry, policy: &PolicyBundle, infi
                 token_mint_id = dispatch.token_mint_id.map(|u| u.to_string());
                 (dispatch.exit_code, dispatch.stdout, dispatch.stderr, dispatch.isolation_tier)
             } else {
+                #[cfg(target_os = "macos")]
+                let sub = backends::run_subprocess_sandboxed(command, &expanded, &cwd, &secrets, &cap.side_effect_class)?;
+                #[cfg(not(target_os = "macos"))]
                 let sub = run_subprocess(command, &expanded, &cwd, &secrets)?;
                 (sub.exit_code, sub.stdout, sub.stderr, crate::manifest::capability::IsolationTier::None)
             };

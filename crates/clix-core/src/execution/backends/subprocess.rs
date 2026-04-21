@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use crate::error::{ClixError, Result};
+#[cfg(target_os = "macos")]
+use crate::manifest::capability::SideEffectClass;
 
 #[derive(Debug, Clone)]
 pub struct SubprocessResult {
@@ -36,6 +38,27 @@ pub fn run_subprocess(command: &str, args: &[String], cwd: &PathBuf, secrets: &H
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
     })
+}
+
+/// Run a subprocess, wrapping it in `sandbox-exec` on macOS when the capability's side
+/// effect class is `None` or `ReadOnly`. Falls back to a direct spawn when sandbox-exec is
+/// unavailable or the class doesn't warrant wrapping.
+#[cfg(target_os = "macos")]
+pub fn run_subprocess_sandboxed(
+    command: &str,
+    args: &[String],
+    cwd: &PathBuf,
+    secrets: &HashMap<String, String>,
+    side_effect_class: &SideEffectClass,
+) -> Result<SubprocessResult> {
+    if let Some(profile) = crate::sandbox::macos::profile_for(side_effect_class) {
+        if crate::sandbox::macos::sandbox_exec_available() {
+            let mut wrapped = vec!["-p".to_string(), profile.to_string(), command.to_string()];
+            wrapped.extend_from_slice(args);
+            return run_subprocess("/usr/bin/sandbox-exec", &wrapped, cwd, secrets);
+        }
+    }
+    run_subprocess(command, args, cwd, secrets)
 }
 
 pub fn expand_secret_refs(args: &[String], secrets: &HashMap<String, String>) -> Vec<String> {

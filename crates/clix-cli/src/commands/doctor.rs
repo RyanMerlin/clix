@@ -57,12 +57,14 @@ pub fn run(json: bool) -> Result<()> {
     );
 
     let sandbox_mode = if enforced { "enforced" } else { "policy-only" };
+    let sandbox_detail = sandbox_detail(enforced);
     if json {
         print_json(&serde_json::json!({
             "broker_up": broker_label.starts_with('✓'),
             "broker_status": broker_status_str,
             "sandbox": sandbox_mode,
             "sandbox_enforced": enforced,
+            "sandbox_detail": sandbox_detail,
             "active_profile": active_profile,
             "pack_count": pack_count,
             "capability_count": cap_count,
@@ -78,7 +80,7 @@ pub fn run(json: bool) -> Result<()> {
     } else {
         print_kv(&[
             ("broker",       format!("{broker_label}: {broker_status_str}")),
-            ("sandbox",      sandbox_mode.to_string()),
+            ("sandbox",      format!("{sandbox_mode} ({sandbox_detail})")),
             ("profile",      active_profile),
             ("packs",        pack_count.to_string()),
             ("capabilities", cap_count.to_string()),
@@ -88,6 +90,18 @@ pub fn run(json: bool) -> Result<()> {
         ]);
     }
     Ok(())
+}
+
+fn sandbox_detail(enforced: bool) -> String {
+    #[cfg(target_os = "linux")]
+    { if enforced { "landlock".to_string() } else { "landlock unavailable".to_string() } }
+    #[cfg(target_os = "macos")]
+    {
+        let available = clix_core::sandbox::macos::sandbox_exec_available();
+        if available { "sandbox-exec".to_string() } else { "sandbox-exec not found".to_string() }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    { "not supported on this platform".to_string() }
 }
 
 fn check_broker() -> (&'static str, String) {
