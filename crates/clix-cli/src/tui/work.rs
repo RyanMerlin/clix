@@ -11,8 +11,7 @@ pub fn next_job_id() -> JobId {
 
 pub enum WorkRequest {
     GitPoll { home: std::path::PathBuf },
-    GitPush { home: std::path::PathBuf, branch: String },
-    GitPull { home: std::path::PathBuf, branch: String },
+    GitSync { home: std::path::PathBuf, branch: String },
     TestInfisical {
         cfg: clix_core::state::InfisicalConfig,
         job_id: JobId,
@@ -53,7 +52,6 @@ pub enum WorkResult {
         behind: usize,
     },
     GitSynced {
-        push: bool,
         ok: bool,
         message: String,
     },
@@ -136,16 +134,11 @@ impl WorkPool {
                 let _ = gs::status(&home); // warm cache
                 let _ = tx.send(WorkResult::GitPolled { configured, dirty, ahead, behind });
             }
-            WorkRequest::GitPush { home, branch } => {
+            WorkRequest::GitSync { home, branch } => {
+                // Full sync: stage all → commit → pull --rebase → push
                 match clix_core::storage::git::push(&home, &branch) {
-                    Ok(msg) => { let _ = tx.send(WorkResult::GitSynced { push: true, ok: true, message: msg }); }
-                    Err(e) => { let _ = tx.send(WorkResult::GitSynced { push: true, ok: false, message: e.to_string() }); }
-                }
-            }
-            WorkRequest::GitPull { home, branch } => {
-                match clix_core::storage::git::pull(&home, &branch) {
-                    Ok(msg) => { let _ = tx.send(WorkResult::GitSynced { push: false, ok: true, message: msg }); }
-                    Err(e) => { let _ = tx.send(WorkResult::GitSynced { push: false, ok: false, message: e.to_string() }); }
+                    Ok(msg) => { let _ = tx.send(WorkResult::GitSynced { ok: true, message: msg }); }
+                    Err(e) => { let _ = tx.send(WorkResult::GitSynced { ok: false, message: e.to_string() }); }
                 }
             }
             WorkRequest::TestInfisical { cfg, job_id } => {

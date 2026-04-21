@@ -137,22 +137,16 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
         app.active_profiles.join(", ")
     };
 
-    // Git badge: only show when configured and there's something to report
+    // Git badge: binary — either "out of sync" (amber) or hidden (clean)
     let git_badge: Option<(String, ratatui::style::Style)> = app.git_badge.as_ref().and_then(|b| {
         if !b.configured { return None; }
         if app.git_syncing {
             return Some((" ⟳ syncing ".to_string(), theme::dim()));
         }
         if b.dirty > 0 || b.ahead > 0 || b.behind > 0 {
-            let mut parts = Vec::new();
-            if b.behind > 0 { parts.push(format!("↓{}", b.behind)); }
-            if b.ahead  > 0 { parts.push(format!("↑{}", b.ahead)); }
-            if b.dirty  > 0 { parts.push(format!("~{}", b.dirty)); }
-            let label = format!(" git:{} ", parts.join(" "));
-            let style = if b.dirty > 0 { theme::warn() } else { theme::ok() };
-            Some((label, style))
+            Some((" ● out of sync ".to_string(), theme::warn()))
         } else {
-            None // clean + no divergence — no badge needed
+            None // synced — no badge (no noise when everything is fine)
         }
     });
 
@@ -257,10 +251,11 @@ fn render_legend(f: &mut Frame, app: &App, area: Rect) {
         ]),
         Screen::Dashboard => legend_spans(&[
             ("0-7", "switch"), ("tab", "next"), ("n", "new"), ("r", "reload"),
-            ("^P", "git push"), ("^L", "git pull"), ("?", "help"), ("q", "quit"),
+            ("^G", "sync"), ("?", "help"), ("q", "quit"),
         ]),
         Screen::Secrets => legend_spans(&[
-            ("m", "accounts"), ("e", "edit"), ("t", "test"), ("b", "browse"), ("r", "reset"), ("?", "help"), ("q", "quit"),
+            ("m", "accounts"), ("e", "edit"), ("t", "test"), ("b", "browse"),
+            ("^G", "sync"), ("?", "help"), ("q", "quit"),
         ]),
         Screen::Receipts => legend_spans(&[
             ("↑↓", "move"), ("A", "approve pending"), ("r", "reload"), ("q", "quit"),
@@ -371,6 +366,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         help_line("n", "new (create wizard)"),
         help_line("i", "install pack"),
         help_line("r", "reload all"),
+        help_line("ctrl+g", "sync with git remote"),
         Line::from(""),
         Line::from(Span::styled("  Profiles", theme::accent())),
         help_line("enter", "toggle active"),
