@@ -140,6 +140,7 @@ pub struct App {
     pub caps_view: CapView,
     pub caps_cursor: usize,
     pub packs_cursor: usize,
+    pub receipts_cursor: usize,
     pub should_quit: bool,
     // async work
     pub work: WorkPool,
@@ -169,12 +170,8 @@ impl App {
         let profiles = load_all_profiles(&state);
         let active_profiles = state.config.active_profiles.clone();
         let infisical_cfg = state.config.infisical.clone();
-        // Load pending approvals from receipts DB
-        let pending_approval_ids = clix_core::receipts::ReceiptStore::open(&state.receipts_db)
-            .ok()
-            .and_then(|store| store.list(100, Some("pending_approval")).ok())
-            .map(|receipts| receipts.iter().map(|r| r.id.to_string()).collect())
-            .unwrap_or_default();
+        // Load receipts from DB for the Receipts screen and pending-approval banner
+        let (receipts_preview, pending_approval_ids) = load_receipts(&state.receipts_db);
         Ok(Self {
             screen: Screen::Dashboard,
             overlay: Overlay::None,
@@ -182,7 +179,7 @@ impl App {
             active_profiles,
             registry,
             packs,
-            receipts_preview: vec![],
+            receipts_preview,
             infisical_cfg,
             connectivity_report: None,
             broker_status: None,
@@ -191,6 +188,7 @@ impl App {
             caps_view: CapView::Namespaces,
             caps_cursor: 0,
             packs_cursor: 0,
+            receipts_cursor: 0,
             should_quit: false,
             work: WorkPool::new(),
             dropped_jobs: std::collections::HashSet::new(),
@@ -209,10 +207,12 @@ impl App {
         self.packs = new.packs;
         self.infisical_cfg = new.infisical_cfg;
         self.pending_approval_ids = new.pending_approval_ids;
+        self.receipts_preview = new.receipts_preview;
         self.profiles_cursor = 0;
         self.caps_view = CapView::Namespaces;
         self.caps_cursor = 0;
         self.packs_cursor = 0;
+        self.receipts_cursor = 0;
         Ok(())
     }
 
@@ -221,6 +221,7 @@ impl App {
             Screen::Profiles => self.profiles_cursor,
             Screen::Capabilities => self.caps_cursor,
             Screen::Packs => self.packs_cursor,
+            Screen::Receipts => self.receipts_cursor,
             _ => 0,
         }
     }
@@ -230,6 +231,7 @@ impl App {
             Screen::Profiles => &mut self.profiles_cursor,
             Screen::Capabilities => &mut self.caps_cursor,
             Screen::Packs => &mut self.packs_cursor,
+            Screen::Receipts => &mut self.receipts_cursor,
             _ => &mut self.profiles_cursor,  // unused placeholder
         }
     }
@@ -876,6 +878,7 @@ impl App {
                 CapView::Detail(_) => 0,
             },
             Screen::Packs => self.packs.len(),
+            Screen::Receipts => self.receipts_preview.len(),
             _ => 0,
         }
     }
@@ -1321,4 +1324,38 @@ fn load_all_profiles(state: &ClixState) -> Vec<ProfileManifest> {
     let mut profiles: Vec<ProfileManifest> = by_name.into_values().collect();
     profiles.sort_by(|a, b| a.name.cmp(&b.name));
     profiles
+}
+
+fn load_receipts(db: &std::path::Path) -> (Vec<ReceiptRow>, Vec<String>) {
+    use clix_core::receipts::{ReceiptStore, ReceiptStatus};
+    let store = match ReceiptStore::open(db) {
+        Ok(s) => s,
+        Err(_) => return (vec![], vec![]),
+    };
+    let all = store.list(200, None).unwrap_or_default();
+    let pending: Vec<String> = all.iter()
+        .filter(|r| matches!(r.status, ReceiptStatus::PendingApproval))
+        .map(|r| r.id.to_string())
+        .collect();
+    let rows = all.into_iter().map(|r| {
+        let time = r.created_at.format("%m-%d %H:%M:%S").to_string();
+        let outcome = match r.status {
+            ReceiptStatus::Succeeded => "✓",
+            ReceiptStatus::Failed => "✗",
+            ReceiptStatus::Denied => "⊘",
+            ReceiptStatus::PendingApproval => "…",
+            ReceiptStatus::ApprovalDenied => "✗",
+        }.to_string();
+        let profile = r.context.get("profile")
+            .and_then(|v| v.as_str())
+            .unwrap_or("—")
+            .to_string();
+        let latency = r.execution.as_ref()
+            .and_then(|e| e.get("latencyMs"))
+            .and_then(|v| v.as_u64())
+            .map(|ms| format!("{ms}ms"))
+            .unwrap_or_default();
+        ReceiptRow { time, capability: r.capability, profile, outcome, latency }
+    }).collect();
+    (rows, pending)
 }

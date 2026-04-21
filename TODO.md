@@ -43,22 +43,25 @@
 ### Dirty-tracking (done)
 - [x] CapabilityCreate and PackCreate: two-step borrow pattern; Cancel arms check `is_dirty()` and route through `confirming_discard`
 
-### Navigation polish
-- [ ] Sidebar focus: `q` should prompt quit only if no dirty overlay exists.
-- [ ] Content Esc with `confirming_discard` active should dismiss the confirm dialog, not also move focus to sidebar.
-- [ ] Number key shortcuts in sidebar focus should also set `Focus::Content` (already done for digits; verify BackTab/Tab behavior in sidebar focus is intuitive).
+### Navigation polish (done)
+- [x] Sidebar focus: `q` can only fire when no overlay is open — correct behavior already.
+- [x] Content Esc with `confirming_discard` active dismisses the dialog only — overlay stays open so next Esc re-routes to handler, not sidebar.
+- [x] Tab/BackTab cycle sidebar selection without entering content — correct; Enter/→ enters. Number keys already set Focus::Content.
 
-### Receipts and Workflows screens
-- [ ] Receipts screen (`CLIX_TUI_EXPERIMENTAL=1`) — render real receipt data from `ReceiptStore`; make `[A]pprove` async via `WorkPool`.
+### Receipts screen (done)
+- [x] Receipts screen — loads up to 200 receipts from `ReceiptStore`, table with time/capability/profile/outcome columns, cursor navigation, `[A]pprove` pending via WorkPool, `r` reloads. Removed from STUB_SCREENS.
+
+### Workflows screen
 - [ ] Workflows screen — execute a workflow from TUI; show step-by-step progress.
 
 ---
 
 ## Next: Platform & distribution
 
-### macOS sandbox (M9)
-- [ ] **SBPL sandbox profile** for macOS subprocess capabilities — designed in architecture; not yet implemented. Replace the current "honest stub" with `sandbox-exec` subprocess wrapping using a generated profile. This gives macOS users real filesystem/network restrictions without full Linux namespaces.
-- [ ] `clix doctor` should report the SBPL profile path and whether `sandbox-exec` is available.
+### macOS sandbox (done)
+- [x] `sandbox/macos.rs` — `sandbox_exec_available()`, `profile_for(SideEffectClass)`, `apply_sandbox()` no-op
+- [x] `run_subprocess_sandboxed()` in `execution/backends/subprocess.rs` wraps readOnly/none capabilities in `sandbox-exec -p <inline-profile>` on macOS
+- [x] `clix doctor` reports sandbox mechanism: `landlock` on Linux, `sandbox-exec` / `sandbox-exec not found` on macOS
 
 ### Install & packaging
 - [ ] **Homebrew formula** — `clix`, `clix-broker`, `clix-shim` + packs in a single formula; `clix init` becomes a post-install step.

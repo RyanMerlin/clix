@@ -162,7 +162,7 @@ static SIDEBAR_ITEMS: &[(&str, &str)] = &[
     ("7", "Secrets"),
 ];
 
-static STUB_SCREENS: &[Screen] = &[Screen::Receipts, Screen::Workflows];
+static STUB_SCREENS: &[Screen] = &[Screen::Workflows];
 
 fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
     let active_idx = app.screen.sidebar_index();
@@ -213,6 +213,7 @@ fn render_content(f: &mut Frame, app: &App, area: Rect) {
         Screen::Packs => screens::packs::render(f, app, area),
         Screen::Secrets => screens::secrets::render(f, app, area),
         Screen::Broker => screens::broker::render(f, app, area),
+        Screen::Receipts => screens::receipts::render(f, app, area),
         _ => render_stub(f, app, area),
     }
 }
@@ -286,6 +287,9 @@ fn render_legend(f: &mut Frame, app: &App, area: Rect) {
         ]),
         Screen::Secrets => legend_spans(&[
             ("e", "edit"), ("t", "test"), ("b", "browse"), ("r", "reset"), ("?", "help"), ("q", "quit"),
+        ]),
+        Screen::Receipts => legend_spans(&[
+            ("↑↓", "move"), ("A", "approve pending"), ("r", "reload"), ("q", "quit"),
         ]),
         _ => legend_spans(&[
             ("0-7", "switch"), ("tab", "next"), ("n", "new"), ("r", "reload"), ("?", "help"), ("q", "quit"),
