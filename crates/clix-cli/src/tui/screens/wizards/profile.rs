@@ -472,8 +472,10 @@ impl ProfileWizard {
             ProfileWizardStep::Confirm => self.render_confirm(f, inner),
         }
 
-        // Picker sub-overlay on top of everything
-        if let Some((_, ref picker)) = self.picker {
+        // Tree picker sub-overlay (preferred) or flat picker fallback
+        if let Some((_, ref tree)) = self.tree_picker {
+            tree.render(f, area);
+        } else if let Some((_, ref picker)) = self.picker {
             picker.render(f, area);
         }
         // Env input sub-overlay
