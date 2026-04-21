@@ -91,10 +91,6 @@ impl FieldInput {
         self.value.len()
     }
 
-    /// Returns (before_cursor, after_cursor) for rendering with a block cursor.
-    pub fn split_at_cursor(&self) -> (&str, &str) {
-        (&self.value[..self.cursor], &self.value[self.cursor..])
-    }
 }
 
 /// A cycling select field (← / → or Space to cycle through options).

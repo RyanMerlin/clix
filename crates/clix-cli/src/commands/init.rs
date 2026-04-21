@@ -2,7 +2,6 @@ use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
 use clix_core::state::{ClixConfig, ClixState, home_dir};
 use clix_core::packs::seed::seed_builtin_packs;
-use chrono::Utc;
 
 /// Write a `.mcp.json` at `project_dir` (defaults to cwd) for Claude Code.
 ///

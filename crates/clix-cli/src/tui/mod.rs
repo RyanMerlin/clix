@@ -162,15 +162,12 @@ static SIDEBAR_ITEMS: &[(&str, &str)] = &[
     ("7", "Secrets"),
 ];
 
-static STUB_SCREENS: &[Screen] = &[Screen::Workflows];
-
 fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
     let active_idx = app.screen.sidebar_index();
     let sidebar_focused = app.focus == Focus::Sidebar && !app.overlay.is_open();
 
     let items: Vec<ListItem> = SIDEBAR_ITEMS.iter().enumerate().map(|(i, (_key, label))| {
         let is_active = i == active_idx;
-        let is_stub = STUB_SCREENS.contains(&Screen::from_index(i));
 
         if is_active && sidebar_focused {
             ListItem::new(Line::from(vec![
@@ -181,11 +178,6 @@ fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
             ListItem::new(Line::from(vec![
                 Span::styled("▸ ", theme::muted()),
                 Span::styled(*label, theme::dim()),
-            ]))
-        } else if is_stub {
-            ListItem::new(Line::from(vec![
-                Span::styled("  ", theme::inactive()),
-                Span::styled(*label, theme::inactive()),
             ]))
         } else {
             ListItem::new(Line::from(vec![
@@ -214,53 +206,8 @@ fn render_content(f: &mut Frame, app: &App, area: Rect) {
         Screen::Secrets => screens::secrets::render(f, app, area),
         Screen::Broker => screens::broker::render(f, app, area),
         Screen::Receipts => screens::receipts::render(f, app, area),
-        _ => render_stub(f, app, area),
+        Screen::Workflows => screens::workflows::render(f, app, area),
     }
-}
-
-fn render_stub(f: &mut Frame, app: &App, area: Rect) {
-    let name = match app.screen {
-        Screen::Receipts => "Receipts",
-        Screen::Workflows => "Workflows",
-        Screen::Broker => "Broker",
-        _ => "",
-    };
-    let experimental = std::env::var("CLIX_TUI_EXPERIMENTAL").is_ok();
-    let lines = if experimental {
-        vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                format!("  {} — experimental preview (CLIX_TUI_EXPERIMENTAL=1)", name),
-                theme::muted(),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "  This screen is incomplete. Data shown may be incorrect.",
-                theme::inactive(),
-            )),
-        ]
-    } else {
-        vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                format!("  {} — not available in this release", name),
-                theme::muted(),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "  Use the CLI: clix receipts list --json",
-                theme::inactive(),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "  Set CLIX_TUI_EXPERIMENTAL=1 to access the in-progress preview.",
-                theme::dim(),
-            )),
-        ]
-    };
-    let para = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).border_style(theme::border_dim()));
-    f.render_widget(para, area);
 }
 
 // ─── legend ───────────────────────────────────────────────────────────────────
@@ -291,8 +238,8 @@ fn render_legend(f: &mut Frame, app: &App, area: Rect) {
         Screen::Receipts => legend_spans(&[
             ("↑↓", "move"), ("A", "approve pending"), ("r", "reload"), ("q", "quit"),
         ]),
-        _ => legend_spans(&[
-            ("0-7", "switch"), ("tab", "next"), ("n", "new"), ("r", "reload"), ("?", "help"), ("q", "quit"),
+        Screen::Workflows => legend_spans(&[
+            ("↑↓", "move"), ("r", "reload"), ("q", "quit"),
         ]),
     };
 

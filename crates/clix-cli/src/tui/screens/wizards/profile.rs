@@ -1,6 +1,6 @@
 use crossterm::event::KeyCode;
 use ratatui::{prelude::*, widgets::*};
-use clix_core::manifest::capability::{CredentialSource, InfisicalRef, RiskLevel, SideEffectClass};
+use clix_core::manifest::capability::{CredentialSource, RiskLevel, SideEffectClass};
 use clix_core::manifest::profile::{ProfileManifest, ProfileSecretBinding, ProfileFolderBinding};
 use clix_core::registry::CapabilityRegistry;
 use clix_core::state::InfisicalConfig;

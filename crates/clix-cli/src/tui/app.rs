@@ -1,9 +1,9 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use clix_core::loader::build_registry;
+use clix_core::loader::{build_registry, build_workflow_registry};
 use clix_core::manifest::pack::PackManifest;
 use clix_core::manifest::profile::{ProfileManifest, ProfileSecretBinding};
-use clix_core::registry::CapabilityRegistry;
+use clix_core::registry::{CapabilityRegistry, WorkflowRegistry};
 use clix_core::state::{home_dir, ClixState};
 use clix_core::manifest::loader::load_dir;
 use clix_core::manifest::capability::{
@@ -130,6 +130,7 @@ pub struct App {
     pub registry: CapabilityRegistry,
     pub packs: Vec<PackManifest>,
     pub receipts_preview: Vec<ReceiptRow>,
+    pub workflow_registry: WorkflowRegistry,
     pub infisical_cfg: Option<clix_core::state::InfisicalConfig>,
     pub connectivity_report: Option<clix_core::secrets::ConnectivityReport>,
     pub broker_status: Option<crate::tui::screens::broker::BrokerScreenState>,
@@ -141,6 +142,7 @@ pub struct App {
     pub caps_cursor: usize,
     pub packs_cursor: usize,
     pub receipts_cursor: usize,
+    pub workflows_cursor: usize,
     pub should_quit: bool,
     // async work
     pub work: WorkPool,
@@ -166,6 +168,7 @@ impl App {
             }
         }
         let registry = build_registry(&state)?;
+        let workflow_registry = build_workflow_registry(&state).unwrap_or_default();
         let packs = load_packs_from_dir(&state.packs_dir);
         let profiles = load_all_profiles(&state);
         let active_profiles = state.config.active_profiles.clone();
@@ -180,6 +183,7 @@ impl App {
             registry,
             packs,
             receipts_preview,
+            workflow_registry,
             infisical_cfg,
             connectivity_report: None,
             broker_status: None,
@@ -189,6 +193,7 @@ impl App {
             caps_cursor: 0,
             packs_cursor: 0,
             receipts_cursor: 0,
+            workflows_cursor: 0,
             should_quit: false,
             work: WorkPool::new(),
             dropped_jobs: std::collections::HashSet::new(),
@@ -208,20 +213,24 @@ impl App {
         self.infisical_cfg = new.infisical_cfg;
         self.pending_approval_ids = new.pending_approval_ids;
         self.receipts_preview = new.receipts_preview;
+        self.workflow_registry = new.workflow_registry;
         self.profiles_cursor = 0;
         self.caps_view = CapView::Namespaces;
         self.caps_cursor = 0;
         self.packs_cursor = 0;
         self.receipts_cursor = 0;
+        self.workflows_cursor = 0;
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn cursor(&self) -> usize {
         match self.screen {
             Screen::Profiles => self.profiles_cursor,
             Screen::Capabilities => self.caps_cursor,
             Screen::Packs => self.packs_cursor,
             Screen::Receipts => self.receipts_cursor,
+            Screen::Workflows => self.workflows_cursor,
             _ => 0,
         }
     }
@@ -232,6 +241,7 @@ impl App {
             Screen::Capabilities => &mut self.caps_cursor,
             Screen::Packs => &mut self.packs_cursor,
             Screen::Receipts => &mut self.receipts_cursor,
+            Screen::Workflows => &mut self.workflows_cursor,
             _ => &mut self.profiles_cursor,  // unused placeholder
         }
     }
@@ -255,7 +265,7 @@ impl App {
         let work_results: Vec<WorkResult> = self.work.result_rx.try_iter().collect();
         for result in work_results {
             match result {
-                WorkResult::ConnectivityPinged { ok, latency_ms, error, .. } => {
+                WorkResult::ConnectivityPinged { ok, latency_ms, error } => {
                     let msg = if ok {
                         format!("✓ Connected ({}ms)", latency_ms)
                     } else {
@@ -296,7 +306,7 @@ impl App {
                         }
                     }
                 }
-                WorkResult::HelpParsed { job_id, command, subcmds, error: _ } => {
+                WorkResult::HelpParsed { job_id, command, subcmds } => {
                     if let Overlay::PackCreate(ref mut wiz) = self.overlay {
                         wiz.deliver_help(job_id, &command, subcmds);
                     }
@@ -434,8 +444,7 @@ impl App {
             // t = test connectivity on Secrets screen (async)
             KeyCode::Char('t') if self.screen == Screen::Secrets => {
                 if let Some(ref cfg) = self.infisical_cfg.clone() {
-                    let job_id = next_job_id();
-                    self.work.dispatch(WorkRequest::PingConnectivity { cfg: cfg.clone(), job_id });
+                    self.work.dispatch(WorkRequest::PingConnectivity { cfg: cfg.clone() });
                     self.toast("Testing connectivity…", false);
                 } else {
                     self.toast("Infisical not configured — press e to configure", true);
@@ -879,6 +888,7 @@ impl App {
             },
             Screen::Packs => self.packs.len(),
             Screen::Receipts => self.receipts_preview.len(),
+            Screen::Workflows => self.workflow_registry.all().len(),
             _ => 0,
         }
     }
@@ -922,25 +932,6 @@ impl App {
         }
     }
 
-    fn handle_back(&mut self) {
-        match self.screen {
-            Screen::Capabilities => {
-                match self.caps_view.clone() {
-                    CapView::Detail(name) => {
-                        let ns = CapabilityRegistry::group_key(&name);
-                        self.caps_view = CapView::Listing(ns);
-                        self.caps_cursor = 0;
-                    }
-                    CapView::Listing(_) => {
-                        self.caps_view = CapView::Namespaces;
-                        self.caps_cursor = 0;
-                    }
-                    CapView::Namespaces => {}
-                }
-            }
-            _ => {}
-        }
-    }
 
     fn handle_back_or_sidebar(&mut self) {
         // For Capabilities: pop drill level first; once at top, return to sidebar
@@ -1192,6 +1183,7 @@ impl App {
         Ok(effective_cfg)
     }
 
+    #[allow(dead_code)]
     fn do_save_infisical_config(&self, site_url: &str, client_id: &str, client_secret: &str, project_id: &str, environment: &str) -> Result<String> {
         let state = ClixState::load(home_dir())?;
         // Try keyring first (Linux only)

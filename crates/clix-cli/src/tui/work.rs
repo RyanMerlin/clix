@@ -16,7 +16,6 @@ pub enum WorkRequest {
     },
     PingConnectivity {
         cfg: clix_core::state::InfisicalConfig,
-        job_id: JobId,
     },
     LoadSecretFolders {
         cfg: clix_core::state::InfisicalConfig,
@@ -52,7 +51,6 @@ pub enum WorkResult {
         error: Option<String>,
     },
     ConnectivityPinged {
-        job_id: JobId,
         ok: bool,
         latency_ms: u64,
         error: Option<String>,
@@ -71,7 +69,6 @@ pub enum WorkResult {
         job_id: JobId,
         command: String,
         subcmds: Vec<clix_core::discovery::ParsedSubcommand>,
-        error: Option<String>,
     },
     ReceiptApproved {
         job_id: JobId,
@@ -105,10 +102,9 @@ impl WorkPool {
                     error: report.error,
                 });
             }
-            WorkRequest::PingConnectivity { cfg, job_id } => {
+            WorkRequest::PingConnectivity { cfg } => {
                 let report = clix_core::secrets::test_connectivity(&cfg);
                 let _ = tx.send(WorkResult::ConnectivityPinged {
-                    job_id,
                     ok: report.auth_ok,
                     latency_ms: report.latency_ms,
                     error: report.error,
@@ -136,7 +132,7 @@ impl WorkPool {
             }
             WorkRequest::ParseHelp { command, job_id } => {
                 let subcmds = clix_core::discovery::parse_help(&command);
-                let _ = tx.send(WorkResult::HelpParsed { job_id, command, subcmds, error: None });
+                let _ = tx.send(WorkResult::HelpParsed { job_id, command, subcmds });
             }
             WorkRequest::ApproveReceipt { id, approver, job_id } => {
                 use clix_core::execution::broker_client::BrokerClient;

@@ -1,11 +1,9 @@
 use ratatui::style::{Color, Modifier, Style};
 
 // Primary accent — rust orange
-pub const ACCENT: Color = Color::Rgb(206, 66, 43);
 pub const ACCENT_BRIGHT: Color = Color::Rgb(231, 91, 42);
 
 // Neutral chrome
-pub const BG: Color = Color::Reset;
 pub const BORDER: Color = Color::Rgb(80, 80, 80);
 pub const BORDER_DIM: Color = Color::Rgb(55, 55, 55);
 pub const TEXT: Color = Color::White;

@@ -33,12 +33,13 @@ use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use uuid::Uuid;
 use clix_core::execution::worker_protocol::{BrokerMintRequest, BrokerMintResponse};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 const DEFAULT_SOCKET_PATH: &str = "/tmp/clix-broker.sock";
 
 // ─── Approval state machine ───────────────────────────────────────────────────
 
+#[allow(dead_code)]
 enum ApprovalState {
     Pending {
         capability: String,
@@ -95,7 +96,7 @@ fn main() {
             }
             unsafe { libc::exit(0) };
         }
-        libc::signal(libc::SIGTERM, on_sigterm as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, on_sigterm as extern "C" fn(libc::c_int) as *const () as libc::sighandler_t);
     }
 
     // Remove stale socket

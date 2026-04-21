@@ -98,7 +98,7 @@ fn sandbox_detail(enforced: bool) -> String {
     #[cfg(target_os = "macos")]
     {
         let available = clix_core::sandbox::macos::sandbox_exec_available();
-        if available { "sandbox-exec".to_string() } else { "sandbox-exec not found".to_string() }
+        if available { "sandbox-exec (BETA)".to_string() } else { "sandbox-exec not found".to_string() }
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     { "not supported on this platform".to_string() }

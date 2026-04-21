@@ -22,6 +22,7 @@ pub struct InfisicalSetupState {
     pub status: Option<String>,
     pub status_is_error: bool,
     pub submit_state: SubmitState,
+    #[allow(dead_code)]
     pub keyring_used: bool,
 }
 

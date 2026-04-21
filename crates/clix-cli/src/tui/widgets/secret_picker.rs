@@ -35,8 +35,6 @@ pub struct SecretPicker {
     pub pending_names_job: Option<crate::tui::work::JobId>,
     /// Multi-selected entry indices
     pub selected: std::collections::HashSet<usize>,
-    /// When Some(prefix), waiting for user to confirm folder-level bind with prefix
-    pub folder_bind_prompt: Option<String>,
 }
 
 impl SecretPicker {
@@ -53,7 +51,6 @@ impl SecretPicker {
             pending_folders_job: None,
             pending_names_job: None,
             selected: std::collections::HashSet::new(),
-            folder_bind_prompt: None,
         }
     }
 
@@ -373,6 +370,7 @@ pub enum SecretPickerAction {
     /// Single secret selected
     Selected(InfisicalRef),
     /// Multiple secrets selected via space+enter
+    #[allow(dead_code)]
     SelectedMany(Vec<InfisicalRef>),
     /// Folder-level bind (F key on a folder entry)
     SelectedFolder {

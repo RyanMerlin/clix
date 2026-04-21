@@ -11,8 +11,9 @@ use crate::execution::worker_registry::WorkerRegistry;
 use crate::execution::worker_protocol::{WorkerRequest, WorkerEvent};
 #[cfg(not(target_os = "linux"))]
 use super::subprocess::run_subprocess;
-use uuid::Uuid;
+#[cfg(not(target_os = "linux"))]
 use tracing::warn;
+use uuid::Uuid;
 
 pub struct IsolatedDispatch {
     pub exit_code: i32,

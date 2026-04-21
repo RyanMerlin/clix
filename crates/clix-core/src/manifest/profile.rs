@@ -2,21 +2,6 @@ use serde::{Deserialize, Deserializer, Serialize};
 use chrono::{DateTime, Utc};
 use super::capability::{CredentialSource, IsolationTier};
 
-/// Deserialize a capability entry that is either a plain string name
-/// or a full capability object (legacy format) — we only keep the name.
-fn deser_cap_name<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
-    let v = serde_json::Value::deserialize(d)?;
-    match v {
-        serde_json::Value::String(s) => Ok(s),
-        serde_json::Value::Object(m) => m
-            .get("name")
-            .and_then(|n| n.as_str())
-            .map(|s| s.to_string())
-            .ok_or_else(|| serde::de::Error::custom("capability object missing 'name' field")),
-        _ => Err(serde::de::Error::custom("expected string or object for capability")),
-    }
-}
-
 fn deser_cap_list<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
     struct CapListVisitor;
     impl<'de> serde::de::Visitor<'de> for CapListVisitor {

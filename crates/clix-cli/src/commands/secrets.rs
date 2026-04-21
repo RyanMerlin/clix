@@ -125,7 +125,7 @@ fn cmd_test(state: &ClixState) -> Result<()> {
     Ok(())
 }
 
-fn cmd_set(state: &ClixState, site_url: Option<String>, project_id: Option<String>, env: String, from_stdin: bool) -> Result<()> {
+fn cmd_set(_state: &ClixState, site_url: Option<String>, project_id: Option<String>, env: String, from_stdin: bool) -> Result<()> {
     let (client_id, client_secret) = if from_stdin {
         let mut line1 = String::new();
         let mut line2 = String::new();

@@ -6,7 +6,7 @@ mod tui;
 
 use anyhow::Result;
 use clap::FromArgMatches;
-use cli::{Cli, Commands, CapabilitiesCmd, WorkflowCmd, ProfileCmd, ReceiptsCmd, PackCmd, ShimCmd, McpCmd, ToolsCmd, BrokerCmd};
+use cli::{Cli, Commands, CapabilitiesCmd, WorkflowCmd, ProfileCmd, ReceiptsCmd, PackCmd, ShimCmd, McpCmd, ToolsCmd};
 #[allow(unused_imports)]
 use commands::approve;
 

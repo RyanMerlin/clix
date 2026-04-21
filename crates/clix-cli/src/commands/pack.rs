@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::path::Path;
 use clix_core::manifest::pack::PackManifest;
 use clix_core::packs::{
-    bundle_pack, bundle_pack_signed, diff_pack, discover_pack, install_pack, install_pack_verified,
+    bundle_pack_signed, diff_pack, discover_pack, install_pack_verified,
     onboard_cli, publish_pack, scaffold_pack, validate_pack,
 };
 use clix_core::packs::scaffold::Preset;

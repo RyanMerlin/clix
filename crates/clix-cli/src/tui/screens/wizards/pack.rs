@@ -226,39 +226,6 @@ impl PackWizard {
         }
     }
 
-    fn parse_selected_help(&mut self) {
-        self.parsing_help = true;
-        let selected_names: Vec<String> = self.binary_checklist.selected_ids();
-
-        let mut subcmds: Vec<DiscoveredSubcmd> = Vec::new();
-        for name in &selected_names {
-            let parsed = clix_core::discovery::parse_help(name);
-            for p in parsed {
-                let cls = clix_core::discovery::classify(&p.name, &p.description);
-                subcmds.push(DiscoveredSubcmd { parsed: p, classification: cls });
-            }
-        }
-
-        // If no subcommands found, create one from the binary itself
-        if subcmds.is_empty() {
-            for name in &selected_names {
-                let cls = clix_core::discovery::classify(&format!("{}.run", name), "");
-                let pack_name = self.name.value.trim().to_string();
-                subcmds.push(DiscoveredSubcmd {
-                    parsed: ParsedSubcommand {
-                        name: format!("{}.run", pack_name.replace('-', "_")),
-                        description: format!("Run {}", name),
-                    },
-                    classification: cls,
-                });
-            }
-        }
-
-        self.all_subcmds = subcmds;
-        self.finalize_subcmds();
-        self.parsing_help = false;
-    }
-
     /// Build the subcmd_checklist from pending_subcmds (async) or all_subcmds (sync path).
     fn finalize_subcmds(&mut self) {
         let subcmds = if self.pending_subcmds.is_empty() {
