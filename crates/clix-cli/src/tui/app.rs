@@ -98,6 +98,7 @@ pub enum Overlay {
     Help,
     InfisicalSetup(InfisicalSetupState),
     SecretsTreeBrowser(crate::tui::widgets::secrets_tree::SecretsTree),
+    InfisicalAccounts(crate::tui::screens::infisical_accounts::InfisicalAccountsState),
 }
 
 impl Overlay {
@@ -472,6 +473,10 @@ impl App {
             KeyCode::Char('b') if self.screen == Screen::Secrets => {
                 self.open_secrets_tree();
             }
+            // m = manage Infisical accounts
+            KeyCode::Char('m') if self.screen == Screen::Secrets => {
+                self.open_infisical_accounts();
+            }
             // A = approve first pending receipt on Receipts screen (async)
             KeyCode::Char('A') if self.screen == Screen::Receipts => {
                 if self.approving_receipt.is_some() {
@@ -627,6 +632,109 @@ impl App {
         self.overlay = Overlay::SecretsTreeBrowser(tree);
     }
 
+    fn open_infisical_accounts(&mut self) {
+        use crate::tui::screens::infisical_accounts::InfisicalAccountsState;
+        let state = match ClixState::load(home_dir()) {
+            Ok(s) => {
+                let profiles: Vec<_> = s.config.infisical_profiles.into_iter().collect();
+                let active = s.config.active_infisical;
+                InfisicalAccountsState::new(profiles, active)
+            }
+            Err(_) => InfisicalAccountsState::new(vec![], None),
+        };
+        self.overlay = Overlay::InfisicalAccounts(state);
+    }
+
+    fn handle_infisical_accounts(&mut self, key: crossterm::event::KeyEvent) {
+        use crate::tui::screens::infisical_accounts::AccountsAction;
+        let action = if let Overlay::InfisicalAccounts(ref mut state) = self.overlay {
+            state.handle_key(key.code)
+        } else {
+            return;
+        };
+
+        match action {
+            AccountsAction::Cancel => { self.overlay = Overlay::None; }
+            AccountsAction::SetActive(name) => {
+                if let Ok(mut s) = ClixState::load(home_dir()) {
+                    s.config.active_infisical = Some(name.clone());
+                    let _ = s.save_config();
+                }
+                let _ = self.reload();
+                if let Overlay::InfisicalAccounts(ref mut state) = self.overlay {
+                    state.status = Some((format!("Active profile set to '{}'", name), false));
+                }
+            }
+            AccountsAction::Remove(name) => {
+                if let Ok(mut s) = ClixState::load(home_dir()) {
+                    s.config.infisical_profiles.remove(&name);
+                    if s.config.active_infisical.as_deref() == Some(&name) {
+                        s.config.active_infisical = s.config.infisical_profiles.keys().next().cloned();
+                    }
+                    let _ = s.save_config();
+                    #[cfg(target_os = "linux")]
+                    { let _ = clix_core::secrets::keyring::delete_credentials(&name); }
+                }
+                let _ = self.reload();
+                self.open_infisical_accounts();
+                if let Overlay::InfisicalAccounts(ref mut state) = self.overlay {
+                    state.status = Some((format!("Profile '{}' removed", name), false));
+                }
+            }
+            AccountsAction::Save { name, site_url, client_id, client_secret, project_id, environment } => {
+                if let Ok(mut s) = ClixState::load(home_dir()) {
+                    let cfg = s.config.infisical_profiles.entry(name.clone()).or_insert_with(|| {
+                        clix_core::state::InfisicalConfig {
+                            site_url: String::new(), client_id: None, client_secret: None,
+                            default_project_id: None, default_environment: "dev".to_string(),
+                        }
+                    });
+                    cfg.site_url = site_url;
+                    if !project_id.is_empty() { cfg.default_project_id = Some(project_id); }
+                    cfg.default_environment = environment;
+                    if s.config.active_infisical.is_none() {
+                        s.config.active_infisical = Some(name.clone());
+                    }
+                    // Store creds
+                    if !client_id.is_empty() || !client_secret.is_empty() {
+                        #[cfg(target_os = "linux")]
+                        {
+                            use clix_core::secrets::keyring::{store_credentials, KeyringResult};
+                            if !matches!(store_credentials(&name, &client_id, &client_secret), KeyringResult::Ok) {
+                                cfg.client_id = Some(client_id);
+                                cfg.client_secret = Some(client_secret);
+                            }
+                        }
+                        #[cfg(not(target_os = "linux"))]
+                        { cfg.client_id = Some(client_id); cfg.client_secret = Some(client_secret); }
+                    }
+                    let _ = s.save_config();
+                }
+                let _ = self.reload();
+                self.open_infisical_accounts();
+                if let Overlay::InfisicalAccounts(ref mut state) = self.overlay {
+                    state.status = Some((format!("Profile '{}' saved", name), false));
+                }
+            }
+            AccountsAction::Test(name) => {
+                if let Ok(s) = ClixState::load(home_dir()) {
+                    if let Some(cfg) = s.config.infisical_profiles.get(&name) {
+                        let report = clix_core::secrets::test_connectivity(cfg);
+                        let (msg, is_err) = if report.auth_ok {
+                            (format!("✓ '{}' connected ({}ms)", name, report.latency_ms), false)
+                        } else {
+                            (format!("✗ '{}': {}", name, report.error.as_deref().unwrap_or("auth failed")), true)
+                        };
+                        if let Overlay::InfisicalAccounts(ref mut state) = self.overlay {
+                            state.status = Some((msg, is_err));
+                        }
+                    }
+                }
+            }
+            AccountsAction::None => {}
+        }
+    }
+
     fn open_create_wizard(&mut self) {
         match self.screen {
             Screen::Profiles => {
@@ -661,6 +769,12 @@ impl App {
         // Dismiss help overlay on any key
         if matches!(self.overlay, Overlay::Help) {
             self.overlay = Overlay::None;
+            return;
+        }
+
+        // Infisical accounts manager
+        if matches!(self.overlay, Overlay::InfisicalAccounts(_)) {
+            self.handle_infisical_accounts(key);
             return;
         }
 

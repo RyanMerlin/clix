@@ -121,6 +121,7 @@ fn breadcrumb(app: &App) -> String {
         Overlay::Help => Some("Help"),
         Overlay::InfisicalSetup(_) => Some("Configure Infisical"),
         Overlay::SecretsTreeBrowser(_) => Some("Browse Secrets"),
+        Overlay::InfisicalAccounts(_) => Some("Infisical Accounts"),
         Overlay::None => None,
     };
     match overlay_name {
@@ -234,7 +235,7 @@ fn render_legend(f: &mut Frame, app: &App, area: Rect) {
             ("0-7", "switch"), ("tab", "next"), ("c", "config"), ("n", "new"), ("r", "reload"), ("?", "help"), ("q", "quit"),
         ]),
         Screen::Secrets => legend_spans(&[
-            ("e", "edit"), ("t", "test"), ("b", "browse"), ("r", "reset"), ("?", "help"), ("q", "quit"),
+            ("m", "accounts"), ("e", "edit"), ("t", "test"), ("b", "browse"), ("r", "reset"), ("?", "help"), ("q", "quit"),
         ]),
         Screen::Receipts => legend_spans(&[
             ("↑↓", "move"), ("A", "approve pending"), ("r", "reload"), ("q", "quit"),
@@ -302,6 +303,7 @@ fn render_overlay(f: &mut Frame, app: &App, area: Rect) {
         Overlay::InstallPack(buf) => render_install_pack(f, buf, area),
         Overlay::InfisicalSetup(state) => state.render(f, area),
         Overlay::SecretsTreeBrowser(tree) => tree.render(f, area),
+        Overlay::InfisicalAccounts(state) => state.render(f, area),
     }
 }
 

@@ -167,6 +167,38 @@ impl InfisicalSetupState {
         }
     }
 
+    /// Render just the form fields (no outer dialog box). Used when embedded in another overlay.
+    pub fn render_fields_only(&self, f: &mut Frame, area: Rect, focused: bool) {
+        use super::wizards::profile::render_text_field;
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(3),
+                Constraint::Length(3),
+                Constraint::Length(3),
+                Constraint::Length(3),
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ])
+            .split(area);
+
+        let field_active = if focused { self.active_field } else { usize::MAX };
+        render_text_field(f, &self.site_url, "Site URL", field_active == 0, chunks[0]);
+        render_text_field(f, &self.client_id, "Client ID", field_active == 1, chunks[1]);
+        render_text_field(f, &self.client_secret, "Client Secret", field_active == 2, chunks[2]);
+        render_text_field(f, &self.project_id, "Default Project ID (optional)", field_active == 3, chunks[3]);
+        render_text_field(f, &self.environment, "Default Environment", field_active == 4, chunks[4]);
+
+        if let Some(ref msg) = self.status {
+            let style = if self.status_is_error { theme::danger() } else { theme::ok() };
+            f.render_widget(Paragraph::new(Span::styled(msg.clone(), style)), chunks[5]);
+        } else {
+            let hint = if focused { "tab:next  enter:save  esc:cancel" } else { "tab:focus form  esc:cancel" };
+            f.render_widget(Paragraph::new(Span::styled(hint, theme::muted())), chunks[5]);
+        }
+    }
+
     pub fn render(&self, f: &mut Frame, area: Rect) {
         let width = 64u16.min(area.width.saturating_sub(4));
         let height = 22u16.min(area.height.saturating_sub(2));

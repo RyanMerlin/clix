@@ -6,5 +6,6 @@ pub mod dashboard;
 pub mod receipts;
 pub mod workflows;
 pub mod wizards;
+pub mod infisical_accounts;
 pub mod infisical_setup;
 pub mod secrets;
