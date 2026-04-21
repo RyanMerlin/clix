@@ -8,6 +8,7 @@ use crate::tui::theme;
 use crate::tui::widgets::checklist::{Checklist, ChecklistItem};
 use crate::tui::widgets::form::FieldInput;
 use crate::tui::widgets::secret_picker::{SecretPicker, SecretPickerAction};
+use crate::tui::widgets::secrets_tree::{SecretsTree, SecretsTreeAction, TreeMode};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProfileWizardStep {
@@ -50,8 +51,10 @@ pub struct ProfileWizard {
     // Step 2 — secrets
     pub binding_rows: Vec<BindingRow>,
     pub secrets_cursor: usize,
-    /// When Some, the secret picker is open for that row index
+    /// When Some, the old flat picker is open (legacy, kept for compatibility)
     pub picker: Option<(usize, SecretPicker)>,
+    /// When Some, the tree picker is open for that row index
+    pub tree_picker: Option<(usize, SecretsTree)>,
     /// "e" sub-mode: user is typing an env var name
     pub env_input: Option<(usize, FieldInput)>,
     /// "l" sub-mode: user is typing a literal value
@@ -72,8 +75,10 @@ pub enum ProfileWizardAction {
         secret_bindings: Vec<ProfileSecretBinding>,
         folder_bindings: Vec<ProfileFolderBinding>,
     },
-    /// Picker navigated to a new path — caller must dispatch LoadSecretFolders + LoadSecretNames.
+    /// Flat picker navigated to a new path — caller dispatches LoadSecretFolders + LoadSecretNames.
     PickerNeedsLoad { project_id: String, environment: String, path: String },
+    /// Tree picker needs a folder loaded — caller dispatches the work jobs.
+    TreeNeedsLoad { project_id: String, environment: String, path: String, folders_job: u64, names_job: u64 },
 }
 
 impl ProfileWizard {
@@ -116,6 +121,7 @@ impl ProfileWizard {
             binding_rows: vec![],
             secrets_cursor: 0,
             picker: None,
+            tree_picker: None,
             env_input: None,
             literal_input: None,
             folder_bindings: vec![],
@@ -155,8 +161,72 @@ impl ProfileWizard {
         !self.name.value.is_empty()
     }
 
+    pub fn deliver_tree_folders(&mut self, job_id: u64, folders: Vec<String>, error: Option<String>) {
+        if let Some((_, ref mut tree)) = self.tree_picker {
+            tree.deliver_folders(job_id, folders, error);
+        }
+    }
+
+    pub fn deliver_tree_names(&mut self, job_id: u64, names: Vec<String>, error: Option<String>) {
+        if let Some((_, ref mut tree)) = self.tree_picker {
+            tree.deliver_names(job_id, names, error);
+        }
+    }
+
     pub fn handle_key(&mut self, code: KeyCode, registry: Option<&CapabilityRegistry>, infisical_cfg: Option<&InfisicalConfig>) -> ProfileWizardAction {
-        // Picker sub-overlay takes priority
+        // Tree picker takes priority over flat picker
+        if let Some((row_idx, ref mut tree)) = self.tree_picker {
+            let action = tree.handle_key(code, infisical_cfg);
+            match action {
+                SecretsTreeAction::Cancelled => { self.tree_picker = None; }
+                SecretsTreeAction::NeedsLoad(path) => {
+                    let project_id = tree.project_id.clone();
+                    let environment = tree.environment.clone();
+                    let (fid, nid) = tree.request_load(&path);
+                    return ProfileWizardAction::TreeNeedsLoad {
+                        project_id, environment, path, folders_job: fid, names_job: nid,
+                    };
+                }
+                SecretsTreeAction::Selected(iref) => {
+                    let inject_as = self.binding_rows.get(row_idx).map(|r| r.inject_as.clone()).unwrap_or_default();
+                    if let Some(row) = self.binding_rows.get_mut(row_idx) {
+                        row.binding = Some(CredentialSource::Infisical { secret_ref: iref, inject_as });
+                    }
+                    self.tree_picker = None;
+                }
+                SecretsTreeAction::SelectedMany(refs) => {
+                    // Bind all selected secrets as folder-style snapshot bindings
+                    for iref in refs {
+                        self.folder_bindings.push(ProfileFolderBinding {
+                            project_id: iref.project_id.clone().unwrap_or_default(),
+                            environment: iref.environment.clone(),
+                            secret_path: iref.secret_path.clone(),
+                            inject_prefix: None,
+                            synced_at: chrono::Utc::now(),
+                            snapshot: vec![iref.secret_name],
+                            infisical_profile: None,
+                        });
+                    }
+                    self.tree_picker = None;
+                }
+                SecretsTreeAction::SelectedFolder { project_id, environment, secret_path, inject_prefix, snapshot } => {
+                    self.folder_bindings.push(ProfileFolderBinding {
+                        project_id,
+                        environment,
+                        secret_path,
+                        inject_prefix,
+                        synced_at: chrono::Utc::now(),
+                        snapshot,
+                        infisical_profile: None,
+                    });
+                    self.tree_picker = None;
+                }
+                SecretsTreeAction::None => {}
+            }
+            return ProfileWizardAction::None;
+        }
+
+        // Flat picker sub-overlay (legacy)
         if let Some((row_idx, ref mut picker)) = self.picker {
             let action = picker.handle_key(code, infisical_cfg);
             match action {
@@ -294,21 +364,32 @@ impl ProfileWizard {
                 if self.secrets_cursor + 1 < self.binding_rows.len() { self.secrets_cursor += 1; }
             }
             KeyCode::Char('p') | KeyCode::Char('i') => {
-                // Open Infisical picker — derive project/env from current binding or ask for defaults
+                // Open Infisical tree picker in Bind mode
                 if let Some(row) = self.binding_rows.get(self.secrets_cursor) {
                     let (project_id, environment) = derive_project_env(row);
-                    let mut picker = SecretPicker::new(&project_id, &environment);
-                    if infisical_cfg.is_some() {
-                        picker.mark_loading();
-                        let path = picker.current_path();
-                        let pid = project_id.clone();
-                        let env = environment.clone();
-                        self.picker = Some((self.secrets_cursor, picker));
-                        return ProfileWizardAction::PickerNeedsLoad { project_id: pid, environment: env, path };
+                    if let Some(cfg) = infisical_cfg {
+                        let proj = if project_id.is_empty() {
+                            cfg.default_project_id.clone().unwrap_or_default()
+                        } else {
+                            project_id.clone()
+                        };
+                        let env = if environment.is_empty() {
+                            cfg.default_environment.clone()
+                        } else {
+                            environment.clone()
+                        };
+                        let mut tree = SecretsTree::new(&proj, &env, TreeMode::Bind);
+                        let fid = crate::tui::work::next_job_id();
+                        let nid = crate::tui::work::next_job_id();
+                        tree.initial_load_ids(fid, nid);
+                        let row_idx = self.secrets_cursor;
+                        self.tree_picker = Some((row_idx, tree));
+                        return ProfileWizardAction::TreeNeedsLoad {
+                            project_id: proj, environment: env,
+                            path: "/".to_string(), folders_job: fid, names_job: nid,
+                        };
                     } else {
-                        picker.error = Some("Infisical not configured (set site_url/client_id/client_secret in config)".to_string());
-                        picker.loaded = true;
-                        self.picker = Some((self.secrets_cursor, picker));
+                        self.error = Some("Infisical not configured — press e to configure it first".into());
                     }
                 }
             }

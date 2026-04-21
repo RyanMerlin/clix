@@ -12,7 +12,7 @@ use crate::tui::work::JobId;
 pub enum NodeKind { Folder, Secret }
 
 /// Per-path state: what we know about a folder's contents.
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 pub struct PathState {
     pub folders: Vec<String>,
     pub secrets: Vec<String>,
@@ -26,7 +26,7 @@ impl PathState {
 }
 
 /// One entry in the flattened visible list (computed on each render pass).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct VisibleRow {
     pub depth: usize,
     pub kind: NodeKind,
@@ -42,6 +42,7 @@ pub struct VisibleRow {
 /// Async tree browser for an Infisical (project_id, environment).
 /// Uses the existing `LoadSecretFolders` / `LoadSecretNames` work jobs,
 /// keyed by path. Supports both Browse and Bind modes.
+#[derive(Debug, Clone)]
 pub struct SecretsTree {
     pub project_id: String,
     pub environment: String,
@@ -61,7 +62,7 @@ pub struct SecretsTree {
     pub error: Option<String>,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TreeMode {
     /// Read-only browse (b key on Secrets screen)
     Browse,
