@@ -137,5 +137,6 @@
 
 - [x] Suppress compiler warnings — zero warnings across all three crates (commit `2ee42fd`).
 - [ ] `clix-testkit` integration suite: add TUI smoke test that opens the TUI, navigates to Secrets, and asserts no hang within 5s on an invalid Infisical URL.
-- [ ] Bump `reqwest` and `tokio` to latest stable.
+- [x] Bump `reqwest` (0.12→0.13), `axum` (0.7→0.8), `ratatui` (0.29→0.30), `crossterm` (0.28→0.29), `which` (4→8), `dirs` (5→6), `prometheus` (0.13→0.14).
+- [ ] **sha2 0.10→0.11 + rand 0.8→0.10 BLOCKED**: `ed25519-dalek 2.2.0` pins sha2 0.10 + rand_core 0.6. Unblocked when `ed25519-dalek 3.0` (currently pre-release) reaches stable.
 - [ ] `jail_config_digest` is captured in receipts but not yet verified on re-read (SECURITY.md note).

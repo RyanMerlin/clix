@@ -7,7 +7,6 @@ use clix_core::state::InfisicalConfig;
 use crate::tui::theme;
 use crate::tui::widgets::checklist::{Checklist, ChecklistItem};
 use crate::tui::widgets::form::FieldInput;
-use crate::tui::widgets::secret_picker::{SecretPicker, SecretPickerAction};
 use crate::tui::widgets::secrets_tree::{SecretsTree, SecretsTreeAction, TreeMode};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -173,7 +172,7 @@ impl ProfileWizard {
     }
 
     pub fn handle_key(&mut self, code: KeyCode, registry: Option<&CapabilityRegistry>, infisical_cfg: Option<&InfisicalConfig>) -> ProfileWizardAction {
-        // Tree picker takes priority over flat picker
+        // Tree picker sub-overlay
         if let Some((row_idx, ref mut tree)) = self.tree_picker {
             let action = tree.handle_key(code, infisical_cfg);
             match action {
