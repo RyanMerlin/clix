@@ -725,7 +725,7 @@ impl App {
                     state.status = Some((format!("Profile '{}' removed", name), false));
                 }
             }
-            AccountsAction::Save { name, site_url, client_id, client_secret, project_id, environment } => {
+            AccountsAction::Save { name, site_url, service_token, project_id, environment } => {
                 if let Ok(mut s) = ClixState::load(home_dir()) {
                     let cfg = s.config.infisical_profiles.entry(name.clone()).or_insert_with(|| {
                         clix_core::state::InfisicalConfig {
@@ -740,18 +740,16 @@ impl App {
                     if s.config.active_infisical.is_none() {
                         s.config.active_infisical = Some(name.clone());
                     }
-                    // Store creds
-                    if !client_id.is_empty() || !client_secret.is_empty() {
+                    if !service_token.is_empty() {
                         #[cfg(target_os = "linux")]
                         {
-                            use clix_core::secrets::keyring::{store_credentials, KeyringResult};
-                            if !matches!(store_credentials(&name, &client_id, &client_secret), KeyringResult::Ok) {
-                                cfg.client_id = Some(client_id);
-                                cfg.client_secret = Some(client_secret);
+                            use clix_core::secrets::keyring::{store_service_token, KeyringResult};
+                            if !matches!(store_service_token(&name, &service_token), KeyringResult::Ok) {
+                                cfg.service_token = Some(service_token);
                             }
                         }
                         #[cfg(not(target_os = "linux"))]
-                        { cfg.client_id = Some(client_id); cfg.client_secret = Some(client_secret); }
+                        { cfg.service_token = Some(service_token); }
                     }
                     let _ = s.save_config();
                 }
@@ -964,8 +962,8 @@ impl App {
                         self.overlay = Overlay::None;
                     }
                 }
-                InfisicalSetupAction::Save { site_url, client_id, client_secret, project_id, environment } => {
-                    match self.do_write_infisical_config(&site_url, &client_id, &client_secret, &project_id, &environment) {
+                InfisicalSetupAction::Save { site_url, service_token, project_id, environment } => {
+                    match self.do_write_infisical_config(&site_url, &service_token, &project_id, &environment) {
                         Ok(effective_cfg) => {
                             let job_id = next_job_id();
                             if let Overlay::InfisicalSetup(ref mut state) = self.overlay {
@@ -1350,19 +1348,21 @@ impl App {
         Ok(format!("Profile '{}' secrets updated ({} bindings)", profile_name, bindings.len()))
     }
 
-    fn do_write_infisical_config(&self, site_url: &str, client_id: &str, client_secret: &str, project_id: &str, environment: &str) -> Result<clix_core::state::InfisicalConfig> {
+    fn do_write_infisical_config(&self, site_url: &str, service_token: &str, project_id: &str, environment: &str) -> Result<clix_core::state::InfisicalConfig> {
         let mut state = ClixState::load(home_dir())?;
         let profile_name = state.config.active_infisical
             .clone()
             .unwrap_or_else(|| "default".to_string());
 
         #[cfg(target_os = "linux")]
-        let keyring_ok = {
-            use clix_core::secrets::keyring::{store_credentials, KeyringResult};
-            matches!(store_credentials(&profile_name, client_id, client_secret), KeyringResult::Ok)
+        let token_in_keyring = if !service_token.is_empty() {
+            use clix_core::secrets::keyring::{store_service_token, KeyringResult};
+            matches!(store_service_token(&profile_name, service_token), KeyringResult::Ok)
+        } else {
+            false
         };
         #[cfg(not(target_os = "linux"))]
-        let keyring_ok = false;
+        let token_in_keyring = false;
 
         let profile = state.config.infisical_profiles
             .entry(profile_name.clone())
@@ -1375,24 +1375,31 @@ impl App {
         profile.site_url = site_url.to_string();
         profile.default_environment = environment.to_string();
         if !project_id.is_empty() { profile.default_project_id = Some(project_id.to_string()); }
-        if !keyring_ok {
-            profile.client_id = Some(client_id.to_string());
-            profile.client_secret = Some(client_secret.to_string());
+        if !service_token.is_empty() && !token_in_keyring {
+            profile.service_token = Some(service_token.to_string());
         }
         if state.config.active_infisical.is_none() {
             state.config.active_infisical = Some(profile_name.clone());
         }
+        // Clone before save_config consumes the mutable borrow
+        let saved_token = profile.service_token.clone();
+        let saved_client_id = profile.client_id.clone();
+        let saved_client_secret = profile.client_secret.clone();
         state.save_config()?;
 
-        let effective_cfg = clix_core::state::InfisicalConfig {
+        let effective_token = if !service_token.is_empty() {
+            Some(service_token.to_string())
+        } else {
+            saved_token
+        };
+        Ok(clix_core::state::InfisicalConfig {
             site_url: site_url.to_string(),
-            client_id: Some(client_id.to_string()),
-            client_secret: Some(client_secret.to_string()),
-            service_token: None,
+            client_id: saved_client_id,
+            client_secret: saved_client_secret,
+            service_token: effective_token,
             default_project_id: if project_id.is_empty() { None } else { Some(project_id.to_string()) },
             default_environment: environment.to_string(),
-        };
-        Ok(effective_cfg)
+        })
     }
 
     fn do_install_pack(&self, path_str: &str) -> Result<String> {
