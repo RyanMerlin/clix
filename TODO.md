@@ -11,7 +11,7 @@
 - **Broker integration** — `RequireApproval` enforcement via broker; `clix-broker` lifecycle surface.
 - **Integration tests** — `clix-testkit` shared harness; suite covers policy, isolation, receipts.
 
-### Pack ecosystem (11 packs, ~45 capabilities)
+### Pack ecosystem (14 packs, ~60 capabilities)
 - **5 new packs**: `docker-observe`, `podman-observe`, `aws-readonly`, `az-readonly`, `helm-observe`
 - **Expanded packs**: `gcloud-readonly` (6 caps), `gh-readonly` (5 caps), `kubectl-observe` (8 caps)
 - **Starter policy**: `clix init` now seeds a `policy.yaml` allowing `none` + `readOnly` side-effects out of the box
@@ -35,13 +35,13 @@
 
 ## Next: TUI completions
 
-### Remaining foot-guns (not yet async)
-- [ ] `SecretPicker::load()` — `list_infisical_folders` + `list_infisical_secrets` called synchronously in a keystroke handler (`widgets/secret_picker.rs:70,84`). Add `LoadInfisicalFolders`/`LoadInfisicalSecrets` to `WorkRequest`; add `loading: bool` + spinner to SecretPicker.
-- [ ] `PackWizard::new()` / `scan_path()` / `parse_help()` — shells out to `git` on construction and runs unbounded `--help` probes (`screens/wizards/pack.rs:80,139,186`). Add `ProbeCommandHelp` to `WorkRequest`; wizard shows per-row spinner.
-- [ ] `Receipts [A]pprove` — `BrokerClient::connect/send_approve` called inline in a keystroke handler (`app.rs`). Add `ApproveReceipt` to `WorkRequest`; inline pending state on the receipt row.
+### Remaining foot-guns (async — all done)
+- [x] `SecretPicker::load()` — async via `LoadSecretFolders`/`LoadSecretNames` WorkPool jobs; spinner while fetching; stale-result rejection by job ID
+- [x] `PackWizard` help probes — `ParseHelp` job per binary; `deliver_help()` accumulates results; `finalize_subcmds()` builds checklist when all jobs complete
+- [x] `Receipts [A]pprove` — async `ApproveReceipt` WorkRequest; `approving_receipt` guard prevents double-approval; toast on result
 
-### Dirty-tracking for CapabilityCreate and PackCreate
-- [ ] The big `match &mut self.overlay` block in `handle_overlay_key` prevents clean two-step borrow for Cap/Pack Cancel arms. Refactor to extract action + dirty state before the match, same pattern as ProfileCreate.
+### Dirty-tracking (done)
+- [x] CapabilityCreate and PackCreate: two-step borrow pattern; Cancel arms check `is_dirty()` and route through `confirming_discard`
 
 ### Navigation polish
 - [ ] Sidebar focus: `q` should prompt quit only if no dirty overlay exists.
@@ -70,12 +70,12 @@
 ## Next: Packs & capabilities
 
 ### New packs (candidates)
-- [ ] `terraform-observe` — `plan` (dry-run), `state list`, `output` — read-only; change-controlled preset for `apply`
+- [x] `terraform-observe` — `validate`, `plan`, `show`, `state list`, `output` — shipped
+- [x] `argocd-observe` — `app list`, `app get`, `app diff`, `app history` — shipped
+- [x] `incus-readonly` — `list`, `info`, `snapshot list`, `image list` — shipped
 - [ ] `k9s-observe` — pass-through to k9s with `--readonly` flag
 - [ ] `pulumi-observe` — `preview`, `stack output`, `stack ls`
-- [ ] `argocd-observe` — `app list`, `app get`, `app diff` — read-only (was in phantom list; now design properly)
-- [ ] `incus-readonly` — `list`, `info`, `snapshot list` — read-only (was in phantom list; design properly)
-- [ ] `gcloud-aiplatform` — Vertex AI inspection (was listed; create the actual YAML files)
+- [x] `gcloud-aiplatform` — Vertex AI inspection — shipped (v0.3.0)
 - [ ] `npm-observe` — `list`, `audit`, `outdated` — read-only Node.js package inspection
 
 ### Pack authoring UX
