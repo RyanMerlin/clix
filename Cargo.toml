@@ -26,7 +26,7 @@ minijinja          = "2"
 axum               = "0.8"
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-zip                = "2"
+zip                = "8"
 sha2               = { version = "0.10", features = ["oid"] }
 hex                = "0.4"
 dirs               = "6"
