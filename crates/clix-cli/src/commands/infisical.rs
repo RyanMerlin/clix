@@ -103,6 +103,7 @@ fn cmd_add(name: &str, site_url: Option<String>, project_id: Option<String>, env
         site_url: site,
         client_id: None,
         client_secret: None,
+        service_token: None,
         default_project_id: project_id,
         default_environment: env,
     };

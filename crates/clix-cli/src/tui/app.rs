@@ -730,6 +730,7 @@ impl App {
                     let cfg = s.config.infisical_profiles.entry(name.clone()).or_insert_with(|| {
                         clix_core::state::InfisicalConfig {
                             site_url: String::new(), client_id: None, client_secret: None,
+                            service_token: None,
                             default_project_id: None, default_environment: "dev".to_string(),
                         }
                     });
@@ -1367,7 +1368,7 @@ impl App {
             .entry(profile_name.clone())
             .or_insert_with(|| clix_core::state::InfisicalConfig {
                 site_url: "https://app.infisical.com".to_string(),
-                client_id: None, client_secret: None,
+                client_id: None, client_secret: None, service_token: None,
                 default_project_id: None,
                 default_environment: "dev".to_string(),
             });
@@ -1387,6 +1388,7 @@ impl App {
             site_url: site_url.to_string(),
             client_id: Some(client_id.to_string()),
             client_secret: Some(client_secret.to_string()),
+            service_token: None,
             default_project_id: if project_id.is_empty() { None } else { Some(project_id.to_string()) },
             default_environment: environment.to_string(),
         };

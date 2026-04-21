@@ -173,6 +173,7 @@ fn cmd_set(_state: &ClixState, site_url: Option<String>, project_id: Option<Stri
             site_url: "https://app.infisical.com".to_string(),
             client_id: None,
             client_secret: None,
+            service_token: None,
             default_project_id: None,
             default_environment: "dev".to_string(),
         });
