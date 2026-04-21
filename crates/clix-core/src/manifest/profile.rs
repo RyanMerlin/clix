@@ -65,6 +65,9 @@ pub struct ProfileFolderBinding {
     pub synced_at: DateTime<Utc>,
     /// Secret names captured at sync time.
     pub snapshot: Vec<String>,
+    /// Which named Infisical account profile to use when resolving. None = active profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub infisical_profile: Option<String>,
 }
 
 /// Binds an environment variable name to a concrete credential source at the profile level.

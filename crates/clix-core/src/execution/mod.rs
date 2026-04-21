@@ -18,7 +18,7 @@ use crate::sandbox::sandbox_enforced;
 use crate::schema::validate_input;
 use crate::manifest::profile::ProfileSecretBinding;
 use crate::secrets::{resolve_credentials, SecretRedactor};
-use crate::state::InfisicalConfig;
+use crate::state::InfisicalProfiles;
 use crate::template::render_args;
 use backends::{builtin_handler, expand_secret_refs, run_isolated, run_remote, run_subprocess};
 use sha2::Digest;
@@ -37,7 +37,7 @@ pub struct ExecutionOutcome {
     pub reason: Option<String>,
 }
 
-pub fn run_capability(registry: &CapabilityRegistry, policy: &PolicyBundle, infisical: Option<&InfisicalConfig>, store: &ReceiptStore, worker_registry: Option<&Arc<WorkerRegistry>>, name: &str, input: serde_json::Value, ctx: ExecutionContext, profile_bindings: &[ProfileSecretBinding]) -> Result<ExecutionOutcome> {
+pub fn run_capability(registry: &CapabilityRegistry, policy: &PolicyBundle, infisical: &InfisicalProfiles<'_>, store: &ReceiptStore, worker_registry: Option<&Arc<WorkerRegistry>>, name: &str, input: serde_json::Value, ctx: ExecutionContext, profile_bindings: &[ProfileSecretBinding]) -> Result<ExecutionOutcome> {
     let cap = registry.get(name).ok_or_else(|| ClixError::CapabilityNotFound(name.to_string()))?.clone();
     validate_input(&cap.input_schema, &input)?;
     let decision = evaluate_policy(policy, &ctx, &cap);
@@ -123,7 +123,7 @@ pub fn run_capability(registry: &CapabilityRegistry, policy: &PolicyBundle, infi
     Ok(ExecutionOutcome { ok, approval_required: false, receipt_id, result: Some(exec_result), reason: None })
 }
 
-pub fn run_workflow(cap_registry: &CapabilityRegistry, wf_registry: &WorkflowRegistry, policy: &PolicyBundle, infisical: Option<&InfisicalConfig>, store: &ReceiptStore, worker_registry: Option<&Arc<WorkerRegistry>>, name: &str, input: serde_json::Value, ctx: ExecutionContext) -> Result<Vec<ExecutionOutcome>> {
+pub fn run_workflow(cap_registry: &CapabilityRegistry, wf_registry: &WorkflowRegistry, policy: &PolicyBundle, infisical: &InfisicalProfiles<'_>, store: &ReceiptStore, worker_registry: Option<&Arc<WorkerRegistry>>, name: &str, input: serde_json::Value, ctx: ExecutionContext) -> Result<Vec<ExecutionOutcome>> {
     let wf = wf_registry.get(name).ok_or_else(|| ClixError::WorkflowNotFound(name.to_string()))?.clone();
     let mut outcomes = vec![];
     for step in &wf.steps {
@@ -160,6 +160,8 @@ mod tests {
     use super::*;
     use crate::manifest::capability::{Backend, CapabilityManifest, IsolationTier, RiskLevel, SideEffectClass};
     use crate::policy::{PolicyAction, PolicyBundle, PolicyRule};
+    use crate::state::InfisicalProfiles;
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
 
     fn allow_all() -> PolicyBundle {
@@ -176,26 +178,36 @@ mod tests {
         CapabilityManifest { name: "sys.date".to_string(), version: 1, description: None, backend: Backend::Builtin { name: "date".to_string() }, risk: RiskLevel::Low, side_effect_class: SideEffectClass::None, sandbox_profile: None, isolation: Default::default(), approval_policy: None, input_schema: serde_json::json!({"type":"object","properties":{}}), validators: vec![], credentials: vec![], argv_pattern: None }
     }
 
+    fn no_infisical(map: &BTreeMap<String, crate::state::InfisicalConfig>) -> InfisicalProfiles<'_> {
+        InfisicalProfiles { profiles: map, active: None }
+    }
+
     #[test]
     fn test_run_builtin() {
+        let map = BTreeMap::new();
+        let infisical = no_infisical(&map);
         let reg = CapabilityRegistry::from_vec(vec![date_cap()]);
-        let outcome = run_capability(&reg, &allow_all(), None, &store(), None, "sys.date", serde_json::json!({}), ctx(), &[]).unwrap();
+        let outcome = run_capability(&reg, &allow_all(), &infisical, &store(), None, "sys.date", serde_json::json!({}), ctx(), &[]).unwrap();
         assert!(outcome.ok);
     }
 
     #[test]
     fn test_unknown_capability_errors() {
+        let map = BTreeMap::new();
+        let infisical = no_infisical(&map);
         let reg = CapabilityRegistry::from_vec(vec![]);
-        assert!(run_capability(&reg, &PolicyBundle::default(), None, &store(), None, "nope", serde_json::json!({}), ctx(), &[]).is_err());
+        assert!(run_capability(&reg, &PolicyBundle::default(), &infisical, &store(), None, "nope", serde_json::json!({}), ctx(), &[]).is_err());
     }
 
     #[test]
     fn test_denied_writes_receipt() {
+        let map = BTreeMap::new();
+        let infisical = no_infisical(&map);
         let reg = CapabilityRegistry::from_vec(vec![date_cap()]);
         let mut policy = PolicyBundle::default();
         policy.rules.push(PolicyRule { capability: Some("sys.date".to_string()), action: PolicyAction::Deny, reason: Some("test".to_string()), ..Default::default() });
         let store = store();
-        let outcome = run_capability(&reg, &policy, None, &store, None, "sys.date", serde_json::json!({}), ctx(), &[]).unwrap();
+        let outcome = run_capability(&reg, &policy, &infisical, &store, None, "sys.date", serde_json::json!({}), ctx(), &[]).unwrap();
         assert!(!outcome.ok);
         assert_eq!(store.list(10, Some("denied")).unwrap().len(), 1);
     }

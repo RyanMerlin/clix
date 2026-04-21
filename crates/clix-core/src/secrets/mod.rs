@@ -11,34 +11,50 @@ use std::sync::Mutex;
 use crate::error::{ClixError, Result};
 use crate::manifest::capability::CredentialSource;
 use crate::manifest::profile::{ProfileSecretBinding, ProfileFolderBinding};
-use crate::state::InfisicalConfig;
+use crate::state::{InfisicalConfig, InfisicalProfiles};
+
+// ─── token cache ─────────────────────────────────────────────────────────────
+// Keyed on (site_url, client_id) so multiple accounts don't share a slot.
 
 struct CachedToken {
     token: String,
     expires_at: Instant,
 }
 
-static TOKEN_CACHE: OnceLock<Mutex<Option<CachedToken>>> = OnceLock::new();
+type TokenKey = (String, String);
 
-fn token_cache() -> &'static Mutex<Option<CachedToken>> {
-    TOKEN_CACHE.get_or_init(|| Mutex::new(None))
+static TOKEN_CACHE: OnceLock<Mutex<HashMap<TokenKey, CachedToken>>> = OnceLock::new();
+
+fn token_cache() -> &'static Mutex<HashMap<TokenKey, CachedToken>> {
+    TOKEN_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn get_infisical_token_cached(cfg: &InfisicalConfig) -> Result<String> {
-    let mut cache = token_cache().lock().unwrap();
-    if let Some(ref ct) = *cache {
-        if ct.expires_at > Instant::now() {
-            return Ok(ct.token.clone());
+    let key: TokenKey = (
+        cfg.site_url.clone(),
+        cfg.client_id.clone().unwrap_or_default(),
+    );
+    {
+        let cache = token_cache().lock().unwrap();
+        if let Some(ct) = cache.get(&key) {
+            if ct.expires_at > Instant::now() {
+                return Ok(ct.token.clone());
+            }
         }
     }
     // stale or missing — re-login
     let (token, ttl) = get_infisical_token_with_ttl(cfg)?;
-    *cache = Some(CachedToken {
-        token: token.clone(),
-        expires_at: Instant::now() + Duration::from_secs(ttl.saturating_sub(60)),
-    });
+    {
+        let mut cache = token_cache().lock().unwrap();
+        cache.insert(key, CachedToken {
+            token: token.clone(),
+            expires_at: Instant::now() + Duration::from_secs(ttl.saturating_sub(60)),
+        });
+    }
     Ok(token)
 }
+
+// ─── connectivity ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ConnectivityReport {
@@ -64,10 +80,11 @@ pub fn test_connectivity(cfg: &InfisicalConfig) -> ConnectivityReport {
             error: Some(e.to_string()),
         },
         Ok((token, ttl)) => {
-            // Update cache with fresh token
+            // Warm the cache for this profile's credentials.
             {
+                let key = (cfg.site_url.clone(), cfg.client_id.clone().unwrap_or_default());
                 let mut cache = token_cache().lock().unwrap();
-                *cache = Some(CachedToken {
+                cache.insert(key, CachedToken {
                     token: token.clone(),
                     expires_at: Instant::now() + Duration::from_secs(ttl.saturating_sub(60)),
                 });
@@ -92,12 +109,14 @@ pub fn test_connectivity(cfg: &InfisicalConfig) -> ConnectivityReport {
     }
 }
 
+// ─── credential resolution ────────────────────────────────────────────────────
+
 /// Resolve credential sources to a map of env-var-name → value.
 /// `profile_bindings` override same-named entries from `creds` (profile wins over capability defaults).
 /// `folder_bindings` expand entire Infisical folder snapshots; per-key bindings take precedence.
 pub fn resolve_credentials(
     creds: &[CredentialSource],
-    infisical_cfg: Option<&InfisicalConfig>,
+    infisical: &InfisicalProfiles<'_>,
     profile_bindings: &[ProfileSecretBinding],
     folder_bindings: &[ProfileFolderBinding],
 ) -> Result<HashMap<String, String>> {
@@ -118,6 +137,7 @@ pub fn resolve_credentials(
                     project_id: Some(fb.project_id.clone()),
                     environment: fb.environment.clone(),
                     secret_path: fb.secret_path.clone(),
+                    infisical_profile: fb.infisical_profile.clone(),
                 },
             });
         }
@@ -140,7 +160,13 @@ pub fn resolve_credentials(
                 })?
             }
             CredentialSource::Infisical { secret_ref, .. } => {
-                let cfg = infisical_cfg.ok_or_else(|| ClixError::CredentialResolution("Infisical requires config".to_string()))?;
+                let cfg = infisical.resolve(secret_ref.infisical_profile.as_deref())
+                    .ok_or_else(|| {
+                        let profile_name = secret_ref.infisical_profile.as_deref().unwrap_or("<active>");
+                        ClixError::CredentialResolution(format!(
+                            "Infisical profile '{profile_name}' not configured (run `clix infisical add` to set one up)"
+                        ))
+                    })?;
                 fetch_infisical_secret(cfg, secret_ref)?
             }
         };
@@ -156,6 +182,8 @@ fn inject_as_of(c: &CredentialSource) -> &str {
         CredentialSource::Infisical { inject_as, .. } => inject_as,
     }
 }
+
+// ─── Infisical API helpers ────────────────────────────────────────────────────
 
 /// List secret names at a given path in Infisical (no values fetched).
 pub fn list_infisical_secrets(
@@ -279,12 +307,17 @@ fn get_infisical_token_with_ttl(cfg: &InfisicalConfig) -> Result<(String, u64)> 
 mod tests {
     use super::*;
     use crate::manifest::capability::CredentialSource;
+    use std::collections::BTreeMap;
+
+    fn empty_profiles() -> BTreeMap<String, InfisicalConfig> { BTreeMap::new() }
 
     #[test]
     fn test_resolve_env() {
         std::env::set_var("CLIX_TEST_SECRET_VAR", "env-value-123");
         let creds = vec![CredentialSource::Env { env_var: "CLIX_TEST_SECRET_VAR".to_string(), inject_as: "TARGET".to_string() }];
-        let resolved = resolve_credentials(&creds, None, &[], &[]).unwrap();
+        let profiles = empty_profiles();
+        let resolver = InfisicalProfiles { profiles: &profiles, active: None };
+        let resolved = resolve_credentials(&creds, &resolver, &[], &[]).unwrap();
         assert_eq!(resolved.get("TARGET").unwrap(), "env-value-123");
         std::env::remove_var("CLIX_TEST_SECRET_VAR");
     }
@@ -292,7 +325,9 @@ mod tests {
     #[test]
     fn test_resolve_literal() {
         let creds = vec![CredentialSource::Literal { value: "lit-val".to_string(), inject_as: "INJECTED".to_string() }];
-        let resolved = resolve_credentials(&creds, None, &[], &[]).unwrap();
+        let profiles = empty_profiles();
+        let resolver = InfisicalProfiles { profiles: &profiles, active: None };
+        let resolved = resolve_credentials(&creds, &resolver, &[], &[]).unwrap();
         assert_eq!(resolved.get("INJECTED").unwrap(), "lit-val");
     }
 
@@ -304,20 +339,23 @@ mod tests {
             inject_as: "MY_TOKEN".to_string(),
             source: CredentialSource::Literal { value: "profile-override".to_string(), inject_as: "MY_TOKEN".to_string() },
         }];
-        let resolved = resolve_credentials(&creds, None, &bindings, &[]).unwrap();
+        let profiles = empty_profiles();
+        let resolver = InfisicalProfiles { profiles: &profiles, active: None };
+        let resolved = resolve_credentials(&creds, &resolver, &bindings, &[]).unwrap();
         assert_eq!(resolved.get("MY_TOKEN").unwrap(), "profile-override");
     }
 
     #[test]
     fn env_credential_missing_var_is_error() {
-        // An unset env var must produce a named error, not an empty string.
         let var_name = "CLIX_TEST_VAR_DEFINITELY_NOT_SET_12345";
         std::env::remove_var(var_name);
         let creds = vec![CredentialSource::Env {
             env_var: var_name.to_string(),
             inject_as: "TARGET_VAR".to_string(),
         }];
-        let err = resolve_credentials(&creds, None, &[], &[]).unwrap_err();
+        let profiles = empty_profiles();
+        let resolver = InfisicalProfiles { profiles: &profiles, active: None };
+        let err = resolve_credentials(&creds, &resolver, &[], &[]).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains(var_name), "error should name the missing var: {msg}");
         assert!(msg.contains("TARGET_VAR"), "error should name the inject_as key: {msg}");
@@ -331,7 +369,9 @@ mod tests {
             env_var: var_name.to_string(),
             inject_as: "TARGET_VAR".to_string(),
         }];
-        let resolved = resolve_credentials(&creds, None, &[], &[]).unwrap();
+        let profiles = empty_profiles();
+        let resolver = InfisicalProfiles { profiles: &profiles, active: None };
+        let resolved = resolve_credentials(&creds, &resolver, &[], &[]).unwrap();
         assert_eq!(resolved.get("TARGET_VAR").unwrap(), "test-value");
         std::env::remove_var(var_name);
     }

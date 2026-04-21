@@ -124,6 +124,8 @@ fn test_profile_policy_isolation_no_cross_contamination() {
     let store_ro  = ReceiptStore::open(std::path::Path::new(":memory:")).unwrap();
     let store_rw  = ReceiptStore::open(std::path::Path::new(":memory:")).unwrap();
     let registry  = CapabilityRegistry::from_vec(vec![cap]);
+    let empty_profiles = std::collections::BTreeMap::new();
+    let infisical = clix_core::state::InfisicalProfiles { profiles: &empty_profiles, active: None };
 
     // Profile A: readonly — deny
     let mut policy_ro = PolicyBundle::allow_all();
@@ -141,7 +143,7 @@ fn test_profile_policy_isolation_no_cross_contamination() {
         approver: None,
     };
     let outcome_ro = run_capability(
-        &registry, &policy_ro, None, &store_ro, None,
+        &registry, &policy_ro, &infisical, &store_ro, None,
         "gcloud.projects.list", serde_json::json!({}), ctx_ro, &[],
     ).unwrap();
     assert!(!outcome_ro.ok, "readonly profile should deny");
@@ -156,7 +158,7 @@ fn test_profile_policy_isolation_no_cross_contamination() {
         approver: None,
     };
     let outcome_rw = run_capability(
-        &registry, &policy_rw, None, &store_rw, None,
+        &registry, &policy_rw, &infisical, &store_rw, None,
         "gcloud.projects.list", serde_json::json!({}), ctx_rw, &[],
     ).unwrap();
     assert!(outcome_rw.ok, "write profile should allow");

@@ -36,7 +36,7 @@ pub fn run_wf(name: &str, input_pairs: &[String], json: bool) -> Result<()> {
         profile: state.config.active_profiles.first().cloned().unwrap_or_else(|| "default".to_string()),
         approver: None,
     };
-    let outcomes = run_workflow(&cap_reg, &wf_reg, &policy, state.config.infisical.as_ref(), &store, None, name, input, ctx)
+    let outcomes = run_workflow(&cap_reg, &wf_reg, &policy, &state.config.infisical(), &store, None, name, input, ctx)
         .map_err(|e| anyhow!("{e}"))?;
     if json { print_json(&outcomes); }
     else {

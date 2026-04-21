@@ -245,6 +245,9 @@ pub struct InfisicalRef {
     pub environment: String,
     #[serde(default = "default_secret_path")]
     pub secret_path: String,
+    /// Which named Infisical account profile to use. None = use the active profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub infisical_profile: Option<String>,
 }
 
 fn default_secret_path() -> String { "/".to_string() }

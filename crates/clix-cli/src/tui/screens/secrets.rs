@@ -26,7 +26,7 @@ fn render_config_card(f: &mut Frame, app: &App, area: Rect) {
 
     // Determine credential source
     #[cfg(target_os = "linux")]
-    let source = if clix_core::secrets::keyring::load_credentials().is_some() { "keyring" } else { "config.yaml" };
+    let source = if clix_core::secrets::keyring::load_credentials(&app.infisical_profile_name).is_some() { "keyring" } else { "config.yaml" };
     #[cfg(not(target_os = "linux"))]
     let source = "config.yaml";
 

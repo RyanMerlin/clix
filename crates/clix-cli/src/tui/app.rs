@@ -132,6 +132,7 @@ pub struct App {
     pub receipts_preview: Vec<ReceiptRow>,
     pub workflow_registry: WorkflowRegistry,
     pub infisical_cfg: Option<clix_core::state::InfisicalConfig>,
+    pub infisical_profile_name: String,
     pub connectivity_report: Option<clix_core::secrets::ConnectivityReport>,
     pub broker_status: Option<crate::tui::screens::broker::BrokerScreenState>,
     /// Receipt IDs with PendingApproval status, for the approval banner.
@@ -172,7 +173,8 @@ impl App {
         let packs = load_packs_from_dir(&state.packs_dir);
         let profiles = load_all_profiles(&state);
         let active_profiles = state.config.active_profiles.clone();
-        let infisical_cfg = state.config.infisical.clone();
+        let infisical_profile_name = state.config.active_infisical.clone().unwrap_or_else(|| "default".to_string());
+        let infisical_cfg = state.config.infisical().active_profile().cloned();
         // Load receipts from DB for the Receipts screen and pending-approval banner
         let (receipts_preview, pending_approval_ids) = load_receipts(&state.receipts_db);
         Ok(Self {
@@ -185,6 +187,7 @@ impl App {
             receipts_preview,
             workflow_registry,
             infisical_cfg,
+            infisical_profile_name,
             connectivity_report: None,
             broker_status: None,
             pending_approval_ids,
@@ -1131,48 +1134,39 @@ impl App {
     }
 
     fn do_write_infisical_config(&self, site_url: &str, client_id: &str, client_secret: &str, project_id: &str, environment: &str) -> Result<clix_core::state::InfisicalConfig> {
-        let state = ClixState::load(home_dir())?;
+        let mut state = ClixState::load(home_dir())?;
+        let profile_name = state.config.active_infisical
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
+
         #[cfg(target_os = "linux")]
         let keyring_ok = {
             use clix_core::secrets::keyring::{store_credentials, KeyringResult};
-            matches!(store_credentials(client_id, client_secret), KeyringResult::Ok)
+            matches!(store_credentials(&profile_name, client_id, client_secret), KeyringResult::Ok)
         };
         #[cfg(not(target_os = "linux"))]
         let keyring_ok = false;
 
-        let config_path = &state.config_path;
-        let existing = if config_path.exists() { std::fs::read_to_string(config_path)? } else { String::new() };
-        let mut val: serde_yaml::Value = if existing.is_empty() {
-            serde_yaml::Value::Mapping(Default::default())
-        } else {
-            serde_yaml::from_str(&existing)?
-        };
-        let infisical_map = {
-            let mut m = serde_yaml::Mapping::new();
-            m.insert(sv("siteUrl"), sv(site_url));
-            if !project_id.is_empty() { m.insert(sv("defaultProjectId"), sv(project_id)); }
-            m.insert(sv("defaultEnvironment"), sv(environment));
-            if !keyring_ok {
-                m.insert(sv("clientId"), sv(client_id));
-                m.insert(sv("clientSecret"), sv(client_secret));
-            }
-            serde_yaml::Value::Mapping(m)
-        };
-        if let serde_yaml::Value::Mapping(ref mut root) = val {
-            root.insert(sv("infisical"), infisical_map);
+        let profile = state.config.infisical_profiles
+            .entry(profile_name.clone())
+            .or_insert_with(|| clix_core::state::InfisicalConfig {
+                site_url: "https://app.infisical.com".to_string(),
+                client_id: None, client_secret: None,
+                default_project_id: None,
+                default_environment: "dev".to_string(),
+            });
+        profile.site_url = site_url.to_string();
+        profile.default_environment = environment.to_string();
+        if !project_id.is_empty() { profile.default_project_id = Some(project_id.to_string()); }
+        if !keyring_ok {
+            profile.client_id = Some(client_id.to_string());
+            profile.client_secret = Some(client_secret.to_string());
         }
-        std::fs::create_dir_all(config_path.parent().unwrap_or(config_path))?;
-        let config_yaml = serde_yaml::to_string(&val)?;
-        std::fs::write(config_path, &config_yaml)?;
-        #[cfg(target_os = "linux")]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let Ok(meta) = std::fs::metadata(config_path) {
-                let mut perms = meta.permissions();
-                perms.set_mode(0o600);
-                let _ = std::fs::set_permissions(config_path, perms);
-            }
+        if state.config.active_infisical.is_none() {
+            state.config.active_infisical = Some(profile_name.clone());
         }
+        state.save_config()?;
+
         let effective_cfg = clix_core::state::InfisicalConfig {
             site_url: site_url.to_string(),
             client_id: Some(client_id.to_string()),
@@ -1181,88 +1175,6 @@ impl App {
             default_environment: environment.to_string(),
         };
         Ok(effective_cfg)
-    }
-
-    #[allow(dead_code)]
-    fn do_save_infisical_config(&self, site_url: &str, client_id: &str, client_secret: &str, project_id: &str, environment: &str) -> Result<String> {
-        let state = ClixState::load(home_dir())?;
-        // Try keyring first (Linux only)
-        #[cfg(target_os = "linux")]
-        let keyring_ok = {
-            use clix_core::secrets::keyring::{store_credentials, KeyringResult};
-            matches!(store_credentials(client_id, client_secret), KeyringResult::Ok)
-        };
-        #[cfg(not(target_os = "linux"))]
-        let keyring_ok = false;
-
-        // Read or create config, patch infisical fields
-        let config_path = &state.config_path;
-        let existing = if config_path.exists() {
-            std::fs::read_to_string(config_path)?
-        } else {
-            String::new()
-        };
-        let mut val: serde_yaml::Value = if existing.is_empty() {
-            serde_yaml::Value::Mapping(Default::default())
-        } else {
-            serde_yaml::from_str(&existing)?
-        };
-        let infisical_map = {
-            let mut m = serde_yaml::Mapping::new();
-            m.insert(sv("siteUrl"), sv(site_url));
-            if !project_id.is_empty() {
-                m.insert(sv("defaultProjectId"), sv(project_id));
-            }
-            m.insert(sv("defaultEnvironment"), sv(environment));
-            // Only store credentials in config.yaml if keyring failed
-            if !keyring_ok {
-                m.insert(sv("clientId"), sv(client_id));
-                m.insert(sv("clientSecret"), sv(client_secret));
-            }
-            serde_yaml::Value::Mapping(m)
-        };
-        if let serde_yaml::Value::Mapping(ref mut root) = val {
-            root.insert(sv("infisical"), infisical_map);
-        }
-        std::fs::create_dir_all(config_path.parent().unwrap_or(config_path))?;
-        let config_yaml = serde_yaml::to_string(&val)?;
-        std::fs::write(config_path, &config_yaml)?;
-        #[cfg(target_os = "linux")]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let Ok(meta) = std::fs::metadata(config_path) {
-                let mut perms = meta.permissions();
-                perms.set_mode(0o600);
-                let _ = std::fs::set_permissions(config_path, perms);
-            }
-        }
-
-        // Post-save connectivity check
-        let cfg_for_test = clix_core::state::InfisicalConfig {
-            site_url: site_url.to_string(),
-            client_id: if keyring_ok || client_id.is_empty() { None } else { Some(client_id.to_string()) },
-            client_secret: if keyring_ok || client_secret.is_empty() { None } else { Some(client_secret.to_string()) },
-            default_project_id: if project_id.is_empty() { None } else { Some(project_id.to_string()) },
-            default_environment: environment.to_string(),
-        };
-        // Build effective cfg (merge keyring creds if they were just stored)
-        let effective_cfg = if keyring_ok {
-            let mut c = cfg_for_test;
-            c.client_id = Some(client_id.to_string());
-            c.client_secret = Some(client_secret.to_string());
-            c
-        } else {
-            cfg_for_test
-        };
-        let report = clix_core::secrets::test_connectivity(&effective_cfg);
-        if report.auth_ok {
-            let msg = format!("✓ Infisical connected ({}ms){}", report.latency_ms,
-                if keyring_ok { " — credentials secured in keyring" } else { " — credentials in config.yaml" });
-            Ok(msg)
-        } else {
-            let err_short: String = report.error.as_deref().unwrap_or("auth failed").chars().take(60).collect();
-            Err(anyhow::anyhow!("connectivity check failed: {}", err_short))
-        }
     }
 
     fn do_install_pack(&self, path_str: &str) -> Result<String> {
@@ -1276,9 +1188,6 @@ impl App {
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-fn sv(s: &str) -> serde_yaml::Value {
-    serde_yaml::Value::String(s.to_string())
-}
 
 // ─── loaders ─────────────────────────────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 use clap::Subcommand;
 use anyhow::Result;
 use clix_core::secrets::{test_connectivity, preview};
-use clix_core::state::ClixState;
+use clix_core::state::{ClixState, InfisicalConfig};
 
 #[derive(Subcommand, Debug)]
 pub enum SecretsCmd {
@@ -12,7 +12,7 @@ pub enum SecretsCmd {
     },
     /// Test connectivity to Infisical
     Test,
-    /// Configure Infisical credentials
+    /// Configure Infisical credentials (updates the active profile, or creates "default")
     Set {
         #[arg(long)] site_url: Option<String>,
         #[arg(long)] project_id: Option<String>,
@@ -20,7 +20,7 @@ pub enum SecretsCmd {
         /// Read client_id and client_secret from stdin (one per line, for CI use)
         #[arg(long)] stdin: bool,
     },
-    /// Remove stored Infisical credentials
+    /// Remove stored Infisical credentials from the active profile
     Unset,
     /// List secrets at a path in Infisical
     List {
@@ -50,11 +50,15 @@ pub fn run_secrets(cmd: SecretsCmd, state: &ClixState) -> Result<()> {
 }
 
 fn cmd_show(state: &ClixState, use_yaml: bool, use_json: bool) -> Result<()> {
-    let cfg = state.config.infisical.as_ref();
+    let profiles = state.config.infisical();
+    let cfg = profiles.active_profile();
 
-    // Determine credential source
+    // Determine credential source for the active profile
     #[cfg(target_os = "linux")]
-    let from_keyring = clix_core::secrets::keyring::load_credentials().is_some();
+    let from_keyring = {
+        let active_name = state.config.active_infisical.as_deref().unwrap_or("default");
+        clix_core::secrets::keyring::load_credentials(active_name).is_some()
+    };
     #[cfg(not(target_os = "linux"))]
     let from_keyring = false;
 
@@ -65,9 +69,11 @@ fn cmd_show(state: &ClixState, use_yaml: bool, use_json: bool) -> Result<()> {
     let client_secret = cfg.and_then(|c| c.client_secret.as_deref()).unwrap_or("");
     let project_id = cfg.and_then(|c| c.default_project_id.as_deref()).unwrap_or("");
     let environment = cfg.map(|c| c.default_environment.as_str()).unwrap_or("dev");
+    let active_name = state.config.active_infisical.as_deref().unwrap_or("(none)");
 
     if use_json {
         let v = serde_json::json!({
+            "active_profile": active_name,
             "site_url": site_url,
             "client_id": preview(client_id),
             "client_id_source": source,
@@ -79,6 +85,7 @@ fn cmd_show(state: &ClixState, use_yaml: bool, use_json: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&v)?);
     } else if use_yaml {
         let v = serde_json::json!({
+            "active_profile": active_name,
             "site_url": site_url,
             "client_id": preview(client_id),
             "client_id_source": source,
@@ -89,7 +96,7 @@ fn cmd_show(state: &ClixState, use_yaml: bool, use_json: bool) -> Result<()> {
         });
         println!("{}", serde_yaml::to_string(&v)?);
     } else {
-        println!("Infisical configuration:");
+        println!("Infisical configuration (profile: {}):", active_name);
         println!("  site_url        {}", site_url);
         println!("  client_id       {} ({})", preview(client_id), source);
         println!("  client_secret   {} ({})", preview(client_secret), source);
@@ -100,8 +107,9 @@ fn cmd_show(state: &ClixState, use_yaml: bool, use_json: bool) -> Result<()> {
 }
 
 fn cmd_test(state: &ClixState) -> Result<()> {
-    let cfg = state.config.infisical.as_ref()
-        .ok_or_else(|| anyhow::anyhow!("Infisical not configured — run `clix secrets set` first"))?;
+    let profiles = state.config.infisical();
+    let cfg = profiles.active_profile()
+        .ok_or_else(|| anyhow::anyhow!("No active Infisical profile — run `clix secrets set` or `clix infisical add`"))?;
 
     println!("Testing Infisical connectivity to {} …", cfg.site_url);
     let report = test_connectivity(cfg);
@@ -143,7 +151,6 @@ fn cmd_set(_state: &ClixState, site_url: Option<String>, project_id: Option<Stri
         };
         let secret = rpassword::prompt_password("client_secret: ")
             .unwrap_or_else(|_| {
-                // fallback: plain readline with a note
                 eprintln!("(warning: hidden input unavailable, secret will be visible)");
                 let mut buf = String::new();
                 let _ = std::io::stdin().read_line(&mut buf);
@@ -154,44 +161,58 @@ fn cmd_set(_state: &ClixState, site_url: Option<String>, project_id: Option<Stri
 
     let home = clix_core::state::home_dir();
     let mut new_state = ClixState::load(home)?;
-    let cfg = new_state.config.infisical.get_or_insert_with(|| clix_core::state::InfisicalConfig {
-        site_url: "https://app.infisical.com".to_string(),
-        client_id: None,
-        client_secret: None,
-        default_project_id: None,
-        default_environment: "dev".to_string(),
-    });
+
+    // Determine which profile to update (active, or create "default")
+    let profile_name = new_state.config.active_infisical
+        .clone()
+        .unwrap_or_else(|| "default".to_string());
+
+    let cfg = new_state.config.infisical_profiles
+        .entry(profile_name.clone())
+        .or_insert_with(|| InfisicalConfig {
+            site_url: "https://app.infisical.com".to_string(),
+            client_id: None,
+            client_secret: None,
+            default_project_id: None,
+            default_environment: "dev".to_string(),
+        });
 
     if let Some(u) = site_url { cfg.site_url = u; }
     if let Some(p) = project_id { cfg.default_project_id = Some(p); }
     cfg.default_environment = env;
 
+    if new_state.config.active_infisical.is_none() {
+        new_state.config.active_infisical = Some(profile_name.clone());
+    }
+
     // On Linux, try keyring first
     #[cfg(target_os = "linux")]
     {
         use clix_core::secrets::keyring::{store_credentials, KeyringResult};
-        match store_credentials(&client_id, &client_secret) {
+        match store_credentials(&profile_name, &client_id, &client_secret) {
             KeyringResult::Ok => {
                 println!("Credentials stored in keyring.");
             }
             KeyringResult::Unavailable(e) => {
                 eprintln!("Keyring unavailable ({}), storing in config.yaml", e);
-                cfg.client_id = Some(client_id.clone());
-                cfg.client_secret = Some(client_secret.clone());
+                let cfg2 = new_state.config.infisical_profiles.get_mut(&profile_name).unwrap();
+                cfg2.client_id = Some(client_id.clone());
+                cfg2.client_secret = Some(client_secret.clone());
             }
         }
     }
     #[cfg(not(target_os = "linux"))]
     {
-        cfg.client_id = Some(client_id.clone());
-        cfg.client_secret = Some(client_secret.clone());
+        let cfg2 = new_state.config.infisical_profiles.get_mut(&profile_name).unwrap();
+        cfg2.client_id = Some(client_id.clone());
+        cfg2.client_secret = Some(client_secret.clone());
     }
 
     new_state.save_config()?;
-    println!("Configuration saved.");
+    println!("Configuration saved (profile: {}).", profile_name);
 
     // Run connectivity test
-    let cfg_ref = new_state.config.infisical.as_ref().unwrap();
+    let cfg_ref = new_state.config.infisical_profiles.get(&profile_name).unwrap();
     let report = test_connectivity(cfg_ref);
     if report.auth_ok {
         println!("✓ Infisical connected ({}ms)", report.latency_ms);
@@ -202,10 +223,15 @@ fn cmd_set(_state: &ClixState, site_url: Option<String>, project_id: Option<Stri
 }
 
 fn cmd_unset(state: &ClixState) -> Result<()> {
+    let profile_name = state.config.active_infisical
+        .as_deref()
+        .unwrap_or("default")
+        .to_string();
+
     #[cfg(target_os = "linux")]
     {
         use clix_core::secrets::keyring::{delete_credentials, KeyringResult};
-        match delete_credentials() {
+        match delete_credentials(&profile_name) {
             KeyringResult::Ok => println!("Keyring credentials removed."),
             KeyringResult::Unavailable(e) => eprintln!("Keyring unavailable: {}", e),
         }
@@ -213,18 +239,18 @@ fn cmd_unset(state: &ClixState) -> Result<()> {
 
     let home = clix_core::state::home_dir();
     let mut new_state = ClixState::load(home)?;
-    if let Some(ref mut cfg) = new_state.config.infisical {
+    if let Some(cfg) = new_state.config.infisical_profiles.get_mut(&profile_name) {
         cfg.client_id = None;
         cfg.client_secret = None;
     }
     new_state.save_config()?;
-    println!("Infisical credentials removed from config.yaml.");
-    let _ = state; // suppress unused warning
+    println!("Infisical credentials removed from profile '{}'.", profile_name);
     Ok(())
 }
 
 fn cmd_list(state: &ClixState, path: &str, project: Option<&str>, env: Option<&str>, plain: bool) -> Result<()> {
-    let cfg = state.config.infisical.as_ref()
+    let profiles = state.config.infisical();
+    let cfg = profiles.active_profile()
         .ok_or_else(|| anyhow::anyhow!("Infisical not configured"))?;
     let project_id = project
         .or_else(|| cfg.default_project_id.as_deref())
@@ -254,7 +280,8 @@ fn cmd_list(state: &ClixState, path: &str, project: Option<&str>, env: Option<&s
 }
 
 fn cmd_tree(state: &ClixState, path: &str, depth: u8, project: Option<&str>, env: Option<&str>) -> Result<()> {
-    let cfg = state.config.infisical.as_ref()
+    let profiles = state.config.infisical();
+    let cfg = profiles.active_profile()
         .ok_or_else(|| anyhow::anyhow!("Infisical not configured"))?;
     let project_id = project
         .or_else(|| cfg.default_project_id.as_deref())

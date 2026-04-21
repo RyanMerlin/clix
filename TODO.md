@@ -17,6 +17,15 @@
 - **Starter policy**: `clix init` now seeds a `policy.yaml` allowing `none` + `readOnly` side-effects out of the box
 - **XDG install path**: pack seeder searches `exe_dir/packs`, `~/.local/share/clix/packs`, then `./packs`
 - **Docs honest**: `docs/pack.md` table reflects only real packs; phantom packs removed
+- **Pack CLI commands**: `clix pack onboard`, `clix pack diff`, `clix pack publish` all implemented
+
+### macOS sandbox
+- **`sandbox/macos.rs`**: `sandbox_exec_available()`, `profile_for(SideEffectClass)`, `apply_sandbox()` no-op
+- **`run_subprocess_sandboxed()`**: wraps readOnly/none capabilities in `sandbox-exec -p <inline-profile>` on macOS
+- **`clix doctor`** reports `sandbox-exec (BETA)` on macOS, `landlock` on Linux
+
+### Compiler health
+- **Zero warnings** across clix-cli, clix-core, clix-broker (commit `2ee42fd`)
 
 ### TUI overhaul (all 5 slices)
 - **Infisical hang fixed**: `reqwest::blocking::Client` now has 10s timeout + 5s connect timeout on all 4 HTTP call sites in `clix-core/src/secrets/mod.rs`
@@ -30,6 +39,29 @@
 - **Breadcrumb header**: replaces filler dashes — shows `clix › Screen › Overlay` updated on every key
 - **Toast decoupled from Overlay**: `App::toast_state: Option<ToastState>` floats above all overlays — toasts no longer eject open wizards
 - **Confirm-before-discard**: `confirming_discard` flag shows y/n/esc dialog when Esc pressed on dirty wizard; `is_dirty()` on InfisicalSetup, ProfileWizard, CapabilityWizard, PackWizard
+
+---
+
+## Next: Multi-Infisical + Secrets Tree Browser
+
+### Core plumbing (Slice 1)
+- [ ] `ClixConfig.infisical` → `infisical_profiles: BTreeMap<String, InfisicalProfile>` + `active_infisical`; migration on load.
+- [ ] Keyring per-profile slots (`infisical-client-id:{name}`).
+- [ ] Token cache keyed on `(site_url, client_id)` instead of global single-entry.
+- [ ] `InfisicalRef` + `ProfileFolderBinding` gain `infisical_profile: Option<String>` selector.
+- [ ] `run_capability` + `run_workflow` take `&InfisicalProfiles` resolver.
+
+### CLI (Slice 2)
+- [ ] `clix infisical {list,add,use,remove,test,edit}` — named Infisical account management.
+- [ ] `--profile <name>` on all `clix secrets *` subcommands.
+
+### TUI (Slice 3)
+- [ ] `Overlay::InfisicalAccounts` — add/edit/remove/use/test accounts list.
+- [ ] `Screen::Secrets` updated: accounts section, `m`/`u`/`b` keybinds, breadcrumb badge.
+
+### Secrets tree browser (Slice 4)
+- [ ] `widgets/secrets_tree.rs` — async lazy-expanding tree; Browse + Bind modes.
+- [ ] Replace `SecretPicker` with tree browser in profile binding wizard.
 
 ---
 
@@ -52,7 +84,7 @@
 - [x] Receipts screen — loads up to 200 receipts from `ReceiptStore`, table with time/capability/profile/outcome columns, cursor navigation, `[A]pprove` pending via WorkPool, `r` reloads. Removed from STUB_SCREENS.
 
 ### Workflows screen
-- [ ] Workflows screen — execute a workflow from TUI; show step-by-step progress.
+- [x] Workflows screen — left list of workflow names + right step-detail panel; backed by `WorkflowRegistry`; cursor navigation. Shipped commit `2ee42fd`.
 
 ---
 
@@ -82,9 +114,9 @@
 - [ ] `npm-observe` — `list`, `audit`, `outdated` — read-only Node.js package inspection
 
 ### Pack authoring UX
-- [ ] `clix pack onboard` — probe `--help`/`--version` entry points and scaffold a pack; `--json` for structured probe report (designed, not implemented).
-- [ ] `clix pack diff` — structured diff between installed and local version.
-- [ ] `clix pack publish` — publish to a local registry directory.
+- [x] `clix pack onboard` — probes `--help`/`--version`, scaffolds a pack from discovered entry points.
+- [x] `clix pack diff` — structured diff between installed and local version.
+- [x] `clix pack publish` — publishes to local registry directory (bundles + writes `index.json`).
 
 ---
 
@@ -101,7 +133,7 @@
 
 ## Maintenance
 
-- [ ] Suppress the 17 `unused import` warnings in `clix-cli` (most are pre-existing stubs from removed features).
+- [x] Suppress compiler warnings — zero warnings across all three crates (commit `2ee42fd`).
 - [ ] `clix-testkit` integration suite: add TUI smoke test that opens the TUI, navigates to Secrets, and asserts no hang within 5s on an invalid Infisical URL.
 - [ ] Bump `reqwest` and `tokio` to latest stable.
 - [ ] `jail_config_digest` is captured in receipts but not yet verified on re-read (SECURITY.md note).

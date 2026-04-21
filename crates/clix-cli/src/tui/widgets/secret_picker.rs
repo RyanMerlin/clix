@@ -207,6 +207,7 @@ impl SecretPicker {
                                 project_id: Some(self.project_id.clone()),
                                 environment: self.environment.clone(),
                                 secret_path: path,
+                                infisical_profile: None,
                             }
                         })
                         .collect();
@@ -234,6 +235,7 @@ impl SecretPicker {
                                 project_id: Some(self.project_id.clone()),
                                 environment: self.environment.clone(),
                                 secret_path: path,
+                                infisical_profile: None,
                             });
                         }
                     }

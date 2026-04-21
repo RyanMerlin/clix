@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use crate::error::Result;
@@ -49,6 +50,8 @@ impl ClixState {
             let content = std::fs::read_to_string(&state.config_path)?;
             state.config = serde_yaml::from_str(&content)?;
         }
+        // Promote legacy single-entry infisical field to named profiles map
+        migrate_infisical_config(&mut state.config);
         #[cfg(target_os = "linux")]
         crate::secrets::keyring::merge_keyring_into_config(&mut state.config);
         Ok(state)
@@ -86,6 +89,24 @@ impl ClixState {
     }
 }
 
+/// Migrate legacy `infisical: Option<InfisicalConfig>` into the named-profile map.
+/// Runs every load; is a no-op once the map is populated.
+fn migrate_infisical_config(config: &mut ClixConfig) {
+    if config.infisical_profiles.is_empty() {
+        if let Some(legacy) = config.infisical.take() {
+            config.infisical_profiles.insert("default".to_string(), legacy);
+            if config.active_infisical.is_none() {
+                config.active_infisical = Some("default".to_string());
+            }
+        }
+    } else {
+        // Map is already populated; clear any stale legacy field so it doesn't re-appear on save.
+        config.infisical = None;
+    }
+}
+
+// ─── config ──────────────────────────────────────────────────────────────────
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClixConfig {
@@ -99,12 +120,31 @@ pub struct ClixConfig {
     pub workspace_root: Option<PathBuf>,
     #[serde(default)]
     pub active_profiles: Vec<String>,
+
+    /// Named Infisical account profiles. Use `active_infisical` to select the default.
     #[serde(default)]
+    pub infisical_profiles: BTreeMap<String, InfisicalConfig>,
+    /// Name of the currently active Infisical profile (key into `infisical_profiles`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_infisical: Option<String>,
+    /// Legacy single-profile field — migrated to `infisical_profiles["default"]` on first load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub infisical: Option<InfisicalConfig>,
+
     #[serde(default)]
     pub approval_gate: Option<ApprovalGateConfig>,
     #[serde(default)]
     pub sandbox: SandboxConfig,
+}
+
+impl ClixConfig {
+    /// Returns a resolver over the named Infisical profiles.
+    pub fn infisical(&self) -> InfisicalProfiles<'_> {
+        InfisicalProfiles {
+            profiles: &self.infisical_profiles,
+            active: self.active_infisical.as_deref(),
+        }
+    }
 }
 
 impl Default for ClixConfig {
@@ -115,6 +155,8 @@ impl Default for ClixConfig {
             default_env: "default".to_string(),
             workspace_root: None,
             active_profiles: vec![],
+            infisical_profiles: BTreeMap::new(),
+            active_infisical: None,
             infisical: None,
             approval_gate: None,
             sandbox: SandboxConfig::default(),
@@ -125,24 +167,9 @@ impl Default for ClixConfig {
 fn default_schema_version() -> u32 { 1 }
 fn default_env() -> String { "default".to_string() }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ApprovalMode {
-    Auto,
-    #[default]
-    Interactive,
-    AlwaysRequire,
-}
+// ─── infisical profiles ───────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SandboxConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub allowed_executables: Vec<String>,
-}
-
+/// A single named Infisical account's connection configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InfisicalConfig {
@@ -164,6 +191,51 @@ fn default_infisical_url() -> String {
 
 fn default_infisical_env() -> String {
     "dev".to_string()
+}
+
+/// Resolver over a set of named Infisical profiles.
+/// Passed to execution / credential resolution so individual bindings can
+/// reference a specific profile by name (or fall back to the active one).
+pub struct InfisicalProfiles<'a> {
+    pub profiles: &'a BTreeMap<String, InfisicalConfig>,
+    pub active: Option<&'a str>,
+}
+
+impl<'a> InfisicalProfiles<'a> {
+    /// Resolve a specific profile by name, or the active profile if `name` is None.
+    pub fn resolve(&self, name: Option<&str>) -> Option<&'a InfisicalConfig> {
+        let key = name.or(self.active)?;
+        self.profiles.get(key)
+    }
+
+    /// Return the active profile, if any.
+    pub fn active_profile(&self) -> Option<&'a InfisicalConfig> {
+        self.resolve(None)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.profiles.is_empty()
+    }
+}
+
+// ─── other config types ───────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ApprovalMode {
+    Auto,
+    #[default]
+    Interactive,
+    AlwaysRequire,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub allowed_executables: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,5 +263,49 @@ mod tests {
         let cfg = ClixConfig::default();
         assert_eq!(cfg.schema_version, 1);
         assert!(matches!(cfg.approval_mode, ApprovalMode::Interactive));
+        assert!(cfg.infisical_profiles.is_empty());
+        assert!(cfg.active_infisical.is_none());
+    }
+
+    #[test]
+    fn test_legacy_migration() {
+        let mut config = ClixConfig {
+            infisical: Some(InfisicalConfig {
+                site_url: "https://example.com".to_string(),
+                client_id: Some("cid".to_string()),
+                client_secret: None,
+                default_project_id: Some("proj1".to_string()),
+                default_environment: "dev".to_string(),
+            }),
+            ..ClixConfig::default()
+        };
+        migrate_infisical_config(&mut config);
+        assert!(config.infisical.is_none(), "legacy field should be cleared");
+        assert!(config.infisical_profiles.contains_key("default"), "promoted to 'default' profile");
+        assert_eq!(config.active_infisical.as_deref(), Some("default"));
+        let profile = &config.infisical_profiles["default"];
+        assert_eq!(profile.site_url, "https://example.com");
+        assert_eq!(profile.client_id.as_deref(), Some("cid"));
+    }
+
+    #[test]
+    fn test_infisical_profiles_resolve() {
+        let mut profiles = BTreeMap::new();
+        profiles.insert("work".to_string(), InfisicalConfig {
+            site_url: "https://work.infisical.com".to_string(),
+            client_id: None, client_secret: None,
+            default_project_id: None,
+            default_environment: "prod".to_string(),
+        });
+        profiles.insert("personal".to_string(), InfisicalConfig {
+            site_url: "https://app.infisical.com".to_string(),
+            client_id: None, client_secret: None,
+            default_project_id: None,
+            default_environment: "dev".to_string(),
+        });
+        let resolver = InfisicalProfiles { profiles: &profiles, active: Some("work") };
+        assert_eq!(resolver.active_profile().map(|p| p.default_environment.as_str()), Some("prod"));
+        assert_eq!(resolver.resolve(Some("personal")).map(|p| p.default_environment.as_str()), Some("dev"));
+        assert!(resolver.resolve(Some("nonexistent")).is_none());
     }
 }

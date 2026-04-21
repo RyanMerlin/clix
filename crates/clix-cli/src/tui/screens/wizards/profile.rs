@@ -185,6 +185,7 @@ impl ProfileWizard {
                         inject_prefix,
                         synced_at: chrono::Utc::now(),
                         snapshot,
+                        infisical_profile: None,
                     });
                     self.picker = None;
                 }

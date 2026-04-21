@@ -28,7 +28,7 @@ pub async fn workflows_run(serve: &Arc<ServeState>, params: &serde_json::Value) 
     let name = name.to_string();
     let outcomes = tokio::task::spawn_blocking(move || {
         let store = serve_clone.store.lock().unwrap();
-        run_workflow(&serve_clone.cap_registry, &serve_clone.wf_registry, &serve_clone.policy, serve_clone.state.config.infisical.as_ref(), &store, serve_clone.worker_registry.as_ref(), &name, arguments, ctx)
+        run_workflow(&serve_clone.cap_registry, &serve_clone.wf_registry, &serve_clone.policy, &serve_clone.state.config.infisical(), &store, serve_clone.worker_registry.as_ref(), &name, arguments, ctx)
     }).await.map_err(|e| format!("task join: {e}"))?.map_err(|e| e.to_string())?;
     Ok(serde_json::json!({"outcomes": outcomes}))
 }
@@ -94,7 +94,7 @@ pub async fn shim_call(serve: &Arc<ServeState>, params: &serde_json::Value) -> M
     let serve_clone = Arc::clone(serve);
     let outcome = tokio::task::spawn_blocking(move || {
         let store = serve_clone.store.lock().unwrap();
-        run_capability(&serve_clone.cap_registry, &serve_clone.policy, serve_clone.state.config.infisical.as_ref(), &store, serve_clone.worker_registry.as_ref(), &cap_name, serde_json::json!({}), ctx, &[])
+        run_capability(&serve_clone.cap_registry, &serve_clone.policy, &serve_clone.state.config.infisical(), &store, serve_clone.worker_registry.as_ref(), &cap_name, serde_json::json!({}), ctx, &[])
     }).await.map_err(|e| format!("task join: {e}"))?.map_err(|e| e.to_string())?;
 
     let exit_code = if let Some(result) = &outcome.result {

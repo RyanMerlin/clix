@@ -56,7 +56,7 @@ pub fn run(capability: &str, input_pairs: &[String], json: bool, dry_run: bool) 
         profile: state.config.active_profiles.first().cloned().unwrap_or_else(|| "default".to_string()),
         approver: None,
     };
-    let outcome = run_capability(&registry, &policy, state.config.infisical.as_ref(), &store, None, capability, input, ctx, &[])
+    let outcome = run_capability(&registry, &policy, &state.config.infisical(), &store, None, capability, input, ctx, &[])
         .map_err(|e| anyhow!("{e}"))?;
     if json {
         // Always emit the full outcome struct under --json for predictable agent parsing.
