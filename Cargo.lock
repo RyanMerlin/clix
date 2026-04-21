@@ -663,7 +663,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "clix-broker"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64",
  "chrono",
@@ -687,7 +687,7 @@ dependencies = [
 
 [[package]]
 name = "clix-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "clix-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "criterion",
@@ -754,7 +754,7 @@ dependencies = [
 
 [[package]]
 name = "clix-serve"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -772,7 +772,7 @@ dependencies = [
 
 [[package]]
 name = "clix-shim"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "assert_cmd",
  "predicates",
@@ -795,7 +795,7 @@ dependencies = [
 
 [[package]]
 name = "clix-worker"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "clix-core",
  "serde",
