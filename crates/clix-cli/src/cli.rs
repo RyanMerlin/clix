@@ -54,6 +54,11 @@ pub enum Commands {
         /// Run from the project root. Merges with existing .cursor/mcp.json if present.
         #[arg(long = "cursor")]
         cursor: bool,
+        /// Install the AppArmor profile for clix-worker (Linux only, requires sudo).
+        /// Needed on Ubuntu 23.10+ where kernel.apparmor_restrict_unprivileged_userns=1
+        /// blocks unprivileged user namespaces. Runs: sudo cp + sudo apparmor_parser.
+        #[arg(long = "install-isolation")]
+        install_isolation: bool,
     },
     /// Show clix status and configuration
     Status { #[arg(long)] json: bool },

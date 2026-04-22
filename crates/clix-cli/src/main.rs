@@ -92,7 +92,7 @@ async fn main() -> Result<()> {
 
 async fn dispatch_static(cli: Cli) -> Result<()> {
     match cli.command {
-        Commands::Init { install_shims, adopt_creds, adopt_sa, claude_code, cursor } => {
+        Commands::Init { install_shims, adopt_creds, adopt_sa, claude_code, cursor, install_isolation } => {
             commands::init::run()?;
             if !install_shims.is_empty() {
                 let cmds: Vec<&str> = install_shims.iter().map(String::as_str).collect();
@@ -115,6 +115,9 @@ async fn dispatch_static(cli: Cli) -> Result<()> {
             }
             if cursor {
                 commands::init::setup_cursor(None)?;
+            }
+            if install_isolation {
+                commands::init::install_isolation()?;
             }
         }
         Commands::Status { json } => commands::status::run(json)?,

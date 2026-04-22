@@ -199,6 +199,7 @@ defaultAction: deny
         println!();
         println!("  run `clix secrets set` or press [c] in the TUI Dashboard to configure Infisical secrets");
     }
+
     Ok(())
 }
 
@@ -480,6 +481,59 @@ fn secure_file(path: &Path) -> Result<()> {
             .map_err(|e| anyhow!("chmod 600 {}: {e}", path.display()))?;
     }
     Ok(())
+}
+
+/// Install the AppArmor profile for clix-worker by running sudo directly.
+/// Requires sudo access. Prompts for password interactively if needed.
+pub fn install_isolation() -> Result<()> {
+    #[cfg(not(target_os = "linux"))]
+    anyhow::bail!("--install-isolation is only supported on Linux");
+
+    #[cfg(target_os = "linux")]
+    {
+        const PROFILE: &str = r#"abi <abi/4.0>,
+include <tunables/global>
+
+profile clix-worker @{HOME}/.local/bin/clix-worker flags=(unconfined) {
+  userns,
+  @{exec_path} mr,
+}
+
+profile clix-worker-system /usr/local/bin/clix-worker flags=(unconfined) {
+  userns,
+  @{exec_path} mr,
+}
+"#;
+        let dest = std::path::Path::new("/etc/apparmor.d/clix-worker");
+
+        // Write profile to a user-owned temp path, then sudo-copy it into place
+        let tmp_path = std::path::PathBuf::from(format!("/tmp/clix-worker-apparmor-{}", std::process::id()));
+        std::fs::write(&tmp_path, PROFILE)
+            .map_err(|e| anyhow!("write profile to temp: {e}"))?;
+
+        println!("Installing AppArmor profile to {} ...", dest.display());
+
+        let cp_status = std::process::Command::new("sudo")
+            .args(["cp", &tmp_path.to_string_lossy(), &dest.to_string_lossy()])
+            .status()
+            .map_err(|e| anyhow!("sudo cp failed: {e}"))?;
+        if !cp_status.success() {
+            anyhow::bail!("sudo cp exited with status {cp_status}");
+        }
+
+        let parse_status = std::process::Command::new("sudo")
+            .args(["apparmor_parser", "-r", &dest.to_string_lossy()])
+            .status()
+            .map_err(|e| anyhow!("sudo apparmor_parser failed: {e}"))?;
+        let _ = std::fs::remove_file(&tmp_path);
+        if !parse_status.success() {
+            anyhow::bail!("sudo apparmor_parser exited with status {parse_status}");
+        }
+
+        println!("AppArmor profile loaded — OS isolation is now active for clix-worker.");
+        println!("Run `clix doctor` to verify.");
+        Ok(())
+    }
 }
 
 fn locate_binary(name: &str) -> Result<PathBuf> {
