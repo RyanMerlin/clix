@@ -159,6 +159,18 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
             Span::raw(if is_active { " deactivate" } else { " activate" }),
             Span::styled("   s", theme::accent()),
             Span::raw(" edit secrets"),
+            Span::styled("   n", theme::accent()),
+            Span::raw(" new profile"),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  tip  ", theme::info()),
+            Span::raw("in secret editor: "),
+            Span::styled("i", theme::accent()),
+            Span::raw("/"),
+            Span::styled("p", theme::accent()),
+            Span::raw(" picks from Infisical, "),
+            Span::styled("e", theme::accent()),
+            Span::raw(" binds env-var"),
         ]));
 
         let inner = block.inner(area);

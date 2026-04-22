@@ -89,3 +89,12 @@ No server needed — runs in-process and exits.
 ---
 
 **That's it.** No MCP tool registration required. Discover on demand, run with `clix run --json`.
+
+## Binding secrets from Infisical to a profile
+
+1. Open the TUI: `clix tui`
+2. Press `1` to go to the **Profiles** screen
+3. Select a profile with `↑`/`↓`, then press `s` to open **Edit Secrets**
+4. Press `a` to add a new binding row, type the env-var name, press Enter
+5. Press `i` (or `p`) to open the Infisical tree picker — navigate folders with `↑`/`↓`/`→`/`←`, press Enter to select a secret path
+6. Press `ctrl-s` to save; the secret is now injected under that env-var name whenever this profile is active

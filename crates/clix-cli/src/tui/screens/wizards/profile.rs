@@ -921,7 +921,7 @@ impl SecretsEditState {
         f.render_stateful_widget(list, chunks[0], &mut state);
 
         f.render_widget(
-            Paragraph::new("↑↓:move  p:Infisical  e:env  l:literal  d:clear  enter:save  esc:cancel").style(theme::muted()),
+            Paragraph::new("↑↓:move  i/p:Infisical  e:env-var  l:literal  d:clear  ctrl-s:save  esc:cancel").style(theme::muted()),
             chunks[1],
         );
 
