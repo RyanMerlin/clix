@@ -234,13 +234,13 @@ fn render_legend(f: &mut Frame, app: &App, area: Rect) {
 
     let hints: Vec<Span> = match app.screen {
         Screen::Profiles => legend_spans(&[
-            ("↑↓", "move"), ("enter", "toggle"), ("s", "secrets"), ("n", "new"), ("tab", "next screen"), ("?", "help"), ("q", "quit"),
+            ("↑↓", "move"), ("enter", "toggle"), ("s", "secrets"), ("n", "new"), ("←/esc", "sidebar"), ("?", "help"), ("q", "quit"),
         ]),
         Screen::Capabilities => legend_spans(&[
-            ("↑↓", "move"), ("enter", "drill in"), ("esc", "back"), ("n", "new"), ("tab", "next screen"), ("q", "quit"),
+            ("↑↓", "move"), ("enter", "drill in"), ("esc", "back"), ("n", "new"), ("←/esc", "sidebar"), ("q", "quit"),
         ]),
         Screen::Packs => legend_spans(&[
-            ("↑↓", "move"), ("n", "new pack"), ("e", "edit caps"), ("i", "install"), ("tab", "next screen"), ("q", "quit"),
+            ("↑↓", "move"), ("enter", "edit caps"), ("n", "new pack"), ("i", "install"), ("←/esc", "sidebar"), ("q", "quit"),
         ]),
         Screen::Broker => legend_spans(&[
             ("r", "refresh"), ("s", "start"), ("x", "stop"), ("0-7", "switch"), ("q", "quit"),

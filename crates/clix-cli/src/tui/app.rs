@@ -458,9 +458,7 @@ impl App {
             KeyCode::Char('6') => self.switch_to(Screen::Broker),
             KeyCode::Char('7') => self.switch_to(Screen::Secrets),
             KeyCode::Char('0') => self.switch_to(Screen::Dashboard),
-            // Tab cycles screens
-            KeyCode::Tab => self.switch_to(self.screen.next()),
-            KeyCode::BackTab => self.switch_to(self.screen.prev()),
+            // Tab is sidebar-only — in content focus it does nothing
             // n = new (create wizard)
             KeyCode::Char('n') => self.open_create_wizard(),
             // i = install pack
