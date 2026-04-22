@@ -247,11 +247,11 @@ fn render_legend(f: &mut Frame, app: &App, area: Rect) {
         ]),
         Screen::Dashboard => legend_spans(&[
             ("0-7", "switch"), ("tab", "next"), ("n", "new"), ("r", "reload"),
-            ("^G", "sync"), ("?", "help"), ("q", "quit"),
+            ("$", "sync"), ("?", "help"), ("q", "quit"),
         ]),
         Screen::Secrets => legend_spans(&[
             ("m", "accounts"), ("e", "edit"), ("t", "test"), ("b", "browse"),
-            ("^G", "sync"), ("?", "help"), ("q", "quit"),
+            ("$", "sync"), ("?", "help"), ("q", "quit"),
         ]),
         Screen::Receipts => legend_spans(&[
             ("↑↓", "move"), ("A", "approve pending"), ("r", "reload"), ("q", "quit"),
@@ -362,7 +362,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         help_line("n", "new (create wizard)"),
         help_line("i", "install pack"),
         help_line("r", "reload all"),
-        help_line("ctrl+g", "sync with git remote"),
+        help_line("$", "sync with git remote"),
         Line::from(""),
         Line::from(Span::styled("  Profiles", theme::accent())),
         help_line("enter", "toggle active"),

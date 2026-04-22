@@ -397,8 +397,8 @@ impl App {
             self.should_quit = true;
             return;
         }
-        // Ctrl+G = full git sync (add → commit → pull --rebase → push)
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('g') {
+        // $ = full git sync (add → commit → pull --rebase → push); Ctrl+G removed (VS Code conflict)
+        if key.code == KeyCode::Char('$') {
             self.git_sync();
             return;
         }
