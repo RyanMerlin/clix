@@ -245,10 +245,10 @@ fn render_legend(f: &mut Frame, app: &App, area: Rect) {
             ("↑↓", "move"), ("enter", "edit caps"), ("n", "new pack"), ("i", "install"), ("←/esc", "sidebar"), ("q", "quit"),
         ]),
         Screen::Broker => legend_spans(&[
-            ("r", "refresh"), ("s", "start"), ("x", "stop"), ("0-7", "switch"), ("q", "quit"),
+            ("r", "refresh"), ("s", "start"), ("x", "stop"), ("q", "quit"),
         ]),
         Screen::Dashboard => legend_spans(&[
-            ("0-7", "switch"), ("tab", "next"), ("n", "new"), ("r", "reload"),
+            ("enter", "next action"), ("n", "new profile"), ("r", "reload"),
             ("$", "sync"), ("?", "help"), ("q", "quit"),
         ]),
         Screen::Secrets => legend_spans(&[
@@ -357,17 +357,19 @@ fn render_help(f: &mut Frame, area: Rect) {
 
     let lines = vec![
         Line::from(""),
-        help_line("0-6 / tab", "switch screen"),
-        help_line("↑ / ↓", "move cursor"),
-        help_line("enter", "confirm / drill in"),
-        help_line("esc", "back"),
+        help_line("↑↓ / tab", "navigate sidebar"),
+        help_line("enter / →", "enter content"),
+        help_line("← / esc", "back to sidebar"),
+        help_line("↑ / ↓", "move cursor (in content)"),
         help_line("n", "new (create wizard)"),
-        help_line("i", "install pack"),
         help_line("r", "reload all"),
         help_line("$", "sync with git remote"),
+        help_line("?", "this help"),
+        help_line("q", "quit"),
         Line::from(""),
         Line::from(Span::styled("  Profiles", theme::accent())),
         help_line("enter", "toggle active"),
+        help_line("s", "edit secrets"),
         Line::from(""),
         Line::from(Span::styled("  Capabilities", theme::accent())),
         help_line("enter", "drill in / detail"),
@@ -377,7 +379,6 @@ fn render_help(f: &mut Frame, area: Rect) {
         help_line("tab / shift-tab", "next / prev field"),
         help_line("← →", "cycle options"),
         help_line("space", "toggle in checklist"),
-        help_line("/ then text", "filter list"),
         Line::from(""),
         Line::from(Span::styled("  any key to close this", theme::muted())),
     ];
