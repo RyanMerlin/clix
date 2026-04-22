@@ -1,5 +1,5 @@
 use ratatui::{prelude::*, widgets::*};
-use crate::tui::app::App;
+use crate::tui::app::{App, Focus};
 use crate::tui::theme;
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
@@ -9,7 +9,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(Span::styled(" Workflows ", theme::accent_bold()))
-            .border_style(theme::border_normal());
+            .border_style(theme::border_for(app.focus == Focus::Content));
         let inner = block.inner(area);
         f.render_widget(block, area);
         let lines = vec![
@@ -33,7 +33,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let list_block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(" Workflows ", theme::accent_bold()))
-        .border_style(theme::border_normal());
+        .border_style(theme::border_for(app.focus == Focus::Content));
 
     let items: Vec<ListItem> = workflows.iter().enumerate().map(|(i, wf)| {
         let style = if i == app.workflows_cursor { theme::selected() } else { theme::normal() };

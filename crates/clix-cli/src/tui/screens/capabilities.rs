@@ -1,6 +1,6 @@
 use ratatui::{prelude::*, widgets::*};
 use clix_core::manifest::capability::{Backend, RiskLevel, SideEffectClass};
-use crate::tui::app::{App, CapView};
+use crate::tui::app::{App, CapView, Focus};
 use crate::tui::theme;
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
@@ -17,7 +17,7 @@ fn render_namespaces(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(" Capabilities ", theme::accent_bold()))
-        .border_style(theme::border_normal());
+        .border_style(theme::border_for(app.focus == Focus::Content));
 
     if namespaces.is_empty() {
         let inner = block.inner(area);
@@ -106,7 +106,7 @@ fn render_listing(f: &mut Frame, app: &App, area: Rect, ns: &str) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(title, theme::accent_bold()))
-        .border_style(theme::border_normal());
+        .border_style(theme::border_for(app.focus == Focus::Content));
 
     let items: Vec<ListItem> = caps.iter().enumerate().map(|(i, cap)| {
         let is_cursor = i == app.caps_cursor;

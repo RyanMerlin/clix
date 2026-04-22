@@ -1,5 +1,5 @@
 use ratatui::{prelude::*, widgets::*};
-use crate::tui::app::App;
+use crate::tui::app::{App, Focus};
 use crate::tui::theme;
 
 pub struct BrokerScreenState {
@@ -160,19 +160,20 @@ fn scan_adopted_creds() -> Vec<AdoptedCred> {
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let state = app.broker_status.as_ref();
+    let focused = app.focus == Focus::Content;
 
     let chunks = Layout::vertical([Constraint::Length(6), Constraint::Min(0)])
         .split(area);
 
-    render_status_card(f, state, chunks[0]);
+    render_status_card(f, state, chunks[0], focused);
     render_creds_list(f, state, chunks[1]);
 }
 
-fn render_status_card(f: &mut Frame, state: Option<&BrokerScreenState>, area: Rect) {
+fn render_status_card(f: &mut Frame, state: Option<&BrokerScreenState>, area: Rect, focused: bool) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(" Broker Status ", theme::accent_bold()))
-        .border_style(theme::border_dim());
+        .border_style(theme::border_for(focused));
 
     let inner = block.inner(area);
     f.render_widget(block, area);

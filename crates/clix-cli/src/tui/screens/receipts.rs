@@ -1,12 +1,12 @@
 use ratatui::{prelude::*, widgets::*};
-use crate::tui::app::App;
+use crate::tui::app::{App, Focus};
 use crate::tui::theme;
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(" Receipts ", theme::accent_bold()))
-        .border_style(theme::border_normal());
+        .border_style(theme::border_for(app.focus == Focus::Content));
 
     if app.receipts_preview.is_empty() {
         let inner = block.inner(area);

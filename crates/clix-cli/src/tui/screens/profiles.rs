@@ -1,6 +1,6 @@
 use ratatui::{prelude::*, widgets::*};
 use chrono::Utc;
-use crate::tui::app::App;
+use crate::tui::app::{App, Focus};
 use crate::tui::theme;
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
@@ -15,7 +15,7 @@ fn render_list(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(" Profiles ", theme::accent_bold()))
-        .border_style(theme::border_normal());
+        .border_style(theme::border_for(app.focus == Focus::Content));
 
     if app.profiles.is_empty() {
         let inner = block.inner(area);

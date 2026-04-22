@@ -149,7 +149,9 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
     let crumb = breadcrumb(app);
     let left = Span::styled(" clix ", theme::accent_bold());
     let sep = Span::styled(" › ", theme::muted());
-    let crumb_span = Span::styled(crumb.clone(), if app.focus == Focus::Content { theme::dim() } else { theme::muted() });
+    // In sidebar focus: sidebar is the accent anchor, crumb is quiet.
+    // In content focus: sidebar dims, crumb becomes the accent anchor.
+    let crumb_span = Span::styled(crumb.clone(), if app.focus == Focus::Content { theme::accent_bold() } else { theme::muted() });
 
     let right_profile = format!(" {} ", active);
     let badge_len = git_badge.as_ref().map(|(s, _)| s.len() as u16).unwrap_or(0);

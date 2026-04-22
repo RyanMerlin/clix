@@ -43,6 +43,7 @@ pub fn selected() -> Style {
 pub fn border_focused() -> Style { Style::default().fg(ACCENT_BRIGHT) }
 pub fn border_normal() -> Style { Style::default().fg(BORDER) }
 pub fn border_dim() -> Style { Style::default().fg(BORDER_DIM) }
+pub fn border_for(focused: bool) -> Style { if focused { border_focused() } else { border_normal() } }
 
 /// Risk-level color
 pub fn risk_color(risk: &str) -> Color {

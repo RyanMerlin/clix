@@ -1,5 +1,5 @@
 use ratatui::{prelude::*, widgets::*};
-use crate::tui::app::App;
+use crate::tui::app::{App, Focus};
 use crate::tui::theme;
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
@@ -35,7 +35,7 @@ fn render_activity(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(" Recent Activity ", theme::accent_bold()))
-        .border_style(theme::border_normal());
+        .border_style(theme::border_for(app.focus == Focus::Content));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -134,7 +134,7 @@ fn render_health(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(" Health ", theme::accent_bold()))
-        .border_style(theme::border_normal());
+        .border_style(theme::border_for(app.focus == Focus::Content));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
