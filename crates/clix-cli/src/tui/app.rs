@@ -1131,6 +1131,7 @@ impl App {
                     CapView::Detail(_) => {}
                 }
             }
+            Screen::Packs => self.open_pack_edit(),
             Screen::Profiles => {
                 if let Some(profile) = self.profiles.get(self.profiles_cursor) {
                     let name = profile.name.clone();
