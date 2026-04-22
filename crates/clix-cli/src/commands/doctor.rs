@@ -111,8 +111,12 @@ fn check_worker() -> (&'static str, String) {
             .unwrap_or_default();
         if apparmor_val.trim() == "1" {
             return ("⚠ worker", format!(
-                "binary found but AppArmor blocks user namespaces — \
-                 run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"
+                "binary found but AppArmor blocks user namespaces\n\
+                 \x20      Fix (recommended): \
+                 sudo cp assets/apparmor/clix-worker /etc/apparmor.d/clix-worker && \
+                 sudo apparmor_parser -r /etc/apparmor.d/clix-worker\n\
+                 \x20      Fix (global, less safe): \
+                 sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"
             ));
         }
     }

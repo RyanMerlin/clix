@@ -211,10 +211,11 @@ fn check_apparmor_userns() -> Result<()> {
         return Err(ClixError::Isolation(
             "AppArmor is blocking unprivileged user namespaces \
              (kernel.apparmor_restrict_unprivileged_userns=1).\n\
-             Fix: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\n\
-             Or install the clix-worker AppArmor profile: \
-             sudo cp /usr/share/apparmor/clix-worker /etc/apparmor.d/ && \
-             sudo apparmor_parser -r /etc/apparmor.d/clix-worker".to_string()
+             Recommended fix (installs per-binary profile, does not weaken system policy):\n\
+             \x20  sudo cp assets/apparmor/clix-worker /etc/apparmor.d/clix-worker\n\
+             \x20  sudo apparmor_parser -r /etc/apparmor.d/clix-worker\n\
+             Alternative (disables restriction globally):\n\
+             \x20  sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0".to_string()
         ));
     }
     Ok(())

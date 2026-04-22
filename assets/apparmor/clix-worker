@@ -1,0 +1,24 @@
+# clix-worker AppArmor profile
+# Grants clix-worker permission to create unprivileged user namespaces for OS-level
+# capability isolation (Linux namespaces + Landlock + seccomp + pivot_root).
+# Required on Ubuntu 23.10+ and any kernel with apparmor_restrict_unprivileged_userns=1.
+#
+# Install:
+#   sudo cp assets/apparmor/clix-worker /etc/apparmor.d/clix-worker
+#   sudo apparmor_parser -r /etc/apparmor.d/clix-worker
+#
+# Or via clix init --install-apparmor (requires sudo).
+
+abi <abi/4.0>,
+include <tunables/global>
+
+profile clix-worker @{HOME}/.local/bin/clix-worker flags=(unconfined) {
+  userns,
+  @{exec_path} mr,
+}
+
+# Also cover system-wide installs
+profile clix-worker-system /usr/local/bin/clix-worker flags=(unconfined) {
+  userns,
+  @{exec_path} mr,
+}
