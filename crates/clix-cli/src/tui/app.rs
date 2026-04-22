@@ -740,15 +740,16 @@ impl App {
                         s.config.active_infisical = Some(name.clone());
                     }
                     if !service_token.is_empty() {
+                        // Always persist to config (0600) — fire-and-forget keyring in background
+                        cfg.service_token = Some(service_token.clone());
                         #[cfg(target_os = "linux")]
                         {
-                            use clix_core::secrets::keyring::{store_service_token, KeyringResult};
-                            if !matches!(store_service_token(&name, &service_token), KeyringResult::Ok) {
-                                cfg.service_token = Some(service_token);
-                            }
+                            let n = name.clone();
+                            let t = service_token.clone();
+                            std::thread::spawn(move || {
+                                let _ = clix_core::secrets::keyring::store_service_token(&n, &t);
+                            });
                         }
-                        #[cfg(not(target_os = "linux"))]
-                        { cfg.service_token = Some(service_token); }
                     }
                     let _ = s.save_config();
                 }
@@ -1353,16 +1354,6 @@ impl App {
             .clone()
             .unwrap_or_else(|| "default".to_string());
 
-        #[cfg(target_os = "linux")]
-        let token_in_keyring = if !service_token.is_empty() {
-            use clix_core::secrets::keyring::{store_service_token, KeyringResult};
-            matches!(store_service_token(&profile_name, service_token), KeyringResult::Ok)
-        } else {
-            false
-        };
-        #[cfg(not(target_os = "linux"))]
-        let token_in_keyring = false;
-
         let profile = state.config.infisical_profiles
             .entry(profile_name.clone())
             .or_insert_with(|| clix_core::state::InfisicalConfig {
@@ -1374,8 +1365,17 @@ impl App {
         profile.site_url = site_url.to_string();
         profile.default_environment = environment.to_string();
         if !project_id.is_empty() { profile.default_project_id = Some(project_id.to_string()); }
-        if !service_token.is_empty() && !token_in_keyring {
+        if !service_token.is_empty() {
+            // Always persist to config (0600) — fire-and-forget keyring in background
             profile.service_token = Some(service_token.to_string());
+            #[cfg(target_os = "linux")]
+            {
+                let n = profile_name.clone();
+                let t = service_token.to_string();
+                std::thread::spawn(move || {
+                    let _ = clix_core::secrets::keyring::store_service_token(&n, &t);
+                });
+            }
         }
         if state.config.active_infisical.is_none() {
             state.config.active_infisical = Some(profile_name.clone());
