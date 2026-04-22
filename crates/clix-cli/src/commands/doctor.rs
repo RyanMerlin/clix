@@ -1,4 +1,5 @@
 use anyhow::Result;
+use clix_core::execution::worker_registry::WorkerRegistry;
 use clix_core::sandbox::sandbox_enforced;
 use clix_core::state::{home_dir, ClixState};
 use clix_core::loader::build_registry;
@@ -46,6 +47,9 @@ pub fn run(json: bool) -> Result<()> {
     // Live broker ping
     let (broker_label, broker_status_str) = check_broker();
 
+    // Worker binary + isolation readiness
+    let (worker_label, worker_status_str) = check_worker();
+
     // Receipt stats
     let receipt_stats = ReceiptStore::open(&state.receipts_db)
         .ok()
@@ -62,6 +66,8 @@ pub fn run(json: bool) -> Result<()> {
         print_json(&serde_json::json!({
             "broker_up": broker_label.starts_with('✓'),
             "broker_status": broker_status_str,
+            "worker_up": worker_label.starts_with('✓'),
+            "worker_status": worker_status_str,
             "sandbox": sandbox_mode,
             "sandbox_enforced": enforced,
             "sandbox_detail": sandbox_detail,
@@ -80,6 +86,7 @@ pub fn run(json: bool) -> Result<()> {
     } else {
         print_kv(&[
             ("broker",       format!("{broker_label}: {broker_status_str}")),
+            ("worker",       format!("{worker_label}: {worker_status_str}")),
             ("sandbox",      format!("{sandbox_mode} ({sandbox_detail})")),
             ("profile",      active_profile),
             ("packs",        pack_count.to_string()),
@@ -90,6 +97,27 @@ pub fn run(json: bool) -> Result<()> {
         ]);
     }
     Ok(())
+}
+
+fn check_worker() -> (&'static str, String) {
+    let binary = WorkerRegistry::locate_worker_binary();
+    if !binary.exists() {
+        return ("✗ worker", format!("clix-worker not found (expected alongside clix at {})", binary.display()));
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let apparmor_val = std::fs::read_to_string("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
+            .unwrap_or_default();
+        if apparmor_val.trim() == "1" {
+            return ("⚠ worker", format!(
+                "binary found but AppArmor blocks user namespaces — \
+                 run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"
+            ));
+        }
+    }
+
+    ("✓ worker", format!("ready ({})", binary.display()))
 }
 
 fn sandbox_detail(enforced: bool) -> String {

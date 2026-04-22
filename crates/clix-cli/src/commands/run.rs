@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use clix_core::execution::run_capability;
+use clix_core::execution::worker_registry::WorkerRegistry;
 use clix_core::loader::{build_registry, load_policy};
 use clix_core::policy::evaluate::ExecutionContext;
 use clix_core::receipts::ReceiptStore;
@@ -56,7 +57,19 @@ pub fn run(capability: &str, input_pairs: &[String], json: bool, dry_run: bool) 
         profile: state.config.active_profiles.first().cloned().unwrap_or_else(|| "default".to_string()),
         approver: None,
     };
-    let outcome = run_capability(&registry, &policy, &state.config.infisical(), &store, None, capability, input, ctx, &[])
+
+    let worker_binary = WorkerRegistry::locate_worker_binary();
+    let worker_registry = if worker_binary.exists() {
+        Some(WorkerRegistry::new(worker_binary, 300))
+    } else {
+        if std::env::var("CLIX_ALLOW_UNSANDBOXED").is_err() {
+            eprintln!("warn: clix-worker not found alongside clix — running without OS isolation");
+            eprintln!("      install all clix binaries together, or set CLIX_ALLOW_UNSANDBOXED=1");
+        }
+        None
+    };
+
+    let outcome = run_capability(&registry, &policy, &state.config.infisical(), &store, worker_registry.as_ref(), capability, input, ctx, &[])
         .map_err(|e| anyhow!("{e}"))?;
     if json {
         // Always emit the full outcome struct under --json for predictable agent parsing.

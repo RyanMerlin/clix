@@ -204,16 +204,54 @@ pub fn discover_lib_deps(binary: &Path) -> Vec<PathBuf> {
 ///
 /// On non-Linux platforms this is a no-op (returns Ok immediately).
 #[cfg(target_os = "linux")]
+fn check_apparmor_userns() -> Result<()> {
+    let val = std::fs::read_to_string("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
+        .unwrap_or_default();
+    if val.trim() == "1" {
+        return Err(ClixError::Isolation(
+            "AppArmor is blocking unprivileged user namespaces \
+             (kernel.apparmor_restrict_unprivileged_userns=1).\n\
+             Fix: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\n\
+             Or install the clix-worker AppArmor profile: \
+             sudo cp /usr/share/apparmor/clix-worker /etc/apparmor.d/ && \
+             sudo apparmor_parser -r /etc/apparmor.d/clix-worker".to_string()
+        ));
+    }
+    Ok(())
+}
+
+/// Returns a local tmpfs path for jail root creation.
+/// Prefers XDG_RUNTIME_DIR (/run/user/<uid>) over /tmp to avoid NFS/network filesystems.
+#[cfg(target_os = "linux")]
+fn jail_tmpdir_base() -> std::path::PathBuf {
+    if let Some(p) = dirs::runtime_dir() {
+        if p.exists() { return p; }
+    }
+    if let Ok(p) = std::env::var("XDG_RUNTIME_DIR") {
+        let pb = std::path::PathBuf::from(p);
+        if pb.exists() { return pb; }
+    }
+    std::path::PathBuf::from("/tmp")
+}
+
+#[cfg(target_os = "linux")]
 pub fn enter_jail(config: &JailConfig) -> Result<()> {
     use super::linux::apply_sandbox;
     use super::seccomp::{build_filter, install_filter};
 
+    // Step 0: check for AppArmor user namespace restriction before attempting fork
+    check_apparmor_userns()?;
+
     // Step 1: verify binary integrity before entering the jail
     verify_binary_hash(&config.pinned_binary, &config.binary_sha256)?;
 
-    // Step 2: create a temporary directory for our new root (before fork so path is shared)
-    let new_root = tempfile::TempDir::new()
-        .map_err(|e| ClixError::Isolation(format!("tmpdir for jail root: {e}")))?;
+    // Step 2: create a temporary directory for our new root (before fork so path is shared).
+    // Use the user runtime dir (/run/user/<uid>) — always a local tmpfs, never NFS.
+    let base = jail_tmpdir_base();
+    let new_root = tempfile::Builder::new()
+        .prefix("clix-jail-")
+        .tempdir_in(&base)
+        .map_err(|e| ClixError::Isolation(format!("tmpdir for jail root in {}: {e}", base.display())))?;
     let root_path = new_root.path().to_path_buf();
 
     // Step 3: set up two pipes for two-phase parent↔child synchronisation:
