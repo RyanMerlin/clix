@@ -257,6 +257,7 @@ mod tests {
             site_url: "http://127.0.0.1:19999".to_string(), // unreachable — will fail fast with timeout
             client_id: Some("test".to_string()),
             client_secret: Some("test".to_string()),
+            service_token: None,
             default_project_id: None,
             default_environment: "dev".to_string(),
         };
