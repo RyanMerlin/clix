@@ -149,7 +149,7 @@ fn render_health(f: &mut Frame, app: &App, area: Rect) {
         }
     };
 
-    let lines = vec![
+    let mut lines = vec![
         Line::from(""),
         Line::from(vec![
             Span::styled("  packs        ", theme::muted()),
@@ -195,6 +195,18 @@ fn render_health(f: &mut Frame, app: &App, area: Rect) {
             ),
         ]),
     ];
+
+    let mut hints: Vec<&str> = vec![];
+    if app.packs.is_empty()         { hints.push("install a pack to load capabilities"); }
+    if cap_count == 0               { hints.push("no capabilities loaded yet"); }
+    if app.profiles.is_empty()      { hints.push("create a profile to run commands"); }
+    if app.active_profiles.is_empty() { hints.push("activate a profile: sidebar 1 → enter"); }
+    if !hints.is_empty() {
+        lines.push(Line::from(""));
+        for h in hints {
+            lines.push(Line::from(Span::styled(format!("  ⓘ  {h}"), theme::warn())));
+        }
+    }
 
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(para, inner);

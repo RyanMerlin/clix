@@ -472,7 +472,11 @@ impl App {
             KeyCode::Char('7') => self.switch_to(Screen::Secrets),
             KeyCode::Char('0') => self.switch_to(Screen::Dashboard),
             // Tab is sidebar-only — in content focus it does nothing
-            // n = new (create wizard)
+            // n = new (create wizard); on Dashboard, jump to Profile create
+            KeyCode::Char('n') if self.screen == Screen::Dashboard => {
+                self.switch_to(Screen::Profiles);
+                self.open_create_wizard();
+            }
             KeyCode::Char('n') => self.open_create_wizard(),
             // i = install pack
             KeyCode::Char('i') if self.screen == Screen::Packs => {
@@ -1209,6 +1213,22 @@ impl App {
                     }
                     CapView::Detail(_) => {}
                 }
+            }
+            Screen::Dashboard => {
+                // Enter picks the most urgent onboarding action
+                if self.packs.is_empty() {
+                    self.switch_to(Screen::Packs);
+                    self.open_create_wizard();
+                } else if self.profiles.is_empty() {
+                    self.switch_to(Screen::Profiles);
+                    self.open_create_wizard();
+                } else if self.infisical_cfg.is_none() {
+                    self.open_infisical_setup();
+                } else if !self.pending_approval_ids.is_empty() {
+                    self.switch_to(Screen::Receipts);
+                    self.focus = Focus::Content;
+                }
+                // else: all looks good, nothing urgent
             }
             Screen::Packs => self.open_pack_edit(),
             Screen::Receipts => self.open_receipt_detail(),
