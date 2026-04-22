@@ -200,6 +200,22 @@ defaultAction: deny
         println!("  run `clix secrets set` or press [c] in the TUI Dashboard to configure Infisical secrets");
     }
 
+    // On Linux, ensure OS isolation is actually usable — install AppArmor profile if needed
+    #[cfg(target_os = "linux")]
+    {
+        let restricted = std::fs::read_to_string("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
+            .unwrap_or_default();
+        let already_installed = std::path::Path::new("/etc/apparmor.d/clix-worker").exists();
+        if restricted.trim() == "1" && !already_installed {
+            println!();
+            println!("Setting up OS isolation (AppArmor profile for clix-worker) — requires sudo:");
+            match install_isolation() {
+                Ok(_) => {}
+                Err(e) => eprintln!("  warn: could not install AppArmor profile: {e}"),
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -484,8 +500,8 @@ fn secure_file(path: &Path) -> Result<()> {
 }
 
 /// Install the AppArmor profile for clix-worker by running sudo directly.
-/// Requires sudo access. Prompts for password interactively if needed.
-pub fn install_isolation() -> Result<()> {
+/// Called automatically by init on Linux when the restriction is active.
+fn install_isolation() -> Result<()> {
     #[cfg(not(target_os = "linux"))]
     anyhow::bail!("--install-isolation is only supported on Linux");
 
