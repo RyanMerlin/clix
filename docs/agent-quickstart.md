@@ -9,7 +9,7 @@ Paste this into your system prompt or agent context. It's the complete reference
 
 ## What clix does
 
-clix is a sandboxed CLI gateway. It gates your CLI tools (git, kubectl, gcloud, etc.) behind policy and OS-level isolation. Every execution is logged to a receipts database.
+clix is a CLI gateway that makes CLIs first-class tools for agents. It provides rolling discovery (browse namespaces → drill in → call), typed inputs, consistent JSON output, and a full receipts log. On Linux, subprocess calls run inside an OS-level jail. Every execution is logged regardless of isolation tier.
 
 ## Core commands
 

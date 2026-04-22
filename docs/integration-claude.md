@@ -15,10 +15,10 @@ The agent runs `clix` CLI commands directly. No tool registration needed. Works 
 Paste into your system prompt or CLAUDE.md:
 
 ```
-clix is a sandboxed CLI gateway. Run these directly:
-  clix capabilities list --json        # browse tools
+clix is a CLI gateway. Discover tools on demand — no upfront catalogue needed.
+  clix capabilities list --json        # browse namespaces
   clix capabilities search <q> --json  # search by keyword
-  clix capabilities show <name> --json # get input schema for one tool
+  clix capabilities show <name> --json # get full schema for one tool
   clix run <name> -i key=val --json    # execute → {ok, result, receipt_id}
   clix run <name> --dry-run --json     # policy preview, no execution
   clix doctor --json                   # health

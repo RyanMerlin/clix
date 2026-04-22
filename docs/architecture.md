@@ -1,6 +1,6 @@
 # clix Architecture
 
-`clix` is a policy-first CLI control plane for agentic tool use, implemented in Rust.
+`clix` is an agent-optimized CLI gateway implemented in Rust. It makes CLIs first-class tools for AI agents: rolling discovery, typed inputs, consistent JSON output, full audit trail — without the context overhead of MCP tool registration. OS-level isolation (namespaces, Landlock, seccomp) and credential mediation are built in so agents can be given broad CLI access without trust concerns.
 
 ## Workspace
 

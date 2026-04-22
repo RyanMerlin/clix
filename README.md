@@ -1,13 +1,11 @@
 # clix
 
-**A sandbox for CLI tools your coding agent runs.**
+**An agent-optimized CLI gateway. CLIs are vastly more powerful than MCP servers — clix makes them reliable, discoverable, and safe for agent use.**
 
-On Linux you get a real OS-level jail — namespaces, Landlock, seccomp, binary pinning. On macOS or Windows you get honest policy enforcement and a full audit trail with a clear `SANDBOX DISABLED` notice at startup. Either way, **unknown capabilities are denied by default** and every invocation is receipted.
+Agents talk to clix as a plain CLI tool. No MCP tool registration, no upfront context cost, no catalogue to maintain. The agent discovers capabilities on demand, calls them with typed inputs, gets structured JSON output and a receipt. On Linux, subprocess calls run inside a real OS-level jail (namespaces, Landlock, seccomp, binary pinning). On macOS / Windows you get policy enforcement and a full audit trail.
 
-The short version: clix stops an AI agent from `rm -rf`ing your filesystem, leaking your cloud credentials, or running anything you haven't explicitly allowed — with an audit log proving it.
-
-> **Supported platforms for full isolation:** Linux x86_64 and aarch64.
-> **Policy-only mode** (no OS jail, receipts + deny rules still work): macOS, Windows.
+> **Full OS isolation:** Linux x86_64 and aarch64.
+> **Policy + audit (no OS jail):** macOS, Windows.
 
 ---
 
@@ -42,13 +40,15 @@ capability is actually used.
 
 ## What it does
 
-**Default deny.** Without an explicit allow rule in your policy, no capability runs. Agents can't call what you haven't declared. This is enforced by the policy engine, not "best effort."
+**Rolling discovery — zero upfront context cost.** Agents list available namespaces, drill into the one they need, and call a capability. No 500-tool catalogue injected at prompt start. Context cost is proportional to what the agent actually uses.
 
-**Curated tool access.** You install *packs* — bundles of capabilities that expose a safe slice of a CLI. A `gcloud-readonly` pack might allow `projects list` and `compute instances list`, but nothing that writes or deletes. The agent sees only what you've declared.
+**Typed, reliable interfaces.** Each capability has a declared input schema, consistent JSON output, and predictable exit codes. Agents don't parse `--help` or guess flag names — they read the schema and call.
 
-**OS-level isolation (Linux).** Subprocess capabilities run inside a jailed worker process: Linux namespaces (user, mount, network, IPC, UTS), Landlock filesystem restrictions, seccomp syscall filtering, and cgroup limits. The binary is pinned by SHA-256 at spawn time. Even if the agent tries to run the real binary directly, it won't have access to your credentials — those are owned by a separate broker process.
+**Packs — curated CLI slices.** Install a `gcloud-readonly` pack and the agent gets `projects list`, `compute instances list`, etc. — scoped read access, nothing that writes or deletes. Packs ship as signed `.clixpack` bundles; community packs can be verified against a trusted key before install.
 
-**Credential mediation.** `clix-broker` owns your credential files (gcloud ADC, kubeconfig, etc.) at `0700`. It mints short-lived tokens on demand and injects them directly into the worker process at execution time, so your credentials never appear in the agent's environment or filesystem.
+**Policy enforcement.** Unknown capabilities are denied by default. Policy rules (allow / deny / require-approval) are evaluated against execution context (user, environment, profile, side-effect class) before any subprocess runs. `clix run --dry-run` lets agents preview the policy decision without executing.
+
+**OS-level isolation (Linux).** Subprocess calls run inside a jailed worker process: Linux namespaces (user, mount, network, IPC, UTS), Landlock filesystem restrictions, seccomp syscall filtering, cgroup limits, and binary SHA-256 pinning. Credential files are owned by a separate broker process at `0700` — they never appear in the agent's environment.
 
 **Full audit trail.** Every call — allowed, denied, or pending approval — is written to a local SQLite receipts database with inputs, outcome, isolation tier, and binary hash. `clix receipts list` shows you exactly what ran.
 
@@ -94,12 +94,12 @@ clix is designed so agents interact with it as a CLI tool, not via MCP. The agen
 The minimal agent prompt (copy into your system prompt):
 
 ```
-clix is a sandboxed CLI gateway.
-  clix capabilities list --json        # browse tools
-  clix capabilities show <name> --json # get schema
-  clix run <name> -i key=val --json    # run (returns {ok, result, receipt_id})
-  clix run <name> --dry-run --json     # preview policy/isolation, no execution
-  clix doctor --json                   # health
+clix is a CLI gateway. Discover and call tools on demand — no upfront catalogue.
+  clix capabilities list --json        # browse namespaces
+  clix capabilities show <name> --json # get full schema for one capability
+  clix run <name> -i key=val --json    # run it (returns {ok, result, receipt_id})
+  clix run <name> --dry-run --json     # preview policy decision without executing
+  clix doctor --json                   # health check
 Exit codes: 0 ok, 1 denied, 2 needs approval.
 ```
 
