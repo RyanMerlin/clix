@@ -107,17 +107,22 @@ fn breadcrumb(app: &App) -> String {
         Screen::Broker => "Broker",
         Screen::Secrets => "Secrets",
     };
-    let overlay_name = match &app.overlay {
-        Overlay::ProfileCreate(_) => Some("New Profile"),
-        Overlay::ProfileSecrets(_) => Some("Edit Secrets"),
-        Overlay::CapabilityCreate(_) => Some("New Capability"),
-        Overlay::PackCreate(_) => Some("New Pack"),
-        Overlay::PackEdit { .. } => Some("Edit Pack"),
-        Overlay::InstallPack(_) => Some("Install Pack"),
-        Overlay::Help => Some("Help"),
-        Overlay::InfisicalSetup(_) => Some("Configure Infisical"),
-        Overlay::SecretsTreeBrowser(_) => Some("Browse Secrets"),
-        Overlay::InfisicalAccounts(_) => Some("Infisical Accounts"),
+    let overlay_name: Option<String> = match &app.overlay {
+        Overlay::ProfileCreate(_) => Some("New Profile".into()),
+        Overlay::ProfileSecrets(_) => Some("Edit Secrets".into()),
+        Overlay::CapabilityCreate(_) => Some("New Capability".into()),
+        Overlay::PackCreate(_) => Some("New Pack".into()),
+        Overlay::PackEdit { .. } => Some("Edit Pack".into()),
+        Overlay::InstallPack(_) => Some("Install Pack".into()),
+        Overlay::Help => Some("Help".into()),
+        Overlay::InfisicalSetup(_) => Some("Configure Infisical".into()),
+        Overlay::SecretsTreeBrowser(_) => Some("Browse Secrets".into()),
+        Overlay::InfisicalAccounts(_) => Some("Infisical Accounts".into()),
+        Overlay::ReceiptDetail(r) => {
+            let id = r.id.to_string();
+            Some(format!("Receipt {}", &id[..8.min(id.len())]))
+        }
+        Overlay::ConfirmRunWorkflow { name } => Some(format!("Run {}", name)),
         Overlay::None => None,
     };
     match overlay_name {
@@ -259,7 +264,7 @@ fn render_legend(f: &mut Frame, app: &App, area: Rect) {
             ("↑↓", "move"), ("A", "approve pending"), ("r", "reload"), ("q", "quit"),
         ]),
         Screen::Workflows => legend_spans(&[
-            ("↑↓", "move"), ("r", "reload"), ("q", "quit"),
+            ("↑↓", "move"), ("enter", "run"), ("r", "reload"), ("q", "quit"),
         ]),
     };
 
@@ -322,7 +327,41 @@ fn render_overlay(f: &mut Frame, app: &App, area: Rect) {
         Overlay::InfisicalSetup(state) => state.render(f, area),
         Overlay::SecretsTreeBrowser(tree) => tree.render(f, area),
         Overlay::InfisicalAccounts(state) => state.render(f, area),
+        Overlay::ReceiptDetail(receipt) => crate::tui::screens::receipt_detail::render(f, receipt, area),
+        Overlay::ConfirmRunWorkflow { name } => render_confirm_run_workflow(f, name, area),
     }
+}
+
+fn render_confirm_run_workflow(f: &mut Frame, name: &str, area: Rect) {
+    use ratatui::widgets::Clear;
+    let width = 60u16.min(area.width);
+    let height = 8u16;
+    let x = (area.width.saturating_sub(width)) / 2;
+    let y = (area.height.saturating_sub(height)) / 2;
+    let dialog = Rect::new(x, y, width, height);
+    f.render_widget(Clear, dialog);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(" Run Workflow ", theme::accent_bold()))
+        .border_style(theme::border_focused());
+    let inner = block.inner(dialog);
+    f.render_widget(block, dialog);
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Run workflow ", theme::muted()),
+            Span::styled(name, theme::accent_bold()),
+            Span::styled("?", theme::muted()),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Each step runs with the workflow input — step outputs do not chain.",
+            theme::inactive(),
+        )),
+        Line::from(""),
+        Line::from(Span::styled("  y: confirm   any other key: cancel", theme::dim())),
+    ];
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn render_toast(f: &mut Frame, message: &str, is_error: bool, area: Rect) {

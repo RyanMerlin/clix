@@ -78,6 +78,7 @@ pub enum CapView {
 
 #[derive(Debug, Clone)]
 pub struct ReceiptRow {
+    pub id: String,
     pub time: String,
     pub capability: String,
     pub profile: String,
@@ -99,6 +100,8 @@ pub enum Overlay {
     InfisicalSetup(InfisicalSetupState),
     SecretsTreeBrowser(crate::tui::widgets::secrets_tree::SecretsTree),
     InfisicalAccounts(crate::tui::screens::infisical_accounts::InfisicalAccountsState),
+    ReceiptDetail(Box<clix_core::receipts::Receipt>),
+    ConfirmRunWorkflow { name: String },
 }
 
 impl Overlay {
@@ -365,6 +368,16 @@ impl App {
                         }
                     }
                 }
+                WorkResult::WorkflowDone { name, outcome_count, error } => {
+                    let is_err = error.is_some();
+                    let msg = if let Some(e) = error {
+                        format!("Workflow '{}' failed: {}", name, e.lines().next().unwrap_or("error").chars().take(60).collect::<String>())
+                    } else {
+                        format!("Workflow '{}' complete — {} step{}", name, outcome_count, if outcome_count == 1 { "" } else { "s" })
+                    };
+                    self.toast(&msg, is_err);
+                    let _ = self.reload();
+                }
                 WorkResult::InfisicalTested { job_id, ok, latency_ms, keyring_used, error } => {
                     if self.dropped_jobs.remove(&job_id) {
                         continue; // user cancelled — discard
@@ -547,6 +560,24 @@ impl App {
             self.focus = Focus::Content;
         }
         self.screen = screen;
+    }
+
+    fn open_receipt_detail(&mut self) {
+        use clix_core::receipts::ReceiptStore;
+        let Some(row) = self.receipts_preview.get(self.receipts_cursor) else { return; };
+        let id = row.id.clone();
+        let state = match ClixState::load(home_dir()) {
+            Ok(s) => s,
+            Err(e) => { self.toast(&format!("Cannot open receipts DB: {e}"), true); return; }
+        };
+        match ReceiptStore::open(&state.receipts_db) {
+            Ok(store) => match store.get(&id) {
+                Ok(Some(receipt)) => { self.overlay = Overlay::ReceiptDetail(Box::new(receipt)); }
+                Ok(None) => self.toast("Receipt not found in DB", true),
+                Err(e) => self.toast(&format!("DB error: {e}"), true),
+            }
+            Err(e) => self.toast(&format!("Cannot open receipts DB: {e}"), true),
+        }
     }
 
     fn open_pack_edit(&mut self) {
@@ -810,6 +841,54 @@ impl App {
         // Dismiss help overlay on any key
         if matches!(self.overlay, Overlay::Help) {
             self.overlay = Overlay::None;
+            return;
+        }
+
+        // Receipt detail — Esc/q closes; A approves if pending
+        if let Overlay::ReceiptDetail(ref receipt) = self.overlay {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => { self.overlay = Overlay::None; }
+                KeyCode::Char('A') => {
+                    use clix_core::receipts::ReceiptStatus;
+                    if !matches!(receipt.status, ReceiptStatus::PendingApproval) {
+                        self.toast("Receipt is not pending approval", false);
+                        return;
+                    }
+                    if self.approving_receipt.is_some() {
+                        self.toast("Approval already in progress…", false);
+                        return;
+                    }
+                    let id_str = receipt.id.to_string();
+                    use uuid::Uuid;
+                    match id_str.parse::<Uuid>() {
+                        Ok(uid) => {
+                            let job_id = next_job_id();
+                            self.approving_receipt = Some((id_str, job_id));
+                            self.work.dispatch(WorkRequest::ApproveReceipt {
+                                id: uid, approver: whoami::username(), job_id,
+                            });
+                            self.overlay = Overlay::None;
+                            self.toast("Sending approval…", false);
+                        }
+                        Err(_) => self.toast("Invalid receipt id", true),
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // Workflow run confirm — y runs, any other key cancels
+        if let Overlay::ConfirmRunWorkflow { ref name } = self.overlay {
+            let name = name.clone();
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.overlay = Overlay::None;
+                    self.work.dispatch(WorkRequest::RunWorkflow { name: name.clone() });
+                    self.toast(&format!("Running workflow '{}'…", name), false);
+                }
+                _ => { self.overlay = Overlay::None; }
+            }
             return;
         }
 
@@ -1132,6 +1211,13 @@ impl App {
                 }
             }
             Screen::Packs => self.open_pack_edit(),
+            Screen::Receipts => self.open_receipt_detail(),
+            Screen::Workflows => {
+                let workflows = self.workflow_registry.all();
+                if let Some(wf) = workflows.get(self.workflows_cursor) {
+                    self.overlay = Overlay::ConfirmRunWorkflow { name: wf.name.clone() };
+                }
+            }
             Screen::Profiles => {
                 if let Some(profile) = self.profiles.get(self.profiles_cursor) {
                     let name = profile.name.clone();
@@ -1479,7 +1565,7 @@ fn load_receipts(db: &std::path::Path) -> (Vec<ReceiptRow>, Vec<String>) {
             .and_then(|v| v.as_u64())
             .map(|ms| format!("{ms}ms"))
             .unwrap_or_default();
-        ReceiptRow { time, capability: r.capability, profile, outcome, latency }
+        ReceiptRow { id: r.id.to_string(), time, capability: r.capability, profile, outcome, latency }
     }).collect();
     (rows, pending)
 }

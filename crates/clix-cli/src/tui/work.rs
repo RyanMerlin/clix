@@ -42,6 +42,9 @@ pub enum WorkRequest {
         approver: String,
         job_id: JobId,
     },
+    RunWorkflow {
+        name: String,
+    },
 }
 
 pub enum WorkResult {
@@ -86,6 +89,11 @@ pub enum WorkResult {
         job_id: JobId,
         id: uuid::Uuid,
         ok: bool,
+        error: Option<String>,
+    },
+    WorkflowDone {
+        name: String,
+        outcome_count: usize,
         error: Option<String>,
     },
 }
@@ -182,6 +190,46 @@ impl WorkPool {
             WorkRequest::ParseHelp { command, job_id } => {
                 let subcmds = clix_core::discovery::parse_help(&command);
                 let _ = tx.send(WorkResult::HelpParsed { job_id, command, subcmds });
+            }
+            WorkRequest::RunWorkflow { name } => {
+                use clix_core::state::{ClixState, home_dir};
+                use clix_core::loader::{build_registry, build_workflow_registry, load_policy};
+                use clix_core::execution;
+                use clix_core::policy::evaluate::ExecutionContext;
+                let state = match ClixState::load(home_dir()) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let _ = tx.send(WorkResult::WorkflowDone { name, outcome_count: 0, error: Some(e.to_string()) });
+                        return;
+                    }
+                };
+                let cap_registry = match build_registry(&state) {
+                    Ok(r) => r,
+                    Err(e) => { let _ = tx.send(WorkResult::WorkflowDone { name, outcome_count: 0, error: Some(e.to_string()) }); return; }
+                };
+                let wf_registry = build_workflow_registry(&state).unwrap_or_default();
+                let policy = load_policy(&state).unwrap_or_default();
+                let receipt_store = match clix_core::receipts::ReceiptStore::open(&state.receipts_db) {
+                    Ok(s) => s,
+                    Err(e) => { let _ = tx.send(WorkResult::WorkflowDone { name, outcome_count: 0, error: Some(e.to_string()) }); return; }
+                };
+                let active_profile = state.config.active_profiles.first().cloned().unwrap_or_default();
+                let infisical_profiles = state.config.infisical();
+                let ctx = ExecutionContext {
+                    user: whoami::username(),
+                    profile: active_profile,
+                    approver: None,
+                    cwd: std::env::current_dir().unwrap_or_default(),
+                    env: String::new(),
+                };
+                match execution::run_workflow(&cap_registry, &wf_registry, &policy, &infisical_profiles, &receipt_store, None, &name, serde_json::Value::Object(Default::default()), ctx) {
+                    Ok(outcomes) => {
+                        let _ = tx.send(WorkResult::WorkflowDone { name, outcome_count: outcomes.len(), error: None });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(WorkResult::WorkflowDone { name, outcome_count: 0, error: Some(e.to_string()) });
+                    }
+                }
             }
             WorkRequest::ApproveReceipt { id, approver, job_id } => {
                 use clix_core::execution::broker_client::BrokerClient;
