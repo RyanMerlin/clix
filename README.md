@@ -2,9 +2,19 @@
 
 **An agent-optimized CLI gateway. CLIs are vastly more powerful than MCP servers — clix makes them reliable, discoverable, and safe for agent use.**
 
-Current release: `v0.5.1`.
+<p align="center">
+  <a href="https://github.com/RyanMerlin/clix/actions/workflows/ci.yml">
+    <img alt="CI" src="https://github.com/RyanMerlin/clix/actions/workflows/ci.yml/badge.svg?branch=main" />
+  </a>
+  <a href="https://github.com/RyanMerlin/clix/releases/latest">
+    <img alt="Latest release" src="https://img.shields.io/github/v/release/RyanMerlin/clix" />
+  </a>
+</p>
+
+Current release: `v0.5.2`.
 
 Release notes:
+- [v0.5.2](docs/releases/v0.5.2.md)
 - [v0.5.1](docs/releases/v0.5.1.md)
 - [v0.5.0](docs/releases/v0.5.0.md)
 - [Release process](docs/release.md)
