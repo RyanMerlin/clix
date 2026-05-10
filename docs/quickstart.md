@@ -5,10 +5,10 @@ If you are new to clix, this is the shortest path from zero to a working setup.
 ## 1. Install clix
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/RyanMerlin/clix/main/scripts/install.sh | sh
+CLIX_VERSION=v0.5.2 curl -fsSL https://raw.githubusercontent.com/RyanMerlin/clix/v0.5.2/scripts/install.sh | sh
 ```
 
-That installs the latest GitHub release binary into `~/.local/bin` by default.
+That installs the tagged `v0.5.2` release binary into `~/.local/bin` by default.
 
 ## 2. Initialize the local workspace
 

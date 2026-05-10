@@ -86,7 +86,7 @@ If you are new to clix, start with [docs/quickstart.md](docs/quickstart.md). It 
 
 ```sh
 # Install
-curl -fsSL https://raw.githubusercontent.com/RyanMerlin/clix/main/scripts/install.sh | sh
+CLIX_VERSION=v0.5.2 curl -fsSL https://raw.githubusercontent.com/RyanMerlin/clix/v0.5.2/scripts/install.sh | sh
 
 # Set up and install built-in packs
 clix init
