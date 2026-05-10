@@ -2,7 +2,8 @@
 
 The project uses GitHub Actions to build tagged releases.
 
-For the current release notes, see [docs/releases/v0.5.0.md](docs/releases/v0.5.0.md).
+Current public release: `v0.5.0`  
+Release notes: [docs/releases/v0.5.0.md](docs/releases/v0.5.0.md)
 
 ## Trigger
 
