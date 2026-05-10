@@ -1,11 +1,40 @@
+use crate::output::print_json;
 use anyhow::{anyhow, Result};
 use clix_core::execution::run_capability;
 use clix_core::execution::worker_registry::WorkerRegistry;
-use clix_core::loader::{build_registry, load_policy};
+use clix_core::loader::{active_profile_bindings, build_registry, load_policy};
 use clix_core::policy::evaluate::ExecutionContext;
 use clix_core::receipts::ReceiptStore;
 use clix_core::state::{home_dir, ClixState};
-use crate::output::print_json;
+use std::sync::Arc;
+
+pub fn build_worker_registry(allow_unsandboxed: bool) -> Result<Option<Arc<WorkerRegistry>>> {
+    let worker_binary = WorkerRegistry::locate_worker_binary();
+    if worker_binary.exists() {
+        return Ok(Some(WorkerRegistry::new(worker_binary, 300)));
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if allow_unsandboxed {
+            eprintln!("warn: clix-worker not found alongside clix — running without OS isolation");
+            eprintln!("      install all clix binaries together, or set CLIX_ALLOW_UNSANDBOXED=1");
+            return Ok(None);
+        }
+        return Err(anyhow!(
+            "clix-worker binary not found on PATH.\n\
+             OS-level isolation requires all five clix binaries installed together.\n\
+             To run without isolation (unsafe), set CLIX_ALLOW_UNSANDBOXED=1."
+        ));
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = allow_unsandboxed;
+        eprintln!("warn: clix-worker not found — running in policy-only mode on this platform");
+        Ok(None)
+    }
+}
 
 pub fn run(capability: &str, input_pairs: &[String], json: bool, dry_run: bool) -> Result<()> {
     let state = ClixState::load(home_dir())?;
@@ -14,7 +43,8 @@ pub fn run(capability: &str, input_pairs: &[String], json: bool, dry_run: bool) 
     let input = parse_input_pairs(input_pairs)?;
 
     // Validate inputs against the capability's JSON Schema before executing.
-    let cap = registry.get(capability)
+    let cap = registry
+        .get(capability)
         .ok_or_else(|| anyhow!("capability not found: {capability}"))?;
     validate_inputs(&input, &cap.input_schema, json)?;
 
@@ -26,7 +56,12 @@ pub fn run(capability: &str, input_pairs: &[String], json: bool, dry_run: bool) 
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
             }),
             user: whoami::username(),
-            profile: state.config.active_profiles.first().cloned().unwrap_or_else(|| "default".to_string()),
+            profile: state
+                .config
+                .active_profiles
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "default".to_string()),
             approver: None,
         };
         let decision = clix_core::policy::evaluate::evaluate_policy(&policy, &ctx, cap);
@@ -41,8 +76,10 @@ pub fn run(capability: &str, input_pairs: &[String], json: bool, dry_run: bool) 
         if json {
             print_json(&result);
         } else {
-            println!("dry-run: {} (policy={:?}, isolation={:?})",
-                capability, decision, cap.isolation);
+            println!(
+                "dry-run: {} (policy={:?}, isolation={:?})",
+                capability, decision, cap.isolation
+            );
         }
         return Ok(());
     }
@@ -54,23 +91,32 @@ pub fn run(capability: &str, input_pairs: &[String], json: bool, dry_run: bool) 
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
         }),
         user: whoami::username(),
-        profile: state.config.active_profiles.first().cloned().unwrap_or_else(|| "default".to_string()),
+        profile: state
+            .config
+            .active_profiles
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "default".to_string()),
         approver: None,
     };
 
-    let worker_binary = WorkerRegistry::locate_worker_binary();
-    let worker_registry = if worker_binary.exists() {
-        Some(WorkerRegistry::new(worker_binary, 300))
-    } else {
-        if std::env::var("CLIX_ALLOW_UNSANDBOXED").is_err() {
-            eprintln!("warn: clix-worker not found alongside clix — running without OS isolation");
-            eprintln!("      install all clix binaries together, or set CLIX_ALLOW_UNSANDBOXED=1");
-        }
-        None
-    };
+    let allow_unsandboxed = std::env::var("CLIX_ALLOW_UNSANDBOXED").is_ok();
+    let worker_registry = build_worker_registry(allow_unsandboxed)?;
+    let (profile_secret_bindings, profile_folder_bindings) = active_profile_bindings(&state)?;
 
-    let outcome = run_capability(&registry, &policy, &state.config.infisical(), &store, worker_registry.as_ref(), capability, input, ctx, &[])
-        .map_err(|e| anyhow!("{e}"))?;
+    let outcome = run_capability(
+        &registry,
+        &policy,
+        &state.config.infisical(),
+        &store,
+        worker_registry.as_ref(),
+        capability,
+        input,
+        ctx,
+        &profile_secret_bindings,
+        &profile_folder_bindings,
+    )
+    .map_err(|e| anyhow!("{e}"))?;
     if json {
         // Always emit the full outcome struct under --json for predictable agent parsing.
         print_json(&outcome);
@@ -78,7 +124,9 @@ pub fn run(capability: &str, input_pairs: &[String], json: bool, dry_run: bool) 
         println!("ok — receipt {}", outcome.receipt_id);
         if let Some(result) = &outcome.result {
             if let Some(stdout) = result["stdout"].as_str() {
-                if !stdout.is_empty() { print!("{stdout}"); }
+                if !stdout.is_empty() {
+                    print!("{stdout}");
+                }
             } else if let Some(date) = result["date"].as_str() {
                 println!("{date}");
             } else if let Some(output) = result["output"].as_str() {
@@ -97,16 +145,26 @@ pub fn run(capability: &str, input_pairs: &[String], json: bool, dry_run: bool) 
 
 /// Validate that `inputs` only contains keys declared in the capability's JSON Schema.
 /// Returns a structured error (and optionally prints JSON) if unknown keys are present.
-fn validate_inputs(inputs: &serde_json::Value, schema: &serde_json::Value, json: bool) -> Result<()> {
+fn validate_inputs(
+    inputs: &serde_json::Value,
+    schema: &serde_json::Value,
+    json: bool,
+) -> Result<()> {
     let props = schema.get("properties");
-    let Some(props) = props else { return Ok(()); };
-    let Some(obj) = inputs.as_object() else { return Ok(()); };
+    let Some(props) = props else {
+        return Ok(());
+    };
+    let Some(obj) = inputs.as_object() else {
+        return Ok(());
+    };
 
-    let declared: Vec<&str> = props.as_object()
+    let declared: Vec<&str> = props
+        .as_object()
         .map(|m| m.keys().map(|k| k.as_str()).collect())
         .unwrap_or_default();
 
-    let unknown: Vec<&str> = obj.keys()
+    let unknown: Vec<&str> = obj
+        .keys()
         .map(|k| k.as_str())
         .filter(|k| !declared.contains(k))
         .collect();
@@ -130,8 +188,11 @@ fn validate_inputs(inputs: &serde_json::Value, schema: &serde_json::Value, json:
 pub fn parse_input_pairs(pairs: &[String]) -> Result<serde_json::Value> {
     let mut map = serde_json::Map::new();
     for pair in pairs {
-        let (key, value) = pair.split_once('=').ok_or_else(|| anyhow!("input must be key=value, got: {pair}"))?;
-        let v: serde_json::Value = serde_json::from_str(value).unwrap_or_else(|_| serde_json::Value::String(value.to_string()));
+        let (key, value) = pair
+            .split_once('=')
+            .ok_or_else(|| anyhow!("input must be key=value, got: {pair}"))?;
+        let v: serde_json::Value = serde_json::from_str(value)
+            .unwrap_or_else(|_| serde_json::Value::String(value.to_string()));
         map.insert(key.to_string(), v);
     }
     Ok(serde_json::Value::Object(map))

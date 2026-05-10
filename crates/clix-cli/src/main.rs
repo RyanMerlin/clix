@@ -6,12 +6,15 @@ mod tui;
 
 use anyhow::Result;
 use clap::FromArgMatches;
-use cli::{Cli, Commands, CapabilitiesCmd, WorkflowCmd, ProfileCmd, ReceiptsCmd, PackCmd, ShimCmd, McpCmd, ToolsCmd};
+use cli::{
+    CapabilitiesCmd, Cli, Commands, McpCmd, PackCmd, ProfileCmd, ReceiptsCmd, ShimCmd, ToolsCmd,
+    WorkflowCmd,
+};
 #[allow(unused_imports)]
 use commands::approve;
 
 use clix_core::execution::run_capability;
-use clix_core::loader::{build_registry, load_policy};
+use clix_core::loader::{active_profile_bindings, build_registry, load_policy};
 use clix_core::policy::evaluate::ExecutionContext;
 use clix_core::receipts::ReceiptStore;
 use clix_core::state::{home_dir, ClixState};
@@ -39,8 +42,7 @@ async fn main() -> Result<()> {
     // typed enum from ArgMatches and dispatch as before.
     if let Some((name, _)) = matches.subcommand() {
         if cli::STATIC_COMMANDS.contains(&name) {
-            let cli = Cli::from_arg_matches(&matches)
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let cli = Cli::from_arg_matches(&matches).map_err(|e| anyhow::anyhow!("{e}"))?;
             return dispatch_static(cli).await;
         }
     }
@@ -48,9 +50,12 @@ async fn main() -> Result<()> {
     // --- Dynamic dispatch ---
     // Walk the subcommand chain to reconstruct the capability name.
     if let Some((cap_name, leaf)) = dynamic_cli::resolve_capability_name(&matches) {
-        let state = state.ok_or_else(|| anyhow::anyhow!("clix is not initialised — run `clix init` first"))?;
-        let registry = registry.ok_or_else(|| anyhow::anyhow!("could not load capability registry"))?;
-        let cap = registry.get(&cap_name)
+        let state = state
+            .ok_or_else(|| anyhow::anyhow!("clix is not initialised — run `clix init` first"))?;
+        let registry =
+            registry.ok_or_else(|| anyhow::anyhow!("could not load capability registry"))?;
+        let cap = registry
+            .get(&cap_name)
             .ok_or_else(|| anyhow::anyhow!("capability not found: {cap_name}"))?;
         let inputs = dynamic_cli::extract_inputs(leaf, cap);
         let policy = load_policy(&state).unwrap_or_default();
@@ -59,17 +64,39 @@ async fn main() -> Result<()> {
             env: state.config.default_env.clone(),
             cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             user: whoami::username(),
-            profile: state.config.active_profiles.first().cloned().unwrap_or_else(|| "default".to_string()),
+            profile: state
+                .config
+                .active_profiles
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "default".to_string()),
             approver: None,
         };
         let json = leaf.get_flag("json");
-        let format_str = matches.get_one::<String>("format").map(|s| s.as_str()).unwrap_or("json");
+        let format_str = matches
+            .get_one::<String>("format")
+            .map(|s| s.as_str())
+            .unwrap_or("json");
         let format = if json {
             output::OutputFormat::Json
         } else {
             output::OutputFormat::from_str(format_str)
         };
-        let outcome = run_capability(&registry, &policy, &state.config.infisical(), &store, None, &cap_name, inputs, ctx, &[])?;
+        let (profile_secret_bindings, profile_folder_bindings) = active_profile_bindings(&state)?;
+        let worker_registry =
+            commands::run::build_worker_registry(std::env::var("CLIX_ALLOW_UNSANDBOXED").is_ok())?;
+        let outcome = run_capability(
+            &registry,
+            &policy,
+            &state.config.infisical(),
+            &store,
+            worker_registry.as_ref(),
+            &cap_name,
+            inputs,
+            ctx,
+            &profile_secret_bindings,
+            &profile_folder_bindings,
+        )?;
         if format != output::OutputFormat::Json && outcome.result.is_some() {
             let result = outcome.result.as_ref().unwrap();
             print!("{}", output::format_value(result, &format));
@@ -92,7 +119,13 @@ async fn main() -> Result<()> {
 
 async fn dispatch_static(cli: Cli) -> Result<()> {
     match cli.command {
-        Commands::Init { install_shims, adopt_creds, adopt_sa, claude_code, cursor } => {
+        Commands::Init {
+            install_shims,
+            adopt_creds,
+            adopt_sa,
+            claude_code,
+            cursor,
+        } => {
             commands::init::run()?;
             if !install_shims.is_empty() {
                 let cmds: Vec<&str> = install_shims.iter().map(String::as_str).collect();
@@ -119,42 +152,67 @@ async fn dispatch_static(cli: Cli) -> Result<()> {
         }
         Commands::Status { json } => commands::status::run(json)?,
         Commands::Version => println!("clix {}", env!("CARGO_PKG_VERSION")),
-        Commands::Run { capability, input, json, dry_run } => commands::run::run(&capability, &input, json, dry_run)?,
+        Commands::Run {
+            capability,
+            input,
+            json,
+            dry_run,
+        } => commands::run::run(&capability, &input, json, dry_run)?,
         Commands::Capabilities(sub) => match sub {
             CapabilitiesCmd::List { json } => commands::capabilities::list(json)?,
             CapabilitiesCmd::Show { name, json } => commands::capabilities::show(&name, json)?,
-            CapabilitiesCmd::Search { query, json } => commands::capabilities::search(&query, json)?,
+            CapabilitiesCmd::Search { query, json } => {
+                commands::capabilities::search(&query, json)?
+            }
         },
         Commands::Workflow(sub) => match sub {
             WorkflowCmd::List { json } => commands::workflow::list(json)?,
-            WorkflowCmd::Run { name, input, json } => commands::workflow::run_wf(&name, &input, json)?,
+            WorkflowCmd::Run { name, input, json } => {
+                commands::workflow::run_wf(&name, &input, json)?
+            }
         },
         Commands::Profile(sub) => match sub {
             ProfileCmd::List { json } => commands::profile::list(json)?,
-            ProfileCmd::Show { name, .. } => { let _ = name; println!("(use pack show for details)"); }
+            ProfileCmd::Show { name, .. } => {
+                let _ = name;
+                println!("(use pack show for details)");
+            }
             ProfileCmd::Activate { name } => commands::profile::activate(&name)?,
             ProfileCmd::Deactivate { name } => commands::profile::deactivate(&name)?,
         },
         Commands::Receipts(sub) => match sub {
-            ReceiptsCmd::List { limit, status, json } => commands::receipts::list(limit, status.as_deref(), json)?,
+            ReceiptsCmd::List {
+                limit,
+                status,
+                json,
+            } => commands::receipts::list(limit, status.as_deref(), json)?,
             ReceiptsCmd::Show { id, json } => commands::receipts::show(&id, json)?,
             ReceiptsCmd::Tail => commands::receipts::tail()?,
-            ReceiptsCmd::Export { status, since, format, output } =>
-                commands::receipts::export(status, since, format, output)?,
+            ReceiptsCmd::Export {
+                status,
+                since,
+                format,
+                output,
+            } => commands::receipts::export(status, since, format, output)?,
         },
         Commands::Serve { socket, http } => commands::serve::run(socket, http).await?,
         Commands::Tui => commands::tui::run()?,
         Commands::Doctor { json } => commands::doctor::run(json)?,
         Commands::Tools(sub) => match sub {
-            ToolsCmd::Export { format, namespace, all } =>
-                commands::tools::export(&format, namespace.as_deref(), all)?,
+            ToolsCmd::Export {
+                format,
+                namespace,
+                all,
+            } => commands::tools::export(&format, namespace.as_deref(), all)?,
         },
         Commands::Shim(sub) => match sub {
             ShimCmd::List { json } => commands::shim::list(json)?,
             ShimCmd::Uninstall { command } => commands::shim::uninstall(&command)?,
         },
         Commands::Mcp(sub) => match sub {
-            McpCmd::Call { method, params } => commands::mcp::call(&method, params.as_deref()).await?,
+            McpCmd::Call { method, params } => {
+                commands::mcp::call(&method, params.as_deref()).await?
+            }
         },
         Commands::Secrets(sub) => {
             let state = ClixState::load(home_dir())?;
@@ -165,10 +223,18 @@ async fn dispatch_static(cli: Cli) -> Result<()> {
         }
         Commands::Sync(sub) => commands::sync::run_sync(sub)?,
         Commands::Broker(sub) => commands::broker::run_broker(sub)?,
-        Commands::Approve { receipt_id, approver, comment } => {
+        Commands::Approve {
+            receipt_id,
+            approver,
+            comment,
+        } => {
             commands::approve::approve(&receipt_id, &approver, comment.as_deref())?;
         }
-        Commands::Reject { receipt_id, approver, reason } => {
+        Commands::Reject {
+            receipt_id,
+            approver,
+            reason,
+        } => {
             commands::approve::reject(&receipt_id, &approver, reason.as_deref())?;
         }
         Commands::Pack(sub) => match sub {
@@ -176,27 +242,47 @@ async fn dispatch_static(cli: Cli) -> Result<()> {
             PackCmd::Show { name, json } => commands::pack::show(&name, json)?,
             PackCmd::Discover { path, json } => commands::pack::discover(&path, json)?,
             PackCmd::Validate { path } => commands::pack::validate(&path)?,
-            PackCmd::Diff { installed, new_path, json } => commands::pack::diff(&installed, &new_path, json)?,
+            PackCmd::Diff {
+                installed,
+                new_path,
+                json,
+            } => commands::pack::diff(&installed, &new_path, json)?,
             PackCmd::Install { path, verify_sig } => commands::pack::install(&path, verify_sig)?,
-            PackCmd::Bundle { path, sign, key } => commands::pack::bundle(&path, sign, key.as_deref())?,
+            PackCmd::Bundle { path, sign, key } => {
+                commands::pack::bundle(&path, sign, key.as_deref())?
+            }
             PackCmd::Publish { path } => commands::pack::publish(&path)?,
             PackCmd::Keygen { force } => commands::pack::keygen(force)?,
             PackCmd::Trust { pubkey_path } => commands::pack::trust(&pubkey_path)?,
             PackCmd::Verify { pack_path } => commands::pack::verify(&pack_path)?,
-            PackCmd::Scaffold { name, preset, command } => commands::pack::scaffold(&name, &preset, command.as_deref())?,
-            PackCmd::Onboard { name, command, json } => commands::pack::onboard(&name, &command, json)?,
+            PackCmd::Scaffold {
+                name,
+                preset,
+                command,
+            } => commands::pack::scaffold(&name, &preset, command.as_deref())?,
+            PackCmd::Onboard {
+                name,
+                command,
+                json,
+            } => commands::pack::onboard(&name, &command, json)?,
         },
     }
     Ok(())
 }
 
 fn init_tracing() {
-    use tracing_subscriber::{EnvFilter, fmt};
-    let filter = EnvFilter::try_from_env("CLIX_LOG")
-        .unwrap_or_else(|_| EnvFilter::new("warn"));
+    use tracing_subscriber::{fmt, EnvFilter};
+    let filter = EnvFilter::try_from_env("CLIX_LOG").unwrap_or_else(|_| EnvFilter::new("warn"));
     if std::env::var("CLIX_LOG_JSON").is_ok() {
-        fmt().json().with_env_filter(filter).with_writer(std::io::stderr).init();
+        fmt()
+            .json()
+            .with_env_filter(filter)
+            .with_writer(std::io::stderr)
+            .init();
     } else {
-        fmt().with_env_filter(filter).with_writer(std::io::stderr).init();
+        fmt()
+            .with_env_filter(filter)
+            .with_writer(std::io::stderr)
+            .init();
     }
 }

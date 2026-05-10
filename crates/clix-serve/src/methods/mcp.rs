@@ -1,8 +1,9 @@
-use std::sync::Arc;
+use crate::dispatch::ServeState;
 use clix_core::execution::run_capability;
+use clix_core::loader::active_profile_bindings;
 use clix_core::policy::evaluate::ExecutionContext;
 use clix_core::sandbox::sandbox_enforced;
-use crate::dispatch::ServeState;
+use std::sync::Arc;
 
 type MethodResult = std::result::Result<serde_json::Value, String>;
 
@@ -22,42 +23,82 @@ pub fn initialize(_serve: &Arc<ServeState>) -> MethodResult {
 pub fn tools_list(serve: &Arc<ServeState>, params: &serde_json::Value) -> MethodResult {
     // "all: true" → flat list (backward compat)
     if params.get("all").and_then(|v| v.as_bool()).unwrap_or(false) {
-        let tools: Vec<serde_json::Value> = serve.cap_registry.all().iter().map(|cap| serde_json::json!({
-            "name": cap.name,
-            "description": cap.description.as_deref().unwrap_or(""),
-            "inputSchema": cap.input_schema
-        })).collect();
+        let tools: Vec<serde_json::Value> = serve
+            .cap_registry
+            .all()
+            .iter()
+            .map(|cap| {
+                serde_json::json!({
+                    "name": cap.name,
+                    "description": cap.description.as_deref().unwrap_or(""),
+                    "inputSchema": cap.input_schema
+                })
+            })
+            .collect();
         return Ok(serde_json::json!({"tools": tools}));
     }
 
     // "namespace: X" → drill-in: return full tool descriptors for that namespace group
     if let Some(ns) = params.get("namespace").and_then(|v| v.as_str()) {
-        let tools: Vec<serde_json::Value> = serve.cap_registry.by_namespace(ns).iter().map(|cap| serde_json::json!({
-            "name": cap.name,
-            "description": cap.description.as_deref().unwrap_or(""),
-            "inputSchema": cap.input_schema
-        })).collect();
+        let tools: Vec<serde_json::Value> = serve
+            .cap_registry
+            .by_namespace(ns)
+            .iter()
+            .map(|cap| {
+                serde_json::json!({
+                    "name": cap.name,
+                    "description": cap.description.as_deref().unwrap_or(""),
+                    "inputSchema": cap.input_schema
+                })
+            })
+            .collect();
         return Ok(serde_json::json!({"tools": tools}));
     }
 
     // Default → namespace stub view
-    let tools: Vec<serde_json::Value> = serve.cap_registry.namespaces().iter().map(|stub| serde_json::json!({
-        "name": stub.key,
-        "type": "namespace",
-        "count": stub.count
-    })).collect();
+    let tools: Vec<serde_json::Value> = serve
+        .cap_registry
+        .namespaces()
+        .iter()
+        .map(|stub| {
+            serde_json::json!({
+                "name": stub.key,
+                "type": "namespace",
+                "count": stub.count
+            })
+        })
+        .collect();
     Ok(serde_json::json!({"tools": tools}))
 }
 
 pub async fn tools_call(serve: &Arc<ServeState>, params: &serde_json::Value) -> MethodResult {
-    let name = params["name"].as_str().ok_or("tools/call: missing 'name'")?;
-    let arguments = params.get("arguments").cloned().unwrap_or(serde_json::json!({}));
+    let name = params["name"]
+        .as_str()
+        .ok_or("tools/call: missing 'name'")?;
+    let arguments = params
+        .get("arguments")
+        .cloned()
+        .unwrap_or(serde_json::json!({}));
+    let (profile_secret_bindings, profile_folder_bindings) =
+        active_profile_bindings(&serve.state).map_err(|e| e.to_string())?;
     let ctx = ExecutionContext {
-        env:     serve.state.config.default_env.clone(),
-        cwd:     serve.state.config.workspace_root.clone()
-                     .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"))),
-        user:    "agent".to_string(),
-        profile: serve.state.config.active_profiles.first().cloned().unwrap_or_else(|| "default".to_string()),
+        env: serve.state.config.default_env.clone(),
+        cwd: serve
+            .state
+            .config
+            .workspace_root
+            .clone()
+            .unwrap_or_else(|| {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"))
+            }),
+        user: "agent".to_string(),
+        profile: serve
+            .state
+            .config
+            .active_profiles
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "default".to_string()),
         approver: None,
     };
     let serve_clone = Arc::clone(serve);
@@ -65,13 +106,34 @@ pub async fn tools_call(serve: &Arc<ServeState>, params: &serde_json::Value) -> 
     let cap_name_for_metrics = name.clone();
     let outcome = tokio::task::spawn_blocking(move || {
         let store = serve_clone.store.lock().unwrap();
-        run_capability(&serve_clone.cap_registry, &serve_clone.policy, &serve_clone.state.config.infisical(), &store, serve_clone.worker_registry.as_ref(), &name, arguments, ctx, &[])
-    }).await.map_err(|e| format!("task join: {e}"))?;
+        run_capability(
+            &serve_clone.cap_registry,
+            &serve_clone.policy,
+            &serve_clone.state.config.infisical(),
+            &store,
+            serve_clone.worker_registry.as_ref(),
+            &name,
+            arguments,
+            ctx,
+            &profile_secret_bindings,
+            &profile_folder_bindings,
+        )
+    })
+    .await
+    .map_err(|e| format!("task join: {e}"))?;
     let outcome = match outcome {
         Ok(o) => {
-            let status = if o.ok { "succeeded" } else if o.approval_required { "pending_approval" } else { "denied" };
+            let status = if o.ok {
+                "succeeded"
+            } else if o.approval_required {
+                "pending_approval"
+            } else {
+                "denied"
+            };
             crate::metrics::record_call(&cap_name_for_metrics, status);
-            if !o.ok && !o.approval_required { crate::metrics::record_denial(&cap_name_for_metrics); }
+            if !o.ok && !o.approval_required {
+                crate::metrics::record_denial(&cap_name_for_metrics);
+            }
             o
         }
         Err(e) => {
@@ -84,7 +146,9 @@ pub async fn tools_call(serve: &Arc<ServeState>, params: &serde_json::Value) -> 
         if let Some(stdout) = result["stdout"].as_str() {
             vec![serde_json::json!({"type":"text","text":stdout})]
         } else {
-            vec![serde_json::json!({"type":"text","text":serde_json::to_string(result).unwrap_or_default()})]
+            vec![
+                serde_json::json!({"type":"text","text":serde_json::to_string(result).unwrap_or_default()}),
+            ]
         }
     } else {
         vec![serde_json::json!({"type":"text","text":outcome.reason.as_deref().unwrap_or("")})]

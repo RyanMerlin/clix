@@ -1,9 +1,10 @@
-use std::sync::Arc;
+use crate::dispatch::ServeState;
 use clix_core::execution::{run_capability, run_workflow};
+use clix_core::loader::active_profile_bindings;
 use clix_core::packs::onboard_cli;
 use clix_core::policy::evaluate::ExecutionContext;
 use clix_core::sandbox::sandbox_enforced;
-use crate::dispatch::ServeState;
+use std::sync::Arc;
 
 type MethodResult = std::result::Result<serde_json::Value, String>;
 
@@ -15,27 +16,64 @@ pub fn workflows_list(serve: &Arc<ServeState>) -> MethodResult {
 }
 
 pub async fn workflows_run(serve: &Arc<ServeState>, params: &serde_json::Value) -> MethodResult {
-    let name = params["name"].as_str().ok_or("workflows/run: missing 'name'")?;
-    let arguments = params.get("arguments").cloned().unwrap_or(serde_json::json!({}));
+    let name = params["name"]
+        .as_str()
+        .ok_or("workflows/run: missing 'name'")?;
+    let arguments = params
+        .get("arguments")
+        .cloned()
+        .unwrap_or(serde_json::json!({}));
+    let (profile_secret_bindings, profile_folder_bindings) =
+        active_profile_bindings(&serve.state).map_err(|e| e.to_string())?;
     let ctx = ExecutionContext {
-        env:     serve.state.config.default_env.clone(),
-        cwd:     serve.state.config.workspace_root.clone().unwrap_or_else(|| std::path::PathBuf::from(".")),
-        user:    "agent".to_string(),
-        profile: serve.state.config.active_profiles.first().cloned().unwrap_or_else(|| "default".to_string()),
+        env: serve.state.config.default_env.clone(),
+        cwd: serve
+            .state
+            .config
+            .workspace_root
+            .clone()
+            .unwrap_or_else(|| std::path::PathBuf::from(".")),
+        user: "agent".to_string(),
+        profile: serve
+            .state
+            .config
+            .active_profiles
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "default".to_string()),
         approver: None,
     };
     let serve_clone = Arc::clone(serve);
     let name = name.to_string();
     let outcomes = tokio::task::spawn_blocking(move || {
         let store = serve_clone.store.lock().unwrap();
-        run_workflow(&serve_clone.cap_registry, &serve_clone.wf_registry, &serve_clone.policy, &serve_clone.state.config.infisical(), &store, serve_clone.worker_registry.as_ref(), &name, arguments, ctx)
-    }).await.map_err(|e| format!("task join: {e}"))?.map_err(|e| e.to_string())?;
+        run_workflow(
+            &serve_clone.cap_registry,
+            &serve_clone.wf_registry,
+            &serve_clone.policy,
+            &serve_clone.state.config.infisical(),
+            &store,
+            serve_clone.worker_registry.as_ref(),
+            &name,
+            arguments,
+            ctx,
+            &profile_secret_bindings,
+            &profile_folder_bindings,
+        )
+    })
+    .await
+    .map_err(|e| format!("task join: {e}"))?
+    .map_err(|e| e.to_string())?;
     Ok(serde_json::json!({"outcomes": outcomes}))
 }
 
 pub fn onboard_probe(params: &serde_json::Value) -> MethodResult {
-    let name    = params["name"].as_str().ok_or("onboard/probe: missing 'name'")?;
-    let command = params["command"].as_str().ok_or("onboard/probe: missing 'command'")?;
+    let name = params["name"]
+        .as_str()
+        .ok_or("onboard/probe: missing 'name'")?;
+    let command = params["command"]
+        .as_str()
+        .ok_or("onboard/probe: missing 'command'")?;
     let tmp = std::env::temp_dir().join(format!("clix-onboard-{name}"));
     std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
     let report = onboard_cli(name, command, &tmp).map_err(|e| e.to_string())?;
@@ -47,11 +85,15 @@ pub fn packs_list(serve: &Arc<ServeState>) -> MethodResult {
     if serve.state.packs_dir.exists() {
         if let Ok(entries) = std::fs::read_dir(&serve.state.packs_dir) {
             for entry in entries.flatten() {
-                if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) { continue; }
+                if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    continue;
+                }
                 let pack_file = entry.path().join("pack.yaml");
                 if pack_file.exists() {
                     if let Ok(content) = std::fs::read_to_string(&pack_file) {
-                        if let Ok(p) = serde_yaml::from_str::<clix_core::manifest::pack::PackManifest>(&content) {
+                        if let Ok(p) = serde_yaml::from_str::<clix_core::manifest::pack::PackManifest>(
+                            &content,
+                        ) {
                             packs.push(serde_json::json!({"name":p.name,"version":p.version,"description":p.description}));
                         }
                     }
@@ -66,7 +108,9 @@ pub fn packs_list(serve: &Arc<ServeState>) -> MethodResult {
 /// Handle a shim invocation: resolve the raw argv to a capability via argv_pattern matching,
 /// then dispatch exactly like tools/call. Called by clix-shim binaries.
 pub async fn shim_call(serve: &Arc<ServeState>, params: &serde_json::Value) -> MethodResult {
-    let command = params["command"].as_str().ok_or("shim/call: missing 'command'")?;
+    let command = params["command"]
+        .as_str()
+        .ok_or("shim/call: missing 'command'")?;
     let argv: Vec<&str> = match params.get("argv").and_then(|v| v.as_array()) {
         Some(arr) => arr.iter().filter_map(|v| v.as_str()).collect(),
         None => vec![],
@@ -76,32 +120,79 @@ pub async fn shim_call(serve: &Arc<ServeState>, params: &serde_json::Value) -> M
     let mut full_argv = vec![command];
     full_argv.extend_from_slice(&argv);
 
-    let cap = serve.cap_registry.resolve_argv(&full_argv)
-        .ok_or_else(|| format!(
+    let cap = serve.cap_registry.resolve_argv(&full_argv).ok_or_else(|| {
+        format!(
             "no capability matched argv: {}; run `clix capabilities list` to see available tools",
             full_argv.join(" ")
-        ))?;
+        )
+    })?;
     let cap_name = cap.name.clone();
 
     let ctx = ExecutionContext {
-        env:     serve.state.config.default_env.clone(),
-        cwd:     serve.state.config.workspace_root.clone()
-                     .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"))),
-        user:    "agent".to_string(),
-        profile: serve.state.config.active_profiles.first().cloned().unwrap_or_else(|| "default".to_string()),
+        env: serve.state.config.default_env.clone(),
+        cwd: serve
+            .state
+            .config
+            .workspace_root
+            .clone()
+            .unwrap_or_else(|| {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"))
+            }),
+        user: "agent".to_string(),
+        profile: serve
+            .state
+            .config
+            .active_profiles
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "default".to_string()),
         approver: None,
     };
+    let (profile_secret_bindings, profile_folder_bindings) =
+        active_profile_bindings(&serve.state).map_err(|e| e.to_string())?;
     let serve_clone = Arc::clone(serve);
     let outcome = tokio::task::spawn_blocking(move || {
         let store = serve_clone.store.lock().unwrap();
-        run_capability(&serve_clone.cap_registry, &serve_clone.policy, &serve_clone.state.config.infisical(), &store, serve_clone.worker_registry.as_ref(), &cap_name, serde_json::json!({}), ctx, &[])
-    }).await.map_err(|e| format!("task join: {e}"))?.map_err(|e| e.to_string())?;
+        run_capability(
+            &serve_clone.cap_registry,
+            &serve_clone.policy,
+            &serve_clone.state.config.infisical(),
+            &store,
+            serve_clone.worker_registry.as_ref(),
+            &cap_name,
+            serde_json::json!({}),
+            ctx,
+            &profile_secret_bindings,
+            &profile_folder_bindings,
+        )
+    })
+    .await
+    .map_err(|e| format!("task join: {e}"))?
+    .map_err(|e| e.to_string())?;
 
     let exit_code = if let Some(result) = &outcome.result {
-        result["exit_code"].as_i64().unwrap_or(if outcome.ok { 0 } else { 1 })
-    } else { if outcome.ok { 0 } else { 1 } };
-    let stdout = outcome.result.as_ref().and_then(|r| r["stdout"].as_str()).unwrap_or("").to_string();
-    let stderr = outcome.result.as_ref().and_then(|r| r["stderr"].as_str()).unwrap_or("").to_string();
+        result["exit_code"]
+            .as_i64()
+            .unwrap_or(if outcome.ok { 0 } else { 1 })
+    } else {
+        if outcome.ok {
+            0
+        } else {
+            1
+        }
+    };
+    let stdout = outcome
+        .result
+        .as_ref()
+        .and_then(|r| r["stdout"].as_str())
+        .unwrap_or("")
+        .to_string();
+    let stderr = outcome
+        .result
+        .as_ref()
+        .and_then(|r| r["stderr"].as_str())
+        .unwrap_or("")
+        .to_string();
     Ok(serde_json::json!({
         "ok": outcome.ok,
         "exit_code": exit_code,

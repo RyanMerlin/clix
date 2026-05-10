@@ -42,7 +42,7 @@ packs/          # Built-in YAML packs (base, kubectl-observe, gcloud-readonly, g
 Each component runs under a separate OS user / trust level:
 
 - **clix-broker** — sole owner of credential files (mode `0700`). Exposes a Unix socket; only the gateway UID may connect (verified via `SO_PEERCRED`). Mints ephemeral tokens (gcloud, kubectl, generic secrets) on demand. Credentials never appear in the agent's filesystem view.
-- **clix-gateway** (`clix-serve`) — supervisor that handles all MCP/JSON-RPC traffic. Keeps a `WorkerRegistry` of warm worker processes keyed by `(profile, binary, isolation_tier)`. Evaluates policy before every dispatch.
+- **clix-gateway** (`clix-serve`) — supervisor that handles all MCP/JSON-RPC traffic. Keeps a `WorkerRegistry` of warm worker processes keyed by `(profile, binary, isolation_tier)`. Evaluates policy before every dispatch and fails closed on Linux when the worker binary is missing, unless `CLIX_ALLOW_UNSANDBOXED=1` is explicitly set.
 - **clix-worker** — thin binary that enters a jail at startup (namespaces + Landlock + seccomp + cgroups) and then loops, accepting dispatch requests over its control socket. One worker per active `(profile, binary)` pair; idle workers are reaped after a configurable TTL.
 
 **Why this prevents bypass:** the agent runs in the gateway process's environment, where raw credential files are inaccessible (owned by the broker with `0700`). If the agent runs the CLI binary directly, the shim intercepts it and routes through the gateway. The worker's jail ensures that even code executing inside the worker cannot escape to the host filesystem or network.
@@ -55,7 +55,7 @@ Each component runs under a separate OS user / trust level:
 | `warm_worker` | all subprocess capabilities | user + mount + net + ipc + uts namespaces, Landlock, seccomp, cgroups, NO_NEW_PRIVS | < 5 ms |
 | `firecracker` | high-risk / untrusted CLIs (opt-in) | microVM via jailer, vsock RPC, MMDS token handoff | < 5 ms warm / ~125 ms cold |
 
-`warm_worker` is the default for all subprocess capabilities. Builtins run in-process (`none`). Firecracker is opt-in per capability manifest and requires Linux with KVM.
+`warm_worker` is the default for all subprocess capabilities. Builtins run in-process (`none`). Firecracker is opt-in per capability manifest and requires Linux with KVM. On Linux, execution entry points now share the same isolation path, so direct CLI invocation, workflows, and MCP calls all route through the worker pool.
 
 ## Execution pipeline
 
@@ -74,6 +74,8 @@ tools/call {name, arguments}
 ```
 
 For `builtin` backends (`sys.date`, `sys.echo`), the worker registry is bypassed and the handler runs in-process.
+
+Profile manifests can contribute `secret_bindings` and `folder_bindings`. These are merged into the execution-time credential resolution step so profile selection affects both available capabilities and injected secrets.
 
 ## Policy evaluation
 
@@ -135,7 +137,7 @@ On Linux, `clix-worker` calls `enter_jail()` at startup which:
 
 Binary integrity: the binary path is resolved to an absolute path at registry load time; its SHA-256 is checked at every worker spawn. Workers reject requests if the hash drifts.
 
-On macOS and Windows the sandbox is a no-op stub with a loud warning. Every receipt records `sandbox_enforced: bool` and `isolation_tier` so agents and operators can observe enforcement status.
+On macOS and Windows the sandbox is a no-op stub with a loud warning. Every receipt records `sandbox_enforced: bool` and `isolation_tier` so agents and operators can observe enforcement status. Missing active profiles are treated as a configuration error instead of falling back to the full registry.
 
 ## State and config
 

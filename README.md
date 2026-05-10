@@ -46,9 +46,9 @@ capability is actually used.
 
 **Packs — curated CLI slices.** Install a `gcloud-readonly` pack and the agent gets `projects list`, `compute instances list`, etc. — scoped read access, nothing that writes or deletes. Packs ship as signed `.clixpack` bundles; community packs can be verified against a trusted key before install.
 
-**Policy enforcement.** Unknown capabilities are denied by default. Policy rules (allow / deny / require-approval) are evaluated against execution context (user, environment, profile, side-effect class) before any subprocess runs. `clix run --dry-run` lets agents preview the policy decision without executing.
+**Policy enforcement.** Unknown capabilities are denied by default. Policy rules (allow / deny / require-approval) are evaluated against execution context (user, environment, profile, side-effect class) before any subprocess runs. `clix run --dry-run` lets agents preview the policy decision without executing. Missing active profiles now fail closed instead of widening the registry.
 
-**OS-level isolation (Linux).** Subprocess calls run inside a jailed worker process: Linux namespaces (user, mount, network, IPC, UTS), Landlock filesystem restrictions, seccomp syscall filtering, cgroup limits, and binary SHA-256 pinning. Credential files are owned by a separate broker process at `0700` — they never appear in the agent's environment.
+**OS-level isolation (Linux).** Subprocess calls run inside a jailed worker process: Linux namespaces (user, mount, network, IPC, UTS), Landlock filesystem restrictions, seccomp syscall filtering, cgroup limits, and binary SHA-256 pinning. Credential files are owned by a separate broker process at `0700` — they never appear in the agent's environment. If the worker binary is missing on Linux, clix now fails closed unless you explicitly opt into unsandboxed mode.
 
 **Full audit trail.** Every call — allowed, denied, or pending approval — is written to a local SQLite receipts database with inputs, outcome, isolation tier, and binary hash. `clix receipts list` shows you exactly what ran.
 
@@ -84,6 +84,8 @@ clix doctor --json
 All commands support `--json` for machine-readable, agent-parseable output.
 
 The state directory defaults to `~/.clix` (`%USERPROFILE%\.clix` on Windows). Override with `CLIX_HOME`.
+
+Profile-level secret bindings and folder bindings are applied at execution time, so profile selection affects both capability availability and injected credentials.
 
 ---
 

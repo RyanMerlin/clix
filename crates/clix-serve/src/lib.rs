@@ -4,12 +4,12 @@ pub mod metrics;
 pub mod transport;
 pub use dispatch::{dispatch, ServeState};
 
-use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use clix_core::execution::worker_registry::WorkerRegistry;
 use clix_core::loader::{build_registry, build_workflow_registry, load_policy};
 use clix_core::receipts::ReceiptStore;
 use clix_core::state::{home_dir, ClixState};
+use std::sync::{Arc, Mutex};
 
 pub fn build_serve_state() -> Result<Arc<ServeState>> {
     let allow_unsandboxed = std::env::var("CLIX_ALLOW_UNSANDBOXED").is_ok();
@@ -25,13 +25,20 @@ pub fn build_serve_state_opts(allow_unsandboxed: bool) -> Result<Arc<ServeState>
     let state = ClixState::load(home_dir())?;
     state.ensure_dirs()?;
     let cap_registry = build_registry(&state)?;
-    let wf_registry  = build_workflow_registry(&state)?;
-    let policy       = load_policy(&state)?;
-    let store        = Mutex::new(ReceiptStore::open(&state.receipts_db)?);
+    let wf_registry = build_workflow_registry(&state)?;
+    let policy = load_policy(&state)?;
+    let store = Mutex::new(ReceiptStore::open(&state.receipts_db)?);
 
     let worker_registry = init_worker_registry(allow_unsandboxed)?;
 
-    Ok(Arc::new(ServeState { cap_registry, wf_registry, policy, store, state, worker_registry }))
+    Ok(Arc::new(ServeState {
+        cap_registry,
+        wf_registry,
+        policy,
+        store,
+        state,
+        worker_registry,
+    }))
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -55,16 +62,31 @@ fn init_worker_registry(allow_unsandboxed: bool) -> Result<Option<Arc<WorkerRegi
     if worker_binary.exists() {
         return Ok(Some(WorkerRegistry::new(worker_binary, 300)));
     }
-    if allow_unsandboxed {
-        eprintln!("[clix-serve] WARNING: clix-worker not found — running without OS-level isolation");
-        eprintln!("[clix-serve] Acknowledged via CLIX_ALLOW_UNSANDBOXED. Do not use in production.");
-        return Ok(None);
+
+    #[cfg(target_os = "linux")]
+    {
+        if allow_unsandboxed {
+            eprintln!(
+                "[clix-serve] WARNING: clix-worker not found — running without OS-level isolation"
+            );
+            eprintln!(
+                "[clix-serve] Acknowledged via CLIX_ALLOW_UNSANDBOXED. Do not use in production."
+            );
+            return Ok(None);
+        }
+        anyhow::bail!(
+            "clix-worker binary not found on PATH.\n\
+             OS-level isolation requires all five clix binaries installed together.\n\
+             To run without isolation (unsafe), set CLIX_ALLOW_UNSANDBOXED=1."
+        );
     }
-    anyhow::bail!(
-        "clix-worker binary not found on PATH.\n\
-         OS-level isolation requires all five clix binaries installed together.\n\
-         To run without isolation (unsafe), set CLIX_ALLOW_UNSANDBOXED=1."
-    )
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = allow_unsandboxed;
+        eprintln!("[clix-serve] WARNING: clix-worker not found — running in policy-only mode on this platform");
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
@@ -81,7 +103,10 @@ mod tests {
         // If it IS found, the function succeeds — that's correct behaviour too.
         if let Err(e) = result {
             let msg = e.to_string();
-            assert!(msg.contains("CLIX_ALLOW_UNSANDBOXED"), "error should mention the escape hatch: {msg}");
+            assert!(
+                msg.contains("CLIX_ALLOW_UNSANDBOXED"),
+                "error should mention the escape hatch: {msg}"
+            );
         }
     }
 

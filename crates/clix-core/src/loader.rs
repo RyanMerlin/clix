@@ -1,11 +1,13 @@
 use crate::error::Result;
 use crate::manifest::loader::load_dir;
+use crate::manifest::profile::{ProfileFolderBinding, ProfileManifest, ProfileSecretBinding};
 use crate::policy::PolicyBundle;
 use crate::registry::{CapabilityRegistry, WorkflowRegistry};
 use crate::state::ClixState;
 
 pub fn build_registry(state: &ClixState) -> Result<CapabilityRegistry> {
-    let mut all_caps: Vec<crate::manifest::capability::CapabilityManifest> = load_dir(&state.capabilities_dir)?;
+    let mut all_caps: Vec<crate::manifest::capability::CapabilityManifest> =
+        load_dir(&state.capabilities_dir)?;
     if state.storage.exists(&state.packs_dir) {
         for path in state.storage.list(&state.packs_dir)? {
             if state.storage.is_dir(&path) {
@@ -17,9 +19,21 @@ pub fn build_registry(state: &ClixState) -> Result<CapabilityRegistry> {
     let caps = if state.config.active_profiles.is_empty() {
         all_caps
     } else {
-        let active = load_active_profiles(state)?;
-        let allowed: std::collections::HashSet<String> = active.iter().flat_map(|p| p.capabilities.iter().cloned()).collect();
-        if allowed.is_empty() { all_caps } else { all_caps.into_iter().filter(|c| allowed.contains(&c.name)).collect() }
+        let active = load_active_profile_manifests(state)?;
+        if active.is_empty() {
+            return Err(crate::error::ClixError::Config(format!(
+                "active profile(s) not found: {}",
+                state.config.active_profiles.join(", ")
+            )));
+        }
+        let allowed: std::collections::HashSet<String> = active
+            .iter()
+            .flat_map(|p| p.capabilities.iter().cloned())
+            .collect();
+        all_caps
+            .into_iter()
+            .filter(|c| allowed.contains(&c.name))
+            .collect()
     };
     Ok(CapabilityRegistry::from_vec(caps))
 }
@@ -46,9 +60,8 @@ pub fn load_policy(state: &ClixState) -> Result<PolicyBundle> {
     }
 }
 
-fn load_active_profiles(state: &ClixState) -> Result<Vec<crate::manifest::profile::ProfileManifest>> {
+pub fn load_active_profile_manifests(state: &ClixState) -> Result<Vec<ProfileManifest>> {
     use std::collections::HashMap;
-    use crate::manifest::profile::ProfileManifest;
     let mut by_name: HashMap<String, ProfileManifest> = HashMap::new();
     for p in load_dir::<ProfileManifest>(&state.profiles_dir)? {
         by_name.insert(p.name.clone(), p);
@@ -62,5 +75,44 @@ fn load_active_profiles(state: &ClixState) -> Result<Vec<crate::manifest::profil
             }
         }
     }
-    Ok(by_name.into_values().filter(|p| state.config.active_profiles.contains(&p.name)).collect())
+    let mut missing = Vec::new();
+    let mut active = Vec::new();
+    for name in &state.config.active_profiles {
+        match by_name.remove(name) {
+            Some(profile) => active.push(profile),
+            None => missing.push(name.clone()),
+        }
+    }
+    if !missing.is_empty() {
+        return Err(crate::error::ClixError::Config(format!(
+            "active profile(s) not found: {}",
+            missing.join(", ")
+        )));
+    }
+    Ok(active)
+}
+
+pub fn active_profile_bindings(
+    state: &ClixState,
+) -> Result<(Vec<ProfileSecretBinding>, Vec<ProfileFolderBinding>)> {
+    if state.config.active_profiles.is_empty() {
+        return Ok((vec![], vec![]));
+    }
+
+    let profiles = load_active_profile_manifests(state)?;
+    if profiles.is_empty() {
+        return Err(crate::error::ClixError::Config(format!(
+            "active profile(s) not found: {}",
+            state.config.active_profiles.join(", ")
+        )));
+    }
+
+    let mut secret_bindings = Vec::new();
+    let mut folder_bindings = Vec::new();
+    for profile in profiles {
+        secret_bindings.extend(profile.secret_bindings);
+        folder_bindings.extend(profile.folder_bindings);
+    }
+
+    Ok((secret_bindings, folder_bindings))
 }

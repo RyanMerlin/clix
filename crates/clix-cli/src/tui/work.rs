@@ -10,8 +10,13 @@ pub fn next_job_id() -> JobId {
 }
 
 pub enum WorkRequest {
-    GitPoll { home: std::path::PathBuf },
-    GitSync { home: std::path::PathBuf, branch: String },
+    GitPoll {
+        home: std::path::PathBuf,
+    },
+    GitSync {
+        home: std::path::PathBuf,
+        branch: String,
+    },
     TestInfisical {
         cfg: clix_core::state::InfisicalConfig,
         job_id: JobId,
@@ -106,7 +111,10 @@ pub struct WorkPool {
 impl WorkPool {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel();
-        Self { result_tx: tx, result_rx: rx }
+        Self {
+            result_tx: tx,
+            result_rx: rx,
+        }
     }
 
     pub fn dispatch(&self, req: WorkRequest) {
@@ -116,7 +124,12 @@ impl WorkPool {
                 use clix_core::storage::git as gs;
                 let configured = home.join(".git").exists();
                 if !configured {
-                    let _ = tx.send(WorkResult::GitPolled { configured: false, dirty: 0, ahead: 0, behind: 0 });
+                    let _ = tx.send(WorkResult::GitPolled {
+                        configured: false,
+                        dirty: 0,
+                        ahead: 0,
+                        behind: 0,
+                    });
                     return;
                 }
                 let dirty = std::process::Command::new("git")
@@ -131,22 +144,41 @@ impl WorkPool {
                     .current_dir(&home)
                     .output()
                     .ok()
-                    .and_then(|o| if o.status.success() {
-                        let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                        let mut parts = s.split_whitespace();
-                        let behind = parts.next()?.parse::<usize>().ok()?;
-                        let ahead  = parts.next()?.parse::<usize>().ok()?;
-                        Some((ahead, behind))
-                    } else { None })
+                    .and_then(|o| {
+                        if o.status.success() {
+                            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                            let mut parts = s.split_whitespace();
+                            let behind = parts.next()?.parse::<usize>().ok()?;
+                            let ahead = parts.next()?.parse::<usize>().ok()?;
+                            Some((ahead, behind))
+                        } else {
+                            None
+                        }
+                    })
                     .unwrap_or((0, 0));
                 let _ = gs::status(&home); // warm cache
-                let _ = tx.send(WorkResult::GitPolled { configured, dirty, ahead, behind });
+                let _ = tx.send(WorkResult::GitPolled {
+                    configured,
+                    dirty,
+                    ahead,
+                    behind,
+                });
             }
             WorkRequest::GitSync { home, branch } => {
                 // Full sync: stage all → commit → pull --rebase → push
                 match clix_core::storage::git::push(&home, &branch) {
-                    Ok(msg) => { let _ = tx.send(WorkResult::GitSynced { ok: true, message: msg }); }
-                    Err(e) => { let _ = tx.send(WorkResult::GitSynced { ok: false, message: e.to_string() }); }
+                    Ok(msg) => {
+                        let _ = tx.send(WorkResult::GitSynced {
+                            ok: true,
+                            message: msg,
+                        });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(WorkResult::GitSynced {
+                            ok: false,
+                            message: e.to_string(),
+                        });
+                    }
                 }
             }
             WorkRequest::TestInfisical { cfg, job_id } => {
@@ -167,53 +199,146 @@ impl WorkPool {
                     error: report.error,
                 });
             }
-            WorkRequest::LoadSecretFolders { cfg, project_id, environment, path, job_id } => {
-                match clix_core::secrets::list_infisical_folders(&cfg, &project_id, &environment, &path) {
+            WorkRequest::LoadSecretFolders {
+                cfg,
+                project_id,
+                environment,
+                path,
+                job_id,
+            } => {
+                match clix_core::secrets::list_infisical_folders(
+                    &cfg,
+                    &project_id,
+                    &environment,
+                    &path,
+                ) {
                     Ok(folders) => {
-                        let _ = tx.send(WorkResult::SecretFoldersLoaded { job_id, folders, error: None });
+                        let _ = tx.send(WorkResult::SecretFoldersLoaded {
+                            job_id,
+                            folders,
+                            error: None,
+                        });
                     }
                     Err(e) => {
-                        let _ = tx.send(WorkResult::SecretFoldersLoaded { job_id, folders: vec![], error: Some(e.to_string()) });
+                        let _ = tx.send(WorkResult::SecretFoldersLoaded {
+                            job_id,
+                            folders: vec![],
+                            error: Some(e.to_string()),
+                        });
                     }
                 }
             }
-            WorkRequest::LoadSecretNames { cfg, project_id, environment, path, job_id } => {
-                match clix_core::secrets::list_infisical_secrets(&cfg, &project_id, &environment, &path) {
+            WorkRequest::LoadSecretNames {
+                cfg,
+                project_id,
+                environment,
+                path,
+                job_id,
+            } => {
+                match clix_core::secrets::list_infisical_secrets(
+                    &cfg,
+                    &project_id,
+                    &environment,
+                    &path,
+                ) {
                     Ok(names) => {
-                        let _ = tx.send(WorkResult::SecretNamesLoaded { job_id, names, error: None });
+                        let _ = tx.send(WorkResult::SecretNamesLoaded {
+                            job_id,
+                            names,
+                            error: None,
+                        });
                     }
                     Err(e) => {
-                        let _ = tx.send(WorkResult::SecretNamesLoaded { job_id, names: vec![], error: Some(e.to_string()) });
+                        let _ = tx.send(WorkResult::SecretNamesLoaded {
+                            job_id,
+                            names: vec![],
+                            error: Some(e.to_string()),
+                        });
                     }
                 }
             }
             WorkRequest::ParseHelp { command, job_id } => {
                 let subcmds = clix_core::discovery::parse_help(&command);
-                let _ = tx.send(WorkResult::HelpParsed { job_id, command, subcmds });
+                let _ = tx.send(WorkResult::HelpParsed {
+                    job_id,
+                    command,
+                    subcmds,
+                });
             }
             WorkRequest::RunWorkflow { name } => {
-                use clix_core::state::{ClixState, home_dir};
-                use clix_core::loader::{build_registry, build_workflow_registry, load_policy};
                 use clix_core::execution;
+                use clix_core::loader::{
+                    active_profile_bindings, build_registry, build_workflow_registry, load_policy,
+                };
                 use clix_core::policy::evaluate::ExecutionContext;
+                use clix_core::state::{home_dir, ClixState};
                 let state = match ClixState::load(home_dir()) {
                     Ok(s) => s,
                     Err(e) => {
-                        let _ = tx.send(WorkResult::WorkflowDone { name, outcome_count: 0, error: Some(e.to_string()) });
+                        let _ = tx.send(WorkResult::WorkflowDone {
+                            name,
+                            outcome_count: 0,
+                            error: Some(e.to_string()),
+                        });
                         return;
                     }
                 };
                 let cap_registry = match build_registry(&state) {
                     Ok(r) => r,
-                    Err(e) => { let _ = tx.send(WorkResult::WorkflowDone { name, outcome_count: 0, error: Some(e.to_string()) }); return; }
+                    Err(e) => {
+                        let _ = tx.send(WorkResult::WorkflowDone {
+                            name,
+                            outcome_count: 0,
+                            error: Some(e.to_string()),
+                        });
+                        return;
+                    }
                 };
                 let wf_registry = build_workflow_registry(&state).unwrap_or_default();
                 let policy = load_policy(&state).unwrap_or_default();
-                let receipt_store = match clix_core::receipts::ReceiptStore::open(&state.receipts_db) {
-                    Ok(s) => s,
-                    Err(e) => { let _ = tx.send(WorkResult::WorkflowDone { name, outcome_count: 0, error: Some(e.to_string()) }); return; }
+                let receipt_store =
+                    match clix_core::receipts::ReceiptStore::open(&state.receipts_db) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            let _ = tx.send(WorkResult::WorkflowDone {
+                                name,
+                                outcome_count: 0,
+                                error: Some(e.to_string()),
+                            });
+                            return;
+                        }
+                    };
+                let (profile_secret_bindings, profile_folder_bindings) =
+                    match active_profile_bindings(&state) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            let _ = tx.send(WorkResult::WorkflowDone {
+                                name,
+                                outcome_count: 0,
+                                error: Some(e.to_string()),
+                            });
+                            return;
+                        }
+                    };
+                let worker_registry = match crate::commands::run::build_worker_registry(
+                    std::env::var("CLIX_ALLOW_UNSANDBOXED").is_ok(),
+                ) {
+                    Ok(reg) => reg,
+                    Err(e) => {
+                        let _ = tx.send(WorkResult::WorkflowDone {
+                            name,
+                            outcome_count: 0,
+                            error: Some(e.to_string()),
+                        });
+                        return;
+                    }
                 };
-                let active_profile = state.config.active_profiles.first().cloned().unwrap_or_default();
+                let active_profile = state
+                    .config
+                    .active_profiles
+                    .first()
+                    .cloned()
+                    .unwrap_or_default();
                 let infisical_profiles = state.config.infisical();
                 let ctx = ExecutionContext {
                     user: whoami::username(),
@@ -222,23 +347,68 @@ impl WorkPool {
                     cwd: std::env::current_dir().unwrap_or_default(),
                     env: String::new(),
                 };
-                match execution::run_workflow(&cap_registry, &wf_registry, &policy, &infisical_profiles, &receipt_store, None, &name, serde_json::Value::Object(Default::default()), ctx) {
+                match execution::run_workflow(
+                    &cap_registry,
+                    &wf_registry,
+                    &policy,
+                    &infisical_profiles,
+                    &receipt_store,
+                    worker_registry.as_ref(),
+                    &name,
+                    serde_json::Value::Object(Default::default()),
+                    ctx,
+                    &profile_secret_bindings,
+                    &profile_folder_bindings,
+                ) {
                     Ok(outcomes) => {
-                        let _ = tx.send(WorkResult::WorkflowDone { name, outcome_count: outcomes.len(), error: None });
+                        let _ = tx.send(WorkResult::WorkflowDone {
+                            name,
+                            outcome_count: outcomes.len(),
+                            error: None,
+                        });
                     }
                     Err(e) => {
-                        let _ = tx.send(WorkResult::WorkflowDone { name, outcome_count: 0, error: Some(e.to_string()) });
+                        let _ = tx.send(WorkResult::WorkflowDone {
+                            name,
+                            outcome_count: 0,
+                            error: Some(e.to_string()),
+                        });
                     }
                 }
             }
-            WorkRequest::ApproveReceipt { id, approver, job_id } => {
+            WorkRequest::ApproveReceipt {
+                id,
+                approver,
+                job_id,
+            } => {
                 use clix_core::execution::broker_client::BrokerClient;
                 match BrokerClient::connect() {
                     Ok(mut client) => match client.send_approve(id, approver, None) {
-                        Ok(_) => { let _ = tx.send(WorkResult::ReceiptApproved { job_id, id, ok: true, error: None }); }
-                        Err(e) => { let _ = tx.send(WorkResult::ReceiptApproved { job_id, id, ok: false, error: Some(e.to_string()) }); }
+                        Ok(_) => {
+                            let _ = tx.send(WorkResult::ReceiptApproved {
+                                job_id,
+                                id,
+                                ok: true,
+                                error: None,
+                            });
+                        }
+                        Err(e) => {
+                            let _ = tx.send(WorkResult::ReceiptApproved {
+                                job_id,
+                                id,
+                                ok: false,
+                                error: Some(e.to_string()),
+                            });
+                        }
                     },
-                    Err(e) => { let _ = tx.send(WorkResult::ReceiptApproved { job_id, id, ok: false, error: Some(format!("Broker unavailable: {e}")) }); }
+                    Err(e) => {
+                        let _ = tx.send(WorkResult::ReceiptApproved {
+                            job_id,
+                            id,
+                            ok: false,
+                            error: Some(format!("Broker unavailable: {e}")),
+                        });
+                    }
                 }
             }
         });
@@ -263,10 +433,14 @@ mod tests {
         };
         pool.dispatch(WorkRequest::TestInfisical { cfg, job_id });
         // Result must arrive within 20 s (reqwest timeout is 10+5)
-        let result = pool.result_rx.recv_timeout(std::time::Duration::from_secs(20));
+        let result = pool
+            .result_rx
+            .recv_timeout(std::time::Duration::from_secs(20));
         assert!(result.is_ok(), "no result arrived in time");
         match result.unwrap() {
-            WorkResult::InfisicalTested { job_id: jid, ok, .. } => {
+            WorkResult::InfisicalTested {
+                job_id: jid, ok, ..
+            } => {
                 assert_eq!(jid, job_id);
                 assert!(!ok, "expected connection failure");
             }
@@ -279,11 +453,20 @@ mod tests {
         let pool = WorkPool::new();
         let job_id = next_job_id();
         // echo is always present and exits immediately
-        pool.dispatch(WorkRequest::ParseHelp { command: "echo".to_string(), job_id });
-        let result = pool.result_rx.recv_timeout(std::time::Duration::from_secs(10));
+        pool.dispatch(WorkRequest::ParseHelp {
+            command: "echo".to_string(),
+            job_id,
+        });
+        let result = pool
+            .result_rx
+            .recv_timeout(std::time::Duration::from_secs(10));
         assert!(result.is_ok(), "no parse_help result arrived in time");
         match result.unwrap() {
-            WorkResult::HelpParsed { job_id: jid, command, .. } => {
+            WorkResult::HelpParsed {
+                job_id: jid,
+                command,
+                ..
+            } => {
                 assert_eq!(jid, job_id);
                 assert_eq!(command, "echo");
             }
