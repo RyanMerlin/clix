@@ -2,9 +2,10 @@
 
 **An agent-optimized CLI gateway. CLIs are vastly more powerful than MCP servers — clix makes them reliable, discoverable, and safe for agent use.**
 
-Current release: `v0.5.0`.
+Current release: `v0.5.1`.
 
 Release notes:
+- [v0.5.1](docs/releases/v0.5.1.md)
 - [v0.5.0](docs/releases/v0.5.0.md)
 - [Release process](docs/release.md)
 
