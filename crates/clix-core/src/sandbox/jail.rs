@@ -1,3 +1,6 @@
+use crate::error::{ClixError, Result};
+use crate::manifest::capability::{CgroupLimits, FsPolicy, NetworkPolicy};
+use std::fs;
 /// Linux-namespace jail setup for warm workers.
 ///
 /// The jail lifecycle:
@@ -7,7 +10,7 @@
 ///      a. Calls `unshare(2)` to create new user/mount/pid/net/ipc/uts namespaces.
 ///      b. Writes uid_map / gid_map to map the worker's UID → 0 inside the namespace.
 ///      c. Sets up the mount namespace: tmpfs root, RO bind of pinned binary + ldd libs,
-///         proc, tmpfs /tmp, tmpfs /home/clix.
+///      proc, tmpfs /tmp, tmpfs /home/clix.
 ///      d. Calls `pivot_root(2)` to chroot into the new rootfs.
 ///      e. Sets PR_SET_NO_NEW_PRIVS.
 ///      f. Drops all capabilities via `prctl(PR_SET_SECUREBITS)`.
@@ -19,9 +22,6 @@
 /// namespaces (kernel ≥ 3.8, enabled on most distros). The key invariant is that
 /// `CLONE_NEWUSER` must be in the same `unshare` call as the other namespace flags.
 use std::path::{Path, PathBuf};
-use std::fs;
-use crate::error::{ClixError, Result};
-use crate::manifest::capability::{FsPolicy, NetworkPolicy, CgroupLimits};
 
 /// All configuration needed to set up a jail. Serialized to env vars by the gateway,
 /// deserialized by the worker on startup.
@@ -48,9 +48,9 @@ pub struct JailConfig {
 pub mod env_keys {
     pub const PINNED_BINARY: &str = "CLIX_JAIL_BINARY";
     pub const BINARY_SHA256: &str = "CLIX_JAIL_SHA256";
-    pub const LIB_PATHS: &str = "CLIX_JAIL_LIBS";           // colon-separated
-    pub const EXTRA_RO_BIND: &str = "CLIX_JAIL_RO_BIND";    // colon-separated
-    pub const EXTRA_RW_BIND: &str = "CLIX_JAIL_RW_BIND";    // colon-separated
+    pub const LIB_PATHS: &str = "CLIX_JAIL_LIBS"; // colon-separated
+    pub const EXTRA_RO_BIND: &str = "CLIX_JAIL_RO_BIND"; // colon-separated
+    pub const EXTRA_RW_BIND: &str = "CLIX_JAIL_RW_BIND"; // colon-separated
     pub const EXTRA_DENY_SYSCALLS: &str = "CLIX_JAIL_DENY_SYSCALLS"; // comma-separated
     pub const MEMORY_MIB: &str = "CLIX_JAIL_MEM_MIB";
     pub const MAX_PIDS: &str = "CLIX_JAIL_MAX_PIDS";
@@ -62,18 +62,51 @@ impl JailConfig {
     /// Serialize JailConfig into a set of env key=value pairs for passing to the worker process.
     pub fn to_env(&self) -> Vec<(String, String)> {
         let env = vec![
-            (env_keys::PINNED_BINARY.to_string(), self.pinned_binary.to_string_lossy().to_string()),
-            (env_keys::BINARY_SHA256.to_string(), self.binary_sha256.clone()),
-            (env_keys::LIB_PATHS.to_string(), self.lib_paths.iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect::<Vec<_>>()
-                .join(":")),
-            (env_keys::EXTRA_RO_BIND.to_string(), self.fs_policy.extra_ro_bind.join(":")),
-            (env_keys::EXTRA_RW_BIND.to_string(), self.fs_policy.extra_rw_bind.join(":")),
-            (env_keys::EXTRA_DENY_SYSCALLS.to_string(), self.extra_deny_syscalls.join(",")),
-            (env_keys::MEMORY_MIB.to_string(), self.limits.memory_mib.to_string()),
-            (env_keys::MAX_PIDS.to_string(), self.limits.max_pids.to_string()),
-            (env_keys::SHARE_HOST_TMP.to_string(), if self.fs_policy.share_host_tmp { "1" } else { "0" }.to_string()),
+            (
+                env_keys::PINNED_BINARY.to_string(),
+                self.pinned_binary.to_string_lossy().to_string(),
+            ),
+            (
+                env_keys::BINARY_SHA256.to_string(),
+                self.binary_sha256.clone(),
+            ),
+            (
+                env_keys::LIB_PATHS.to_string(),
+                self.lib_paths
+                    .iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect::<Vec<_>>()
+                    .join(":"),
+            ),
+            (
+                env_keys::EXTRA_RO_BIND.to_string(),
+                self.fs_policy.extra_ro_bind.join(":"),
+            ),
+            (
+                env_keys::EXTRA_RW_BIND.to_string(),
+                self.fs_policy.extra_rw_bind.join(":"),
+            ),
+            (
+                env_keys::EXTRA_DENY_SYSCALLS.to_string(),
+                self.extra_deny_syscalls.join(","),
+            ),
+            (
+                env_keys::MEMORY_MIB.to_string(),
+                self.limits.memory_mib.to_string(),
+            ),
+            (
+                env_keys::MAX_PIDS.to_string(),
+                self.limits.max_pids.to_string(),
+            ),
+            (
+                env_keys::SHARE_HOST_TMP.to_string(),
+                if self.fs_policy.share_host_tmp {
+                    "1"
+                } else {
+                    "0"
+                }
+                .to_string(),
+            ),
         ];
         env
     }
@@ -106,19 +139,31 @@ impl JailConfig {
             .filter(|s| !s.is_empty())
             .map(String::from)
             .collect();
-        let memory_mib: u64 = std::env::var(env_keys::MEMORY_MIB).ok()
-            .and_then(|s| s.parse().ok()).unwrap_or(512);
-        let max_pids: u64 = std::env::var(env_keys::MAX_PIDS).ok()
-            .and_then(|s| s.parse().ok()).unwrap_or(64);
+        let memory_mib: u64 = std::env::var(env_keys::MEMORY_MIB)
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(512);
+        let max_pids: u64 = std::env::var(env_keys::MAX_PIDS)
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(64);
         let share_host_tmp = std::env::var(env_keys::SHARE_HOST_TMP).unwrap_or_default() == "1";
 
         Some(JailConfig {
             pinned_binary: PathBuf::from(binary),
             binary_sha256: sha256,
             lib_paths: libs,
-            fs_policy: FsPolicy { extra_ro_bind: ro_bind, extra_rw_bind: rw_bind, share_host_tmp },
+            fs_policy: FsPolicy {
+                extra_ro_bind: ro_bind,
+                extra_rw_bind: rw_bind,
+                share_host_tmp,
+            },
             network_policy: NetworkPolicy::default(),
-            limits: CgroupLimits { memory_mib, max_pids, cpu_weight: 100 },
+            limits: CgroupLimits {
+                memory_mib,
+                max_pids,
+                cpu_weight: 100,
+            },
             extra_deny_syscalls: deny_syscalls,
         })
     }
@@ -145,7 +190,9 @@ pub fn verify_binary_hash(path: &Path, expected_sha256: &str) -> Result<()> {
     if actual != expected_sha256 {
         return Err(ClixError::IntegrityFailure(format!(
             "binary {} hash mismatch: expected {}, got {}",
-            path.display(), expected_sha256, actual
+            path.display(),
+            expected_sha256,
+            actual
         )));
     }
     Ok(())
@@ -154,9 +201,7 @@ pub fn verify_binary_hash(path: &Path, expected_sha256: &str) -> Result<()> {
 /// Discover the dynamic library dependencies of a binary using `ldd`.
 /// Returns a list of absolute paths to .so files that need to be bind-mounted into the jail.
 pub fn discover_lib_deps(binary: &Path) -> Vec<PathBuf> {
-    let output = std::process::Command::new("ldd")
-        .arg(binary)
-        .output();
+    let output = std::process::Command::new("ldd").arg(binary).output();
     let output = match output {
         Ok(o) => o,
         Err(_) => return vec![],
@@ -169,10 +214,10 @@ pub fn discover_lib_deps(binary: &Path) -> Vec<PathBuf> {
         //   /lib64/ld-linux-x86-64.so.2 (0x...)
         let path_str = if let Some(pos) = line.find("=>") {
             // "name => /abs/path (0x...)"
-            line[pos + 2..].trim().split_whitespace().next().unwrap_or("")
+            line[pos + 2..].split_whitespace().next().unwrap_or("")
         } else {
             // "/abs/path (0x...)"
-            line.trim().split_whitespace().next().unwrap_or("")
+            line.split_whitespace().next().unwrap_or("")
         };
         if path_str.starts_with('/') {
             let p = PathBuf::from(path_str);
@@ -182,7 +227,8 @@ pub fn discover_lib_deps(binary: &Path) -> Vec<PathBuf> {
         }
     }
     // Add parent directories of libraries (for ld-linux symlinks)
-    let mut dirs: Vec<PathBuf> = libs.iter()
+    let mut dirs: Vec<PathBuf> = libs
+        .iter()
         .filter_map(|p| p.parent().map(PathBuf::from))
         .collect();
     dirs.dedup();
@@ -215,7 +261,8 @@ fn check_apparmor_userns() -> Result<()> {
              \x20  sudo cp assets/apparmor/clix-worker /etc/apparmor.d/clix-worker\n\
              \x20  sudo apparmor_parser -r /etc/apparmor.d/clix-worker\n\
              Alternative (disables restriction globally):\n\
-             \x20  sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0".to_string()
+             \x20  sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"
+                .to_string(),
         ));
     }
     Ok(())
@@ -225,12 +272,16 @@ fn check_apparmor_userns() -> Result<()> {
 /// Prefers XDG_RUNTIME_DIR (/run/user/<uid>) over /tmp to avoid NFS/network filesystems.
 #[cfg(target_os = "linux")]
 fn jail_tmpdir_base() -> std::path::PathBuf {
-    if let Some(p) = dirs::runtime_dir() {
-        if p.exists() { return p; }
+    if let Some(p) = dirs::runtime_dir()
+        && p.exists()
+    {
+        return p;
     }
     if let Ok(p) = std::env::var("XDG_RUNTIME_DIR") {
         let pb = std::path::PathBuf::from(p);
-        if pb.exists() { return pb; }
+        if pb.exists() {
+            return pb;
+        }
     }
     std::path::PathBuf::from("/tmp")
 }
@@ -252,7 +303,9 @@ pub fn enter_jail(config: &JailConfig) -> Result<()> {
     let new_root = tempfile::Builder::new()
         .prefix("clix-jail-")
         .tempdir_in(&base)
-        .map_err(|e| ClixError::Isolation(format!("tmpdir for jail root in {}: {e}", base.display())))?;
+        .map_err(|e| {
+            ClixError::Isolation(format!("tmpdir for jail root in {}: {e}", base.display()))
+        })?;
     let root_path = new_root.path().to_path_buf();
 
     // Step 3: set up two pipes for two-phase parent↔child synchronisation:
@@ -261,10 +314,16 @@ pub fn enter_jail(config: &JailConfig) -> Result<()> {
     let mut pipe_a = [0i32; 2]; // [read, write]
     let mut pipe_b = [0i32; 2];
     if unsafe { libc::pipe(pipe_a.as_mut_ptr()) } != 0 {
-        return Err(ClixError::Isolation(format!("pipe_a: {}", std::io::Error::last_os_error())));
+        return Err(ClixError::Isolation(format!(
+            "pipe_a: {}",
+            std::io::Error::last_os_error()
+        )));
     }
     if unsafe { libc::pipe(pipe_b.as_mut_ptr()) } != 0 {
-        return Err(ClixError::Isolation(format!("pipe_b: {}", std::io::Error::last_os_error())));
+        return Err(ClixError::Isolation(format!(
+            "pipe_b: {}",
+            std::io::Error::last_os_error()
+        )));
     }
 
     // Capture real uid/gid NOW, before fork, while still in the parent namespace
@@ -273,13 +332,19 @@ pub fn enter_jail(config: &JailConfig) -> Result<()> {
 
     let child_pid = unsafe { libc::fork() };
     if child_pid < 0 {
-        return Err(ClixError::Isolation(format!("fork: {}", std::io::Error::last_os_error())));
+        return Err(ClixError::Isolation(format!(
+            "fork: {}",
+            std::io::Error::last_os_error()
+        )));
     }
 
     if child_pid == 0 {
         // ── CHILD ─────────────────────────────────────────────────────────────
         // Close unused ends
-        unsafe { libc::close(pipe_a[0]); libc::close(pipe_b[1]); }
+        unsafe {
+            libc::close(pipe_a[0]);
+            libc::close(pipe_b[1]);
+        }
 
         // Step 4a: unshare namespaces
         if let Err(e) = unshare_namespaces() {
@@ -288,12 +353,18 @@ pub fn enter_jail(config: &JailConfig) -> Result<()> {
         }
 
         // Signal parent: "unshare done, please write uid_map"
-        unsafe { libc::close(pipe_a[1]); } // EOF signals parent
+        unsafe {
+            libc::close(pipe_a[1]);
+        } // EOF signals parent
 
         // Wait for parent: "uid_map written"
         let mut buf = [0u8; 1];
-        unsafe { libc::read(pipe_b[0], buf.as_mut_ptr() as *mut libc::c_void, 1); }
-        unsafe { libc::close(pipe_b[0]); }
+        unsafe {
+            libc::read(pipe_b[0], buf.as_mut_ptr() as *mut libc::c_void, 1);
+        }
+        unsafe {
+            libc::close(pipe_b[0]);
+        }
 
         // Step 5: set up mount namespace
         if let Err(e) = setup_mount_namespace(&root_path, config) {
@@ -321,11 +392,15 @@ pub fn enter_jail(config: &JailConfig) -> Result<()> {
         apply_sandbox(&[binary_str]).ok(); // non-fatal: seccomp is the hard boundary
 
         // Step 10: seccomp
-        let extra: Vec<&str> = config.extra_deny_syscalls.iter().map(String::as_str).collect();
-        if let Ok(filter) = build_filter(&extra) {
-            if !filter.is_noop() {
-                install_filter(&filter).ok();
-            }
+        let extra: Vec<&str> = config
+            .extra_deny_syscalls
+            .iter()
+            .map(String::as_str)
+            .collect();
+        if let Ok(filter) = build_filter(&extra)
+            && !filter.is_noop()
+        {
+            install_filter(&filter).ok();
         }
 
         // Keep new_root alive — we've pivoted so the tmpdir won't be dropped on host
@@ -337,17 +412,24 @@ pub fn enter_jail(config: &JailConfig) -> Result<()> {
 
     // ── PARENT ────────────────────────────────────────────────────────────────
     // Close unused ends
-    unsafe { libc::close(pipe_a[1]); libc::close(pipe_b[0]); }
+    unsafe {
+        libc::close(pipe_a[1]);
+        libc::close(pipe_b[0]);
+    }
 
     // Wait for child to signal "unshare done"
     let mut buf = [0u8; 1];
-    unsafe { libc::read(pipe_a[0], buf.as_mut_ptr() as *mut libc::c_void, 1); }
-    unsafe { libc::close(pipe_a[0]); }
+    unsafe {
+        libc::read(pipe_a[0], buf.as_mut_ptr() as *mut libc::c_void, 1);
+    }
+    unsafe {
+        libc::close(pipe_a[0]);
+    }
 
     // Step 4b: write uid_map and gid_map from the parent user namespace
     let setgroups_path = format!("/proc/{child_pid}/setgroups");
-    let uid_map_path   = format!("/proc/{child_pid}/uid_map");
-    let gid_map_path   = format!("/proc/{child_pid}/gid_map");
+    let uid_map_path = format!("/proc/{child_pid}/uid_map");
+    let gid_map_path = format!("/proc/{child_pid}/gid_map");
 
     // "deny" must be written to setgroups before gid_map (Linux 3.19+)
     let _ = fs::write(&setgroups_path, "deny");
@@ -355,13 +437,23 @@ pub fn enter_jail(config: &JailConfig) -> Result<()> {
     let _ = fs::write(&gid_map_path, format!("0 {real_gid} 1\n"));
 
     // Signal child: "uid_map written, proceed"
-    unsafe { libc::write(pipe_b[1], buf.as_ptr() as *const libc::c_void, 1); }
-    unsafe { libc::close(pipe_b[1]); }
+    unsafe {
+        libc::write(pipe_b[1], buf.as_ptr() as *const libc::c_void, 1);
+    }
+    unsafe {
+        libc::close(pipe_b[1]);
+    }
 
     // Wait for child and proxy its exit code
     let mut status: libc::c_int = 0;
-    unsafe { libc::waitpid(child_pid, &mut status, 0); }
-    let exit_code = if libc::WIFEXITED(status) { libc::WEXITSTATUS(status) } else { 1 };
+    unsafe {
+        libc::waitpid(child_pid, &mut status, 0);
+    }
+    let exit_code = if libc::WIFEXITED(status) {
+        libc::WEXITSTATUS(status)
+    } else {
+        1
+    };
     std::process::exit(exit_code);
 }
 
@@ -387,12 +479,12 @@ fn unshare_namespaces() -> Result<()> {
     let ret = unsafe { libc::unshare(flags) };
     if ret != 0 {
         return Err(ClixError::Isolation(format!(
-            "unshare failed: {}", std::io::Error::last_os_error()
+            "unshare failed: {}",
+            std::io::Error::last_os_error()
         )));
     }
     Ok(())
 }
-
 
 #[cfg(target_os = "linux")]
 fn setup_mount_namespace(root: &Path, config: &JailConfig) -> Result<()> {
@@ -403,8 +495,11 @@ fn setup_mount_namespace(root: &Path, config: &JailConfig) -> Result<()> {
     let none_str = CString::new("none").unwrap();
     unsafe {
         libc::mount(
-            none_str.as_ptr(), slash_c.as_ptr(), std::ptr::null(),
-            libc::MS_PRIVATE | libc::MS_REC, std::ptr::null(),
+            none_str.as_ptr(),
+            slash_c.as_ptr(),
+            std::ptr::null(),
+            libc::MS_PRIVATE | libc::MS_REC,
+            std::ptr::null(),
         )
     };
 
@@ -415,18 +510,33 @@ fn setup_mount_namespace(root: &Path, config: &JailConfig) -> Result<()> {
     let tmpfs = CString::new("tmpfs").unwrap();
     let ret = unsafe {
         libc::mount(
-            tmpfs.as_ptr(), root_c.as_ptr(), tmpfs.as_ptr(),
-            libc::MS_NOSUID | libc::MS_NODEV, std::ptr::null(),
+            tmpfs.as_ptr(),
+            root_c.as_ptr(),
+            tmpfs.as_ptr(),
+            libc::MS_NOSUID | libc::MS_NODEV,
+            std::ptr::null(),
         )
     };
     if ret != 0 {
         return Err(ClixError::Isolation(format!(
-            "mount tmpfs at {}: {}", root.display(), std::io::Error::last_os_error()
+            "mount tmpfs at {}: {}",
+            root.display(),
+            std::io::Error::last_os_error()
         )));
     }
 
     // Create essential directories in the new root
-    for dir in &["proc", "tmp", "home", "home/clix", "usr", "lib", "lib64", "bin", "dev"] {
+    for dir in &[
+        "proc",
+        "tmp",
+        "home",
+        "home/clix",
+        "usr",
+        "lib",
+        "lib64",
+        "bin",
+        "dev",
+    ] {
         fs::create_dir_all(root.join(dir))
             .map_err(|e| ClixError::Isolation(format!("mkdir {dir}: {e}")))?;
     }
@@ -445,16 +555,22 @@ fn setup_mount_namespace(root: &Path, config: &JailConfig) -> Result<()> {
     let proc_str = CString::new("proc").unwrap();
     unsafe {
         libc::mount(
-            proc_str.as_ptr(), proc_dest_c.as_ptr(), proc_str.as_ptr(),
-            libc::MS_NOSUID | libc::MS_NOEXEC | libc::MS_NODEV, std::ptr::null(),
+            proc_str.as_ptr(),
+            proc_dest_c.as_ptr(),
+            proc_str.as_ptr(),
+            libc::MS_NOSUID | libc::MS_NOEXEC | libc::MS_NODEV,
+            std::ptr::null(),
         )
     }; // ignore error — some environments (WSL2) disallow proc mount in user ns
 
     // Bind-mount the pinned binary into /bin/<name> inside the jail
-    let bin_name = config.pinned_binary.file_name()
+    let bin_name = config
+        .pinned_binary
+        .file_name()
         .ok_or_else(|| ClixError::Isolation("binary has no filename".to_string()))?;
     let jail_bin = root.join("bin").join(bin_name);
-    fs::write(&jail_bin, "").map_err(|e| ClixError::Isolation(format!("create bind target: {e}")))?;
+    fs::write(&jail_bin, "")
+        .map_err(|e| ClixError::Isolation(format!("create bind target: {e}")))?;
     bind_mount(&config.pinned_binary, &jail_bin, true)?;
 
     // Bind-mount dynamic libraries
@@ -472,7 +588,8 @@ fn setup_mount_namespace(root: &Path, config: &JailConfig) -> Result<()> {
                 fs::create_dir_all(parent)
                     .map_err(|e| ClixError::Isolation(format!("mkdir lib parent: {e}")))?;
             }
-            fs::write(&dest, "").map_err(|e| ClixError::Isolation(format!("create lib target: {e}")))?;
+            fs::write(&dest, "")
+                .map_err(|e| ClixError::Isolation(format!("create lib target: {e}")))?;
             bind_mount(lib, &dest, true)?;
         }
     }
@@ -524,8 +641,11 @@ fn setup_mount_namespace(root: &Path, config: &JailConfig) -> Result<()> {
         let tmp_c = CString::new(root.join("tmp").to_string_lossy().as_bytes()).unwrap();
         unsafe {
             libc::mount(
-                tmpfs.as_ptr(), tmp_c.as_ptr(), tmpfs.as_ptr(),
-                libc::MS_NOSUID | libc::MS_NODEV, std::ptr::null(),
+                tmpfs.as_ptr(),
+                tmp_c.as_ptr(),
+                tmpfs.as_ptr(),
+                libc::MS_NOSUID | libc::MS_NODEV,
+                std::ptr::null(),
             )
         };
     }
@@ -543,19 +663,29 @@ fn bind_mount(src: &Path, dest: &Path, read_only: bool) -> Result<()> {
     let none_c = CString::new("none").unwrap();
 
     let ret = unsafe {
-        libc::mount(src_c.as_ptr(), dest_c.as_ptr(), std::ptr::null(), libc::MS_BIND, std::ptr::null())
+        libc::mount(
+            src_c.as_ptr(),
+            dest_c.as_ptr(),
+            std::ptr::null(),
+            libc::MS_BIND,
+            std::ptr::null(),
+        )
     };
     if ret != 0 {
         return Err(ClixError::Isolation(format!(
             "bind mount {} → {}: {}",
-            src.display(), dest.display(), std::io::Error::last_os_error()
+            src.display(),
+            dest.display(),
+            std::io::Error::last_os_error()
         )));
     }
 
     if read_only {
         let ret = unsafe {
             libc::mount(
-                none_c.as_ptr(), dest_c.as_ptr(), std::ptr::null(),
+                none_c.as_ptr(),
+                dest_c.as_ptr(),
+                std::ptr::null(),
                 libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY,
                 std::ptr::null(),
             )
@@ -563,7 +693,9 @@ fn bind_mount(src: &Path, dest: &Path, read_only: bool) -> Result<()> {
         if ret != 0 {
             return Err(ClixError::Isolation(format!(
                 "remount ro {} → {}: {}",
-                src.display(), dest.display(), std::io::Error::last_os_error()
+                src.display(),
+                dest.display(),
+                std::io::Error::last_os_error()
             )));
         }
     }
@@ -582,10 +714,17 @@ fn pivot_into(new_root: &Path) -> Result<()> {
     let new_root_c = CString::new(new_root.to_string_lossy().as_bytes()).unwrap();
     let put_old_c = CString::new(put_old.to_string_lossy().as_bytes()).unwrap();
 
-    let ret = unsafe { libc::syscall(libc::SYS_pivot_root, new_root_c.as_ptr(), put_old_c.as_ptr()) };
+    let ret = unsafe {
+        libc::syscall(
+            libc::SYS_pivot_root,
+            new_root_c.as_ptr(),
+            put_old_c.as_ptr(),
+        )
+    };
     if ret != 0 {
         return Err(ClixError::Isolation(format!(
-            "pivot_root failed: {}", std::io::Error::last_os_error()
+            "pivot_root failed: {}",
+            std::io::Error::last_os_error()
         )));
     }
 
@@ -606,7 +745,8 @@ fn set_no_new_privs() -> Result<()> {
     let ret = unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) };
     if ret != 0 {
         return Err(ClixError::Isolation(format!(
-            "PR_SET_NO_NEW_PRIVS failed: {}", std::io::Error::last_os_error()
+            "PR_SET_NO_NEW_PRIVS failed: {}",
+            std::io::Error::last_os_error()
         )));
     }
     Ok(())
@@ -622,24 +762,43 @@ fn drop_capabilities() -> Result<()> {
     // libc doesn't expose the capset structs directly, so we define them inline
     // (matching linux/capability.h) and call the raw syscall.
     #[repr(C)]
-    struct CapHeader { version: u32, pid: i32 }
+    struct CapHeader {
+        version: u32,
+        pid: i32,
+    }
     #[repr(C)]
-    struct CapData { effective: u32, permitted: u32, inheritable: u32 }
+    struct CapData {
+        effective: u32,
+        permitted: u32,
+        inheritable: u32,
+    }
 
     const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
     const SYS_CAPSET: i64 = 126; // x86_64
 
-    let hdr = CapHeader { version: LINUX_CAPABILITY_VERSION_3, pid: 0 };
-    let data = [
-        CapData { effective: 0, permitted: 0, inheritable: 0 },
-        CapData { effective: 0, permitted: 0, inheritable: 0 },
-    ];
-    let ret = unsafe {
-        libc::syscall(SYS_CAPSET, &hdr as *const CapHeader, data.as_ptr() as *const CapData)
+    let hdr = CapHeader {
+        version: LINUX_CAPABILITY_VERSION_3,
+        pid: 0,
     };
+    let data = [
+        CapData {
+            effective: 0,
+            permitted: 0,
+            inheritable: 0,
+        },
+        CapData {
+            effective: 0,
+            permitted: 0,
+            inheritable: 0,
+        },
+    ];
+    let ret = unsafe { libc::syscall(SYS_CAPSET, &hdr as *const CapHeader, data.as_ptr()) };
     if ret != 0 {
         // Non-fatal — NO_NEW_PRIVS + bounding-set drop already denies escalation
-        eprintln!("[clix-worker] capset warning: {}", std::io::Error::last_os_error());
+        eprintln!(
+            "[clix-worker] capset warning: {}",
+            std::io::Error::last_os_error()
+        );
     }
     Ok(())
 }
@@ -661,7 +820,9 @@ fn which_binary(command: &str) -> Result<PathBuf> {
             return Ok(candidate);
         }
     }
-    Err(ClixError::Isolation(format!("binary `{command}` not found on PATH")))
+    Err(ClixError::Isolation(format!(
+        "binary `{command}` not found on PATH"
+    )))
 }
 
 #[cfg(test)]
@@ -695,7 +856,11 @@ mod tests {
             pinned_binary: PathBuf::from("/usr/bin/gcloud"),
             binary_sha256: "abc123".repeat(10) + "abcd",
             lib_paths: vec![PathBuf::from("/lib/x86_64-linux-gnu/libc.so.6")],
-            fs_policy: FsPolicy { extra_ro_bind: vec!["/etc/ssl".to_string()], extra_rw_bind: vec![], share_host_tmp: false },
+            fs_policy: FsPolicy {
+                extra_ro_bind: vec!["/etc/ssl".to_string()],
+                extra_rw_bind: vec![],
+                share_host_tmp: false,
+            },
             network_policy: NetworkPolicy::default(),
             limits: CgroupLimits::default(),
             extra_deny_syscalls: vec!["ptrace".to_string()],
@@ -703,7 +868,10 @@ mod tests {
         let env_pairs = config.to_env();
         // Set them in process env temporarily
         for (k, v) in &env_pairs {
-            std::env::set_var(k, v);
+            // Rust 2024 makes process-global env mutation explicit.
+            unsafe {
+                std::env::set_var(k, v);
+            }
         }
         let loaded = JailConfig::from_env().unwrap();
         assert_eq!(loaded.binary_sha256, config.binary_sha256);
@@ -711,7 +879,9 @@ mod tests {
         assert_eq!(loaded.extra_deny_syscalls, vec!["ptrace"]);
         // Clean up
         for (k, _) in &env_pairs {
-            std::env::remove_var(k);
+            unsafe {
+                std::env::remove_var(k);
+            }
         }
     }
 }

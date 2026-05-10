@@ -1,6 +1,6 @@
-use std::path::Path;
-use crate::error::Result;
 use super::install::copy_dir_all;
+use crate::error::Result;
+use std::path::Path;
 
 /// Seed the built-in packs from the embedded packs directory into packs_dir.
 /// Built-in packs are already installed if the directory exists.

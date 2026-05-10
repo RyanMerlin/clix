@@ -13,30 +13,36 @@ use std::path::Path;
 use tempfile::tempdir;
 
 use clix_core::packs::bundle::{bundle_pack, bundle_pack_signed};
-use clix_core::packs::signing::{
-    generate_keypair, key_fingerprint, trust_key, verify_signature, verifying_key_from_private,
-};
+use clix_core::packs::signing::{generate_keypair, trust_key, verify_signature};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Minimal valid pack directory.
 fn write_test_pack(dir: &Path) {
     fs::create_dir_all(dir.join("capabilities")).unwrap();
-    fs::write(dir.join("pack.yaml"), concat!(
-        "name: testpack\n",
-        "version: \"1.0.0\"\n",
-        "description: A test pack\n",
-        "author: test\n",
-    )).unwrap();
-    fs::write(dir.join("capabilities").join("hello.yaml"), concat!(
-        "name: testpack.hello\n",
-        "version: 1\n",
-        "description: hello\n",
-        "backend:\n",
-        "  type: builtin\n",
-        "  name: date\n",
-        "inputSchema: {\"type\":\"object\",\"properties\":{}}\n",
-    )).unwrap();
+    fs::write(
+        dir.join("pack.yaml"),
+        concat!(
+            "name: testpack\n",
+            "version: \"1.0.0\"\n",
+            "description: A test pack\n",
+            "author: test\n",
+        ),
+    )
+    .unwrap();
+    fs::write(
+        dir.join("capabilities").join("hello.yaml"),
+        concat!(
+            "name: testpack.hello\n",
+            "version: 1\n",
+            "description: hello\n",
+            "backend:\n",
+            "  type: builtin\n",
+            "  name: date\n",
+            "inputSchema: {\"type\":\"object\",\"properties\":{}}\n",
+        ),
+    )
+    .unwrap();
 }
 
 /// Read the signature from a .sig sidecar file as a 64-byte array.
@@ -51,7 +57,7 @@ fn read_sig(zip_path: &Path) -> [u8; 64] {
 
 /// Read the sha256 of the zip (used as the signed payload).
 fn zip_sha256(zip_path: &Path) -> [u8; 32] {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let data = fs::read(zip_path).unwrap();
     let mut h = Sha256::new();
     h.update(&data);
@@ -65,10 +71,10 @@ fn zip_sha256(zip_path: &Path) -> [u8; 32] {
 fn test_generate_keypair() {
     let dir = tempdir().unwrap();
     let priv_path = dir.path().join("key.pem");
-    let pub_path  = dir.path().join("key.pub");
+    let pub_path = dir.path().join("key.pub");
     let fp = generate_keypair(&priv_path, &pub_path, false).unwrap();
     assert!(priv_path.exists(), "private key should exist");
-    assert!(pub_path.exists(),  "public key should exist");
+    assert!(pub_path.exists(), "public key should exist");
     assert_eq!(fp.len(), 16, "fingerprint should be 16 hex chars");
 }
 
@@ -77,7 +83,7 @@ fn test_generate_keypair() {
 fn test_generate_keypair_no_overwrite() {
     let dir = tempdir().unwrap();
     let priv_path = dir.path().join("key.pem");
-    let pub_path  = dir.path().join("key.pub");
+    let pub_path = dir.path().join("key.pub");
     generate_keypair(&priv_path, &pub_path, false).unwrap();
     assert!(generate_keypair(&priv_path, &pub_path, false).is_err());
 }
@@ -95,7 +101,10 @@ fn test_bundle_unsigned() {
     let sha_path = zip_path.with_extension("clixpack.sha256");
     assert!(sha_path.exists(), "sha256 sidecar should exist");
     let sig_path = format!("{}.sig", zip_path.display());
-    assert!(!Path::new(&sig_path).exists(), "no .sig for unsigned bundle");
+    assert!(
+        !Path::new(&sig_path).exists(),
+        "no .sig for unsigned bundle"
+    );
 }
 
 /// (c) Signed bundle creates .zip + .sha256 + .sig + .fingerprint.
@@ -105,14 +114,20 @@ fn test_bundle_signed() {
     let pack_dir = tmp.path().join("pack");
     write_test_pack(&pack_dir);
     let priv_path = tmp.path().join("signing.pem");
-    let pub_path  = tmp.path().join("signing.pub");
+    let pub_path = tmp.path().join("signing.pub");
     generate_keypair(&priv_path, &pub_path, false).unwrap();
 
     let out_dir = tmp.path().join("out");
     let zip_path = bundle_pack_signed(&pack_dir, &out_dir, Some(&priv_path)).unwrap();
     assert!(zip_path.exists());
-    assert!(Path::new(&format!("{}.sig", zip_path.display())).exists(), ".sig should exist");
-    assert!(Path::new(&format!("{}.fingerprint", zip_path.display())).exists(), ".fingerprint should exist");
+    assert!(
+        Path::new(&format!("{}.sig", zip_path.display())).exists(),
+        ".sig should exist"
+    );
+    assert!(
+        Path::new(&format!("{}.fingerprint", zip_path.display())).exists(),
+        ".fingerprint should exist"
+    );
 }
 
 /// (d) Sign, trust the key, verify via verify_signature → Ok.
@@ -122,7 +137,7 @@ fn test_verify_valid_signature() {
     let pack_dir = tmp.path().join("pack");
     write_test_pack(&pack_dir);
     let priv_path = tmp.path().join("signing.pem");
-    let pub_path  = tmp.path().join("signing.pub");
+    let pub_path = tmp.path().join("signing.pub");
     generate_keypair(&priv_path, &pub_path, false).unwrap();
 
     let out_dir = tmp.path().join("out");
@@ -143,7 +158,7 @@ fn test_verify_tampered_bundle() {
     let pack_dir = tmp.path().join("pack");
     write_test_pack(&pack_dir);
     let priv_path = tmp.path().join("signing.pem");
-    let pub_path  = tmp.path().join("signing.pub");
+    let pub_path = tmp.path().join("signing.pub");
     generate_keypair(&priv_path, &pub_path, false).unwrap();
 
     let out_dir = tmp.path().join("out");
@@ -176,9 +191,9 @@ fn test_verify_wrong_key() {
     write_test_pack(&pack_dir);
 
     let priv_a = tmp.path().join("a.pem");
-    let pub_a  = tmp.path().join("a.pub");
+    let pub_a = tmp.path().join("a.pub");
     let priv_b = tmp.path().join("b.pem");
-    let pub_b  = tmp.path().join("b.pub");
+    let pub_b = tmp.path().join("b.pub");
     generate_keypair(&priv_a, &pub_a, false).unwrap();
     generate_keypair(&priv_b, &pub_b, false).unwrap();
 

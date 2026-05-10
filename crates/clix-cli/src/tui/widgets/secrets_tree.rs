@@ -1,15 +1,18 @@
-use std::collections::{HashMap, HashSet};
-use crossterm::event::KeyCode;
-use ratatui::{prelude::*, widgets::*};
-use clix_core::manifest::capability::InfisicalRef;
-use clix_core::state::InfisicalConfig;
 use crate::tui::theme;
 use crate::tui::work::JobId;
+use clix_core::manifest::capability::InfisicalRef;
+use clix_core::state::InfisicalConfig;
+use crossterm::event::KeyCode;
+use ratatui::{prelude::*, widgets::*};
+use std::collections::{HashMap, HashSet};
 
 // ── data model ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum NodeKind { Folder, Secret }
+pub enum NodeKind {
+    Folder,
+    Secret,
+}
 
 /// Per-path state: what we know about a folder's contents.
 #[derive(Default, Debug, Clone)]
@@ -22,7 +25,9 @@ pub struct PathState {
 }
 
 impl PathState {
-    pub fn is_loading(&self) -> bool { self.folders_loading || self.secrets_loading }
+    pub fn is_loading(&self) -> bool {
+        self.folders_loading || self.secrets_loading
+    }
 }
 
 /// One entry in the flattened visible list (computed on each render pass).
@@ -79,7 +84,7 @@ impl SecretsTree {
             paths: HashMap::new(),
             expanded: {
                 let mut s = HashSet::new();
-                s.insert("/".to_string());  // root always expanded
+                s.insert("/".to_string()); // root always expanded
                 s
             },
             visible: vec![],
@@ -90,11 +95,14 @@ impl SecretsTree {
             error: None,
         };
         // Mark root as needing load
-        tree.paths.insert("/".to_string(), PathState {
-            folders_loading: true,
-            secrets_loading: true,
-            ..Default::default()
-        });
+        tree.paths.insert(
+            "/".to_string(),
+            PathState {
+                folders_loading: true,
+                secrets_loading: true,
+                ..Default::default()
+            },
+        );
         tree
     }
 
@@ -120,11 +128,20 @@ impl SecretsTree {
 
     /// Called when SecretFoldersLoaded arrives. Returns the path if we accepted it
     /// (so caller can re-compute visible).
-    pub fn deliver_folders(&mut self, job_id: JobId, folders: Vec<String>, error: Option<String>) -> bool {
-        let path = self.pending_folders.iter()
-            .find(|(_, &jid)| jid == job_id)
+    pub fn deliver_folders(
+        &mut self,
+        job_id: JobId,
+        folders: Vec<String>,
+        error: Option<String>,
+    ) -> bool {
+        let path = self
+            .pending_folders
+            .iter()
+            .find(|&(_, &jid)| jid == job_id)
             .map(|(p, _)| p.clone());
-        let Some(path) = path else { return false; };
+        let Some(path) = path else {
+            return false;
+        };
         self.pending_folders.remove(&path);
         let state = self.paths.entry(path).or_default();
         state.folders_loading = false;
@@ -133,26 +150,41 @@ impl SecretsTree {
         } else {
             state.folders = folders;
         }
-        if !state.is_loading() { state.loaded = true; }
+        if !state.is_loading() {
+            state.loaded = true;
+        }
         self.rebuild_visible();
         true
     }
 
     /// Called when SecretNamesLoaded arrives.
-    pub fn deliver_names(&mut self, job_id: JobId, names: Vec<String>, error: Option<String>) -> bool {
-        let path = self.pending_names.iter()
-            .find(|(_, &jid)| jid == job_id)
+    pub fn deliver_names(
+        &mut self,
+        job_id: JobId,
+        names: Vec<String>,
+        error: Option<String>,
+    ) -> bool {
+        let path = self
+            .pending_names
+            .iter()
+            .find(|&(_, &jid)| jid == job_id)
             .map(|(p, _)| p.clone());
-        let Some(path) = path else { return false; };
+        let Some(path) = path else {
+            return false;
+        };
         self.pending_names.remove(&path);
         let state = self.paths.entry(path).or_default();
         state.secrets_loading = false;
         if let Some(e) = error {
-            if self.error.is_none() { self.error = Some(format!("Secret list error: {e}")); }
+            if self.error.is_none() {
+                self.error = Some(format!("Secret list error: {e}"));
+            }
         } else {
             state.secrets = names;
         }
-        if !state.is_loading() { state.loaded = true; }
+        if !state.is_loading() {
+            state.loaded = true;
+        }
         self.rebuild_visible();
         true
     }
@@ -169,7 +201,9 @@ impl SecretsTree {
     }
 
     fn dfs_collect(&self, path: &str, depth: usize, out: &mut Vec<VisibleRow>) {
-        let Some(state) = self.paths.get(path) else { return; };
+        let Some(state) = self.paths.get(path) else {
+            return;
+        };
 
         for folder in &state.folders {
             let full_path = if path == "/" {
@@ -206,22 +240,31 @@ impl SecretsTree {
 
     /// Returns the parent folder path of the cursor row, or "/" if the list is empty.
     pub fn current_path(&self) -> &str {
-        self.visible.get(self.cursor)
+        self.visible
+            .get(self.cursor)
             .map(|r| r.parent_path.as_str())
             .unwrap_or("/")
     }
 
     // ── key handling ─────────────────────────────────────────────────────────
 
-    pub fn handle_key(&mut self, code: KeyCode, cfg: Option<&InfisicalConfig>) -> SecretsTreeAction {
+    pub fn handle_key(
+        &mut self,
+        code: KeyCode,
+        cfg: Option<&InfisicalConfig>,
+    ) -> SecretsTreeAction {
         match code {
             KeyCode::Esc => return SecretsTreeAction::Cancelled,
 
             KeyCode::Up => {
-                if self.cursor > 0 { self.cursor -= 1; }
+                if self.cursor > 0 {
+                    self.cursor -= 1;
+                }
             }
             KeyCode::Down => {
-                if self.cursor + 1 < self.visible.len() { self.cursor += 1; }
+                if self.cursor + 1 < self.visible.len() {
+                    self.cursor += 1;
+                }
             }
             KeyCode::PageUp => {
                 self.cursor = self.cursor.saturating_sub(10);
@@ -265,13 +308,13 @@ impl SecretsTree {
 
             // space: toggle multi-select for current entry (secrets only)
             KeyCode::Char(' ') => {
-                if let Some(row) = self.visible.get(self.cursor) {
-                    if row.kind == NodeKind::Secret {
-                        if self.selected.contains(&self.cursor) {
-                            self.selected.remove(&self.cursor);
-                        } else {
-                            self.selected.insert(self.cursor);
-                        }
+                if let Some(row) = self.visible.get(self.cursor)
+                    && row.kind == NodeKind::Secret
+                {
+                    if self.selected.contains(&self.cursor) {
+                        self.selected.remove(&self.cursor);
+                    } else {
+                        self.selected.insert(self.cursor);
                     }
                 }
             }
@@ -289,18 +332,17 @@ impl SecretsTree {
             // snapshot is left empty — callers sync lazily via the existing folder-binding refresh path
             KeyCode::Char('F') => {
                 let _ = cfg;
-                if self.mode == TreeMode::Bind {
-                    if let Some(row) = self.visible.get(self.cursor).cloned() {
-                        if row.kind == NodeKind::Folder {
-                            return SecretsTreeAction::SelectedFolder {
-                                project_id: self.project_id.clone(),
-                                environment: self.environment.clone(),
-                                secret_path: row.full_path.clone(),
-                                inject_prefix: None,
-                                snapshot: vec![],
-                            };
-                        }
-                    }
+                if self.mode == TreeMode::Bind
+                    && let Some(row) = self.visible.get(self.cursor).cloned()
+                    && row.kind == NodeKind::Folder
+                {
+                    return SecretsTreeAction::SelectedFolder {
+                        project_id: self.project_id.clone(),
+                        environment: self.environment.clone(),
+                        secret_path: row.full_path.clone(),
+                        inject_prefix: None,
+                        snapshot: vec![],
+                    };
                 }
             }
 
@@ -309,7 +351,11 @@ impl SecretsTree {
         SecretsTreeAction::None
     }
 
-    fn toggle_or_enter_folder(&mut self, row: &VisibleRow, cfg: Option<&InfisicalConfig>) -> SecretsTreeAction {
+    fn toggle_or_enter_folder(
+        &mut self,
+        row: &VisibleRow,
+        cfg: Option<&InfisicalConfig>,
+    ) -> SecretsTreeAction {
         let _ = cfg;
         if self.expanded.contains(&row.full_path) {
             self.expanded.remove(&row.full_path);
@@ -317,8 +363,13 @@ impl SecretsTree {
         } else {
             self.expanded.insert(row.full_path.clone());
             // Lazy-load if not yet loaded
-            if !self.paths.get(&row.full_path).map(|s| s.loaded).unwrap_or(false)
-                && !self.pending_folders.contains_key(&row.full_path) {
+            if !self
+                .paths
+                .get(&row.full_path)
+                .map(|s| s.loaded)
+                .unwrap_or(false)
+                && !self.pending_folders.contains_key(&row.full_path)
+            {
                 return SecretsTreeAction::NeedsLoad(row.full_path.clone());
             }
             self.rebuild_visible();
@@ -327,13 +378,19 @@ impl SecretsTree {
     }
 
     fn confirm_multi_select(&mut self) -> Option<SecretsTreeAction> {
-        if self.selected.is_empty() { return None; }
-        let refs: Vec<InfisicalRef> = self.selected.iter()
+        if self.selected.is_empty() {
+            return None;
+        }
+        let refs: Vec<InfisicalRef> = self
+            .selected
+            .iter()
             .filter_map(|&idx| self.visible.get(idx))
             .filter(|r| r.kind == NodeKind::Secret)
             .map(|r| self.make_ref(r))
             .collect();
-        if refs.is_empty() { return None; }
+        if refs.is_empty() {
+            return None;
+        }
         Some(SecretsTreeAction::SelectedMany(refs))
     }
 
@@ -358,7 +415,11 @@ impl SecretsTree {
 
         f.render_widget(Clear, dialog);
 
-        let mode_badge = if self.mode == TreeMode::Bind { " [BIND]" } else { "" };
+        let mode_badge = if self.mode == TreeMode::Bind {
+            " [BIND]"
+        } else {
+            ""
+        };
         let title = format!(
             " Infisical · {} · {}{} ",
             self.project_id, self.environment, mode_badge
@@ -371,18 +432,20 @@ impl SecretsTree {
         f.render_widget(block, dialog);
 
         let chunks = Layout::vertical([
-                Constraint::Length(1),  // path breadcrumb
-                Constraint::Min(0),     // tree list
-                Constraint::Length(1),  // hint
-            ])
-            .split(inner);
+            Constraint::Length(1), // path breadcrumb
+            Constraint::Min(0),    // tree list
+            Constraint::Length(1), // hint
+        ])
+        .split(inner);
 
         // Breadcrumb: shows current folder path
         let raw = self.current_path();
         let crumb = if raw == "/" {
             "/".to_string()
         } else {
-            raw.trim_start_matches('/').trim_end_matches('/').replace('/', " › ")
+            raw.trim_start_matches('/')
+                .trim_end_matches('/')
+                .replace('/', " › ")
         };
         f.render_widget(
             Paragraph::new(Span::styled(format!(" {}", crumb), theme::dim())),
@@ -409,7 +472,10 @@ impl SecretsTree {
                 .unwrap_or(0);
             let spinner = ["⠋", "⠙", "⠹", "⠸"][frame];
             f.render_widget(
-                Paragraph::new(Span::styled(format!("  {} Loading…", spinner), theme::muted())),
+                Paragraph::new(Span::styled(
+                    format!("  {} Loading…", spinner),
+                    theme::muted(),
+                )),
                 area,
             );
             return;
@@ -417,36 +483,64 @@ impl SecretsTree {
 
         if self.visible.is_empty() {
             f.render_widget(
-                Paragraph::new(Span::styled("  (empty — no secrets or folders found)", theme::inactive())),
+                Paragraph::new(Span::styled(
+                    "  (empty — no secrets or folders found)",
+                    theme::inactive(),
+                )),
                 area,
             );
             return;
         }
 
-        let items: Vec<ListItem> = self.visible.iter().enumerate().map(|(i, row)| {
-            let indent = "  ".repeat(row.depth);
-            let is_cursor = i == self.cursor;
-            let is_selected = self.selected.contains(&i);
+        let items: Vec<ListItem> = self
+            .visible
+            .iter()
+            .enumerate()
+            .map(|(i, row)| {
+                let indent = "  ".repeat(row.depth);
+                let is_cursor = i == self.cursor;
+                let is_selected = self.selected.contains(&i);
 
-            let (icon, base_style) = match row.kind {
-                NodeKind::Folder => {
-                    let expanded = self.expanded.contains(&row.full_path);
-                    let loading = self.pending_folders.contains_key(&row.full_path)
-                        || self.pending_names.contains_key(&row.full_path);
-                    let icon = if loading { "⠸ " } else if expanded { "▾  " } else { "▸  " };
-                    (icon, if is_cursor { theme::selected() } else { theme::accent() })
-                }
-                NodeKind::Secret => {
-                    let icon = if is_selected { "[✓]" } else { "[ ]" };
-                    let style = if is_cursor { theme::selected() } else if is_selected { theme::ok() } else { theme::normal() };
-                    (icon, style)
-                }
-            };
+                let (icon, base_style) = match row.kind {
+                    NodeKind::Folder => {
+                        let expanded = self.expanded.contains(&row.full_path);
+                        let loading = self.pending_folders.contains_key(&row.full_path)
+                            || self.pending_names.contains_key(&row.full_path);
+                        let icon = if loading {
+                            "⠸ "
+                        } else if expanded {
+                            "▾  "
+                        } else {
+                            "▸  "
+                        };
+                        (
+                            icon,
+                            if is_cursor {
+                                theme::selected()
+                            } else {
+                                theme::accent()
+                            },
+                        )
+                    }
+                    NodeKind::Secret => {
+                        let icon = if is_selected { "[✓]" } else { "[ ]" };
+                        let style = if is_cursor {
+                            theme::selected()
+                        } else if is_selected {
+                            theme::ok()
+                        } else {
+                            theme::normal()
+                        };
+                        (icon, style)
+                    }
+                };
 
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("  {}{} {}", indent, icon, row.name), base_style),
-            ]))
-        }).collect();
+                ListItem::new(Line::from(vec![Span::styled(
+                    format!("  {}{} {}", indent, icon, row.name),
+                    base_style,
+                )]))
+            })
+            .collect();
 
         let list = List::new(items).highlight_style(theme::selected());
         let mut state = ListState::default();
@@ -457,17 +551,22 @@ impl SecretsTree {
     fn render_hint(&self, f: &mut Frame, area: Rect) {
         let sel_count = self.selected.len();
         let hint = if sel_count > 0 {
-            let folder_hint = if self.mode == TreeMode::Bind { "  F:folder-bind" } else { "" };
-            format!("{} selected  space:toggle  a:all  enter:confirm{}  esc:cancel", sel_count, folder_hint)
+            let folder_hint = if self.mode == TreeMode::Bind {
+                "  F:folder-bind"
+            } else {
+                ""
+            };
+            format!(
+                "{} selected  space:toggle  a:all  enter:confirm{}  esc:cancel",
+                sel_count, folder_hint
+            )
         } else if self.mode == TreeMode::Bind {
-            "↑↓ move  →/enter:open  ←:close  space:toggle  a:all  F:folder-bind  esc:cancel".to_string()
+            "↑↓ move  →/enter:open  ←:close  space:toggle  a:all  F:folder-bind  esc:cancel"
+                .to_string()
         } else {
             "↑↓ move  →/enter:expand  ←:collapse  esc:close".to_string()
         };
-        f.render_widget(
-            Paragraph::new(hint).style(theme::muted()),
-            area,
-        );
+        f.render_widget(Paragraph::new(hint).style(theme::muted()), area);
     }
 }
 

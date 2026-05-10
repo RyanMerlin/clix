@@ -1,6 +1,6 @@
-use serde::{Deserialize, Deserializer, Serialize};
-use chrono::{DateTime, Utc};
 use super::capability::{CredentialSource, IsolationTier};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Deserializer, Serialize};
 
 fn deser_cap_list<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
     struct CapListVisitor;
@@ -9,7 +9,10 @@ fn deser_cap_list<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Err
         fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
             write!(f, "a list of capability names or objects")
         }
-        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Vec<String>, A::Error> {
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut seq: A,
+        ) -> Result<Vec<String>, A::Error> {
             let mut out = Vec::new();
             while let Some(v) = seq.next_element::<serde_json::Value>()? {
                 let name = match v {
@@ -18,7 +21,9 @@ fn deser_cap_list<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Err
                         .get("name")
                         .and_then(|n| n.as_str())
                         .map(|s| s.to_string())
-                        .ok_or_else(|| serde::de::Error::custom("capability object missing 'name'"))?,
+                        .ok_or_else(|| {
+                            serde::de::Error::custom("capability object missing 'name'")
+                        })?,
                     _ => return Err(serde::de::Error::custom("unexpected capability entry")),
                 };
                 out.push(name);
@@ -110,8 +115,12 @@ impl Default for IsolationDefaults {
     }
 }
 
-fn default_worker_idle_ttl() -> u64 { 300 }
-fn default_memory_mib() -> u64 { 512 }
+fn default_worker_idle_ttl() -> u64 {
+    300
+}
+fn default_memory_mib() -> u64 {
+    512
+}
 
 #[cfg(test)]
 mod tests {

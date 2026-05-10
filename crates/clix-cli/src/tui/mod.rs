@@ -1,14 +1,14 @@
-use std::io;
-use std::time::Duration;
+use anyhow::Result;
 use crossterm::{
     event::{self, Event, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{prelude::*, widgets::*};
-use anyhow::Result;
+use std::io;
+use std::time::Duration;
 
-use crate::tui::app::{App, Screen, Overlay, Focus};
+use crate::tui::app::{App, Focus, Overlay, Screen};
 
 pub mod app;
 pub mod screens;
@@ -50,14 +50,15 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App
         app.tick();
         terminal.draw(|f| render(f, app))?;
         // Poll with 250ms timeout so toasts can auto-dismiss
-        if event::poll(Duration::from_millis(250))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    app.handle_key(key);
-                }
-            }
+        if event::poll(Duration::from_millis(250))?
+            && let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            app.handle_key(key);
         }
-        if app.should_quit { break; }
+        if app.should_quit {
+            break;
+        }
     }
     Ok(())
 }
@@ -66,14 +67,17 @@ fn render(f: &mut Frame, app: &App) {
     let full = f.area();
 
     // Three vertical bands: header (1), body (min), legend (1)
-    let bands = Layout::vertical([Constraint::Length(1), Constraint::Min(0), Constraint::Length(1)])
-        .split(full);
+    let bands = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(0),
+        Constraint::Length(1),
+    ])
+    .split(full);
 
     render_header(f, app, bands[0]);
 
     // Body: sidebar (16) + content — 16 fits "Capabilities" with ▸ prefix
-    let body = Layout::horizontal([Constraint::Length(16), Constraint::Min(0)])
-        .split(bands[1]);
+    let body = Layout::horizontal([Constraint::Length(16), Constraint::Min(0)]).split(bands[1]);
 
     render_sidebar(f, app, body[0]);
     render_content(f, app, body[1]);
@@ -140,7 +144,9 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
 
     // Git badge: binary — either "out of sync" (amber) or hidden (clean)
     let git_badge: Option<(String, ratatui::style::Style)> = app.git_badge.as_ref().and_then(|b| {
-        if !b.configured { return None; }
+        if !b.configured {
+            return None;
+        }
         if app.git_syncing {
             return Some((" ⟳ syncing ".to_string(), theme::dim()));
         }
@@ -156,7 +162,14 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
     let sep = Span::styled(" › ", theme::muted());
     // In sidebar focus: sidebar is the accent anchor, crumb is quiet.
     // In content focus: sidebar dims, crumb becomes the accent anchor.
-    let crumb_span = Span::styled(crumb.clone(), if app.focus == Focus::Content { theme::accent_bold() } else { theme::muted() });
+    let crumb_span = Span::styled(
+        crumb.clone(),
+        if app.focus == Focus::Content {
+            theme::accent_bold()
+        } else {
+            theme::muted()
+        },
+    );
 
     let right_profile = format!(" {} ", active);
     let badge_len = git_badge.as_ref().map(|(s, _)| s.len() as u16).unwrap_or(0);
@@ -189,32 +202,41 @@ fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
     let active_idx = app.screen.sidebar_index();
     let sidebar_focused = app.focus == Focus::Sidebar && !app.overlay.is_open();
 
-    let items: Vec<ListItem> = SIDEBAR_ITEMS.iter().enumerate().map(|(i, (_key, label))| {
-        let is_active = i == active_idx;
+    let items: Vec<ListItem> = SIDEBAR_ITEMS
+        .iter()
+        .enumerate()
+        .map(|(i, (_key, label))| {
+            let is_active = i == active_idx;
 
-        if is_active && sidebar_focused {
-            ListItem::new(Line::from(vec![
-                Span::styled("▶ ", theme::accent()),
-                Span::styled(*label, theme::accent_bold()),
-            ]))
-        } else if is_active {
-            ListItem::new(Line::from(vec![
-                Span::styled("▸ ", theme::muted()),
-                Span::styled(*label, theme::dim()),
-            ]))
-        } else {
-            ListItem::new(Line::from(vec![
-                Span::styled("  ", theme::muted()),
-                Span::styled(*label, theme::dim()),
-            ]))
-        }
-    }).collect();
+            if is_active && sidebar_focused {
+                ListItem::new(Line::from(vec![
+                    Span::styled("▶ ", theme::accent()),
+                    Span::styled(*label, theme::accent_bold()),
+                ]))
+            } else if is_active {
+                ListItem::new(Line::from(vec![
+                    Span::styled("▸ ", theme::muted()),
+                    Span::styled(*label, theme::dim()),
+                ]))
+            } else {
+                ListItem::new(Line::from(vec![
+                    Span::styled("  ", theme::muted()),
+                    Span::styled(*label, theme::dim()),
+                ]))
+            }
+        })
+        .collect();
 
-    let border_style = if sidebar_focused { theme::border_focused() } else { theme::border_dim() };
-    let list = List::new(items)
-        .block(Block::default()
+    let border_style = if sidebar_focused {
+        theme::border_focused()
+    } else {
+        theme::border_dim()
+    };
+    let list = List::new(items).block(
+        Block::default()
             .borders(Borders::RIGHT)
-            .border_style(border_style));
+            .border_style(border_style),
+    );
     f.render_widget(list, area);
 }
 
@@ -237,45 +259,86 @@ fn render_content(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_legend(f: &mut Frame, app: &App, area: Rect) {
     let has_overlay = app.overlay.is_open();
-    if has_overlay { return; }
+    if has_overlay {
+        return;
+    }
 
     let hints: Vec<Span> = match app.screen {
         Screen::Profiles => legend_spans(&[
-            ("↑↓", "move"), ("enter", "toggle"), ("s", "secrets"), ("n", "new"), ("←/esc", "sidebar"), ("?", "help"), ("q", "quit"),
+            ("↑↓", "move"),
+            ("enter", "toggle"),
+            ("s", "secrets"),
+            ("n", "new"),
+            ("←/esc", "sidebar"),
+            ("?", "help"),
+            ("q", "quit"),
         ]),
         Screen::Capabilities => legend_spans(&[
-            ("↑↓", "move"), ("enter", "drill in"), ("esc", "back"), ("n", "new"), ("←/esc", "sidebar"), ("q", "quit"),
+            ("↑↓", "move"),
+            ("enter", "drill in"),
+            ("esc", "back"),
+            ("n", "new"),
+            ("←/esc", "sidebar"),
+            ("q", "quit"),
         ]),
         Screen::Packs => legend_spans(&[
-            ("↑↓", "move"), ("enter", "edit caps"), ("n", "new pack"), ("i", "install"), ("←/esc", "sidebar"), ("q", "quit"),
+            ("↑↓", "move"),
+            ("enter", "edit caps"),
+            ("n", "new pack"),
+            ("i", "install"),
+            ("←/esc", "sidebar"),
+            ("q", "quit"),
         ]),
         Screen::Broker => legend_spans(&[
-            ("r", "refresh"), ("s", "start"), ("x", "stop"), ("q", "quit"),
+            ("r", "refresh"),
+            ("s", "start"),
+            ("x", "stop"),
+            ("q", "quit"),
         ]),
         Screen::Dashboard => legend_spans(&[
-            ("enter", "next action"), ("n", "new profile"), ("r", "reload"),
-            ("$", "sync"), ("?", "help"), ("q", "quit"),
+            ("enter", "next action"),
+            ("n", "new profile"),
+            ("r", "reload"),
+            ("$", "sync"),
+            ("?", "help"),
+            ("q", "quit"),
         ]),
         Screen::Secrets => legend_spans(&[
-            ("m", "accounts"), ("e", "edit"), ("t", "test"), ("b", "browse"),
-            ("$", "sync"), ("?", "help"), ("q", "quit"),
+            ("m", "accounts"),
+            ("e", "edit"),
+            ("t", "test"),
+            ("b", "browse"),
+            ("$", "sync"),
+            ("?", "help"),
+            ("q", "quit"),
         ]),
         Screen::Receipts => legend_spans(&[
-            ("↑↓", "move"), ("A", "approve pending"), ("r", "reload"), ("q", "quit"),
+            ("↑↓", "move"),
+            ("A", "approve pending"),
+            ("r", "reload"),
+            ("q", "quit"),
         ]),
         Screen::Workflows => legend_spans(&[
-            ("↑↓", "move"), ("enter", "run"), ("r", "reload"), ("q", "quit"),
+            ("↑↓", "move"),
+            ("enter", "run"),
+            ("r", "reload"),
+            ("q", "quit"),
         ]),
     };
 
-    f.render_widget(Paragraph::new(Line::from(hints)).style(theme::muted()), area);
+    f.render_widget(
+        Paragraph::new(Line::from(hints)).style(theme::muted()),
+        area,
+    );
 }
 
 fn legend_spans(pairs: &[(&str, &str)]) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     spans.push(Span::raw(" "));
     for (i, (key, desc)) in pairs.iter().enumerate() {
-        if i > 0 { spans.push(Span::styled("  ", theme::inactive())); }
+        if i > 0 {
+            spans.push(Span::styled("  ", theme::inactive()));
+        }
         spans.push(Span::styled(key.to_string(), theme::accent()));
         spans.push(Span::styled(format!(":{}", desc), theme::muted()));
     }
@@ -299,7 +362,7 @@ fn render_confirm_discard(f: &mut Frame, area: Rect) {
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled("  You have unsaved changes.", theme::dim())),
-        Line::from(Line::from(vec![
+        Line::from(vec![
             Span::raw("  "),
             Span::styled("y", theme::accent_bold()),
             Span::styled(" discard  ", theme::muted()),
@@ -307,7 +370,7 @@ fn render_confirm_discard(f: &mut Frame, area: Rect) {
             Span::styled("/", theme::inactive()),
             Span::styled("esc", theme::accent_bold()),
             Span::styled(" keep editing", theme::muted()),
-        ])),
+        ]),
     ];
     f.render_widget(Paragraph::new(lines), inner);
 }
@@ -322,12 +385,17 @@ fn render_overlay(f: &mut Frame, app: &App, area: Rect) {
         Overlay::ProfileSecrets(state) => state.render(f, area),
         Overlay::CapabilityCreate(wiz) => wiz.render(f, area),
         Overlay::PackCreate(wiz) => wiz.render(f, area),
-        Overlay::PackEdit { pack_name, checklist } => render_pack_edit(f, pack_name, checklist, area),
+        Overlay::PackEdit {
+            pack_name,
+            checklist,
+        } => render_pack_edit(f, pack_name, checklist, area),
         Overlay::InstallPack(buf) => render_install_pack(f, buf, area),
         Overlay::InfisicalSetup(state) => state.render(f, area),
         Overlay::SecretsTreeBrowser(tree) => tree.render(f, area),
         Overlay::InfisicalAccounts(state) => state.render(f, area),
-        Overlay::ReceiptDetail(receipt) => crate::tui::screens::receipt_detail::render(f, receipt, area),
+        Overlay::ReceiptDetail(receipt) => {
+            crate::tui::screens::receipt_detail::render(f, receipt, area)
+        }
         Overlay::ConfirmRunWorkflow { name } => render_confirm_run_workflow(f, name, area),
     }
 }
@@ -359,13 +427,20 @@ fn render_confirm_run_workflow(f: &mut Frame, name: &str, area: Rect) {
             theme::inactive(),
         )),
         Line::from(""),
-        Line::from(Span::styled("  y: confirm   any other key: cancel", theme::dim())),
+        Line::from(Span::styled(
+            "  y: confirm   any other key: cancel",
+            theme::dim(),
+        )),
     ];
     f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn render_toast(f: &mut Frame, message: &str, is_error: bool, area: Rect) {
-    let style = if is_error { theme::danger() } else { theme::ok() };
+    let style = if is_error {
+        theme::danger()
+    } else {
+        theme::ok()
+    };
     let icon = if is_error { "✗ " } else { "✓ " };
     let text = format!("{}{}", icon, message);
     let width = (text.len() as u16 + 4).min(area.width);
@@ -375,7 +450,7 @@ fn render_toast(f: &mut Frame, message: &str, is_error: bool, area: Rect) {
     let toast_area = Rect::new(x, y, width, height);
     f.render_widget(
         Paragraph::new(Span::styled(format!(" {} ", text), style)),
-        toast_area
+        toast_area,
     );
 }
 
@@ -457,7 +532,12 @@ fn render_install_pack(f: &mut Frame, buf: &str, area: Rect) {
     f.render_widget(para, inner);
 }
 
-fn render_pack_edit(f: &mut Frame, pack_name: &str, checklist: &crate::tui::widgets::checklist::Checklist, area: Rect) {
+fn render_pack_edit(
+    f: &mut Frame,
+    pack_name: &str,
+    checklist: &crate::tui::widgets::checklist::Checklist,
+    area: Rect,
+) {
     let width = area.width.saturating_sub(4).max(55);
     let height = area.height.saturating_sub(2).max(14);
     let x = (area.width.saturating_sub(width)) / 2;

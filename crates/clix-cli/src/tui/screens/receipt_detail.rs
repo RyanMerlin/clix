@@ -1,10 +1,10 @@
-use ratatui::{prelude::*, widgets::*};
-use clix_core::receipts::{Receipt, ReceiptStatus};
 use crate::tui::theme;
+use clix_core::receipts::{Receipt, ReceiptStatus};
+use ratatui::{prelude::*, widgets::*};
 
 pub fn render(f: &mut Frame, receipt: &Receipt, area: Rect) {
-    let width = area.width.saturating_sub(4).max(60).min(100);
-    let height = area.height.saturating_sub(4).max(20).min(40);
+    let width = area.width.saturating_sub(4).clamp(60, 100);
+    let height = area.height.saturating_sub(4).clamp(20, 40);
     let x = (area.width.saturating_sub(width)) / 2;
     let y = (area.height.saturating_sub(height)) / 2;
     let dialog = Rect::new(x, y, width, height);
@@ -43,7 +43,10 @@ pub fn render(f: &mut Frame, receipt: &Receipt, area: Rect) {
     }
 
     // Context
-    let time = receipt.created_at.format("%Y-%m-%d %H:%M:%S UTC").to_string();
+    let time = receipt
+        .created_at
+        .format("%Y-%m-%d %H:%M:%S UTC")
+        .to_string();
     lines.push(kv("  time      ", &time));
     if let Some(user) = receipt.context.get("user").and_then(|v| v.as_str()) {
         lines.push(kv("  user      ", user));
@@ -61,29 +64,47 @@ pub fn render(f: &mut Frame, receipt: &Receipt, area: Rect) {
         if let Some(tier) = exec.get("isolationTier").and_then(|v| v.as_str()) {
             lines.push(kv("  isolation ", tier));
         }
-        let sandbox = if receipt.sandbox_enforced { "yes" } else { "no" };
+        let sandbox = if receipt.sandbox_enforced {
+            "yes"
+        } else {
+            "no"
+        };
         lines.push(kv("  sandbox   ", sandbox));
         if let Some(sha) = receipt.binary_sha256.as_deref() {
             lines.push(kv("  binary   ", &sha[..12.min(sha.len())]));
         }
 
         // stdout
-        if let Some(out) = exec.get("stdout").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        if let Some(out) = exec
+            .get("stdout")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled("  stdout:", theme::muted())));
             for line in out.lines().take(8) {
-                lines.push(Line::from(Span::styled(format!("    {}", line), theme::dim())));
+                lines.push(Line::from(Span::styled(
+                    format!("    {}", line),
+                    theme::dim(),
+                )));
             }
             if out.lines().count() > 8 {
                 lines.push(Line::from(Span::styled("    …", theme::inactive())));
             }
         }
         // stderr
-        if let Some(err) = exec.get("stderr").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        if let Some(err) = exec
+            .get("stderr")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled("  stderr:", theme::muted())));
             for line in err.lines().take(6) {
-                lines.push(Line::from(Span::styled(format!("    {}", line), theme::danger())));
+                lines.push(Line::from(Span::styled(
+                    format!("    {}", line),
+                    theme::danger(),
+                )));
             }
             if err.lines().count() > 6 {
                 lines.push(Line::from(Span::styled("    …", theme::inactive())));

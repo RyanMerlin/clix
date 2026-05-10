@@ -1,3 +1,5 @@
+use super::worker_protocol::{BrokerMintRequest, BrokerMintResponse};
+use crate::error::Result;
 /// Thin client for the clix-broker credential daemon.
 ///
 /// Called by the gateway immediately before each worker dispatch to obtain ephemeral
@@ -8,12 +10,10 @@
 /// Errors are non-fatal: if the broker is unavailable, the gateway logs a warning and
 /// falls back to whatever static secrets are already in the request env.
 use std::collections::HashMap;
-use tracing::{warn, debug};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use crate::error::Result;
-use super::worker_protocol::{BrokerMintRequest, BrokerMintResponse};
+use tracing::{debug, warn};
 
 const DEFAULT_BROKER_SOCKET: &str = "/tmp/clix-broker.sock";
 
@@ -30,7 +30,11 @@ pub fn broker_socket_path() -> std::path::PathBuf {
 /// broker unavailability is treated as a hard error — a capability that requires credentials
 /// should not silently run without them. If `false`, broker failure is non-fatal and returns
 /// an empty map so the capability can proceed with whatever static secrets it already has.
-pub fn mint_credentials(socket_path: &Path, cli: &str, credentials_declared: bool) -> Result<HashMap<String, String>> {
+pub fn mint_credentials(
+    socket_path: &Path,
+    cli: &str,
+    credentials_declared: bool,
+) -> Result<HashMap<String, String>> {
     let stream = match UnixStream::connect(socket_path) {
         Ok(s) => s,
         Err(e) => {
@@ -45,17 +49,23 @@ pub fn mint_credentials(socket_path: &Path, cli: &str, credentials_declared: boo
         }
     };
 
-    let req = BrokerMintRequest::Mint { cli: cli.to_string(), duration_secs: 3600 };
-    let mut writer = stream.try_clone()
+    let req = BrokerMintRequest::Mint {
+        cli: cli.to_string(),
+        duration_secs: 3600,
+    };
+    let mut writer = stream
+        .try_clone()
         .map_err(|e| crate::error::ClixError::Broker(format!("clone broker stream: {e}")))?;
     let msg = serde_json::to_string(&req)? + "\n";
-    writer.write_all(msg.as_bytes())
+    writer
+        .write_all(msg.as_bytes())
         .map_err(|e| crate::error::ClixError::Broker(format!("write broker request: {e}")))?;
     writer.flush().ok();
 
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
-    reader.read_line(&mut line)
+    reader
+        .read_line(&mut line)
         .map_err(|e| crate::error::ClixError::Broker(format!("read broker response: {e}")))?;
 
     let resp: BrokerMintResponse = serde_json::from_str(line.trim())
@@ -94,9 +104,14 @@ pub struct BrokerClient {
 impl BrokerClient {
     pub fn connect() -> Result<Self> {
         let socket = broker_socket_path();
-        let stream = UnixStream::connect(&socket)
-            .map_err(|e| crate::error::ClixError::Broker(format!("connect to broker at {}: {e}", socket.display())))?;
-        let writer = stream.try_clone()
+        let stream = UnixStream::connect(&socket).map_err(|e| {
+            crate::error::ClixError::Broker(format!(
+                "connect to broker at {}: {e}",
+                socket.display()
+            ))
+        })?;
+        let writer = stream
+            .try_clone()
             .map_err(|e| crate::error::ClixError::Broker(format!("clone stream: {e}")))?;
         let reader = BufReader::new(stream);
         Ok(Self { writer, reader })
@@ -104,12 +119,14 @@ impl BrokerClient {
 
     fn send_request(&mut self, req: &BrokerMintRequest) -> Result<BrokerMintResponse> {
         let msg = serde_json::to_string(req)? + "\n";
-        self.writer.write_all(msg.as_bytes())
+        self.writer
+            .write_all(msg.as_bytes())
             .map_err(|e| crate::error::ClixError::Broker(format!("write: {e}")))?;
         self.writer.flush().ok();
 
         let mut line = String::new();
-        self.reader.read_line(&mut line)
+        self.reader
+            .read_line(&mut line)
             .map_err(|e| crate::error::ClixError::Broker(format!("read: {e}")))?;
         serde_json::from_str(line.trim())
             .map_err(|e| crate::error::ClixError::Broker(format!("parse response: {e}")))
@@ -160,7 +177,11 @@ impl BrokerClient {
         approver: String,
         comment: Option<String>,
     ) -> Result<()> {
-        let req = BrokerMintRequest::Approve { receipt_id, approver, comment };
+        let req = BrokerMintRequest::Approve {
+            receipt_id,
+            approver,
+            comment,
+        };
         self.send_request(&req)?;
         Ok(())
     }
@@ -171,7 +192,11 @@ impl BrokerClient {
         approver: String,
         reason: Option<String>,
     ) -> Result<()> {
-        let req = BrokerMintRequest::Reject { receipt_id, approver, reason };
+        let req = BrokerMintRequest::Reject {
+            receipt_id,
+            approver,
+            reason,
+        };
         self.send_request(&req)?;
         Ok(())
     }
@@ -203,13 +228,19 @@ mod tests {
         let bogus = std::path::Path::new("/tmp/clix-test-no-broker-socket-definitely-absent");
         let err = mint_credentials(bogus, "gcloud", true).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("broker unavailable"), "expected broker error, got: {msg}");
+        assert!(
+            msg.contains("broker unavailable"),
+            "expected broker error, got: {msg}"
+        );
     }
 
     #[test]
     fn broker_unavailable_soft_fails_when_no_credentials() {
         let bogus = std::path::Path::new("/tmp/clix-test-no-broker-socket-definitely-absent");
         let env = mint_credentials(bogus, "gcloud", false).unwrap();
-        assert!(env.is_empty(), "should return empty map when broker is absent and no creds declared");
+        assert!(
+            env.is_empty(),
+            "should return empty map when broker is absent and no creds declared"
+        );
     }
 }

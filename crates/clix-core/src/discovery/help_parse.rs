@@ -10,7 +10,9 @@ pub struct ParsedSubcommand {
 /// group commands (e.g. `gh pr` → `gh.pr.list`, `gh.pr.create`, …).
 pub fn parse_help(cmd: &str) -> Vec<ParsedSubcommand> {
     let text = run_help(cmd, &[]).unwrap_or_default();
-    if text.is_empty() { return vec![]; }
+    if text.is_empty() {
+        return vec![];
+    }
 
     let top = parse_help_text(&text, cmd);
 
@@ -49,10 +51,7 @@ fn is_group_command(description: &str) -> bool {
 
 fn run_help(cmd: &str, args: &[&str]) -> Option<String> {
     // Try --help first, then -h, then help subcommand
-    let help_variants: &[&[&str]] = &[
-        &[args, &["--help"]].concat(),
-        &[args, &["-h"]].concat(),
-    ];
+    let help_variants: &[&[&str]] = &[&[args, &["--help"]].concat(), &[args, &["-h"]].concat()];
     // If args is empty also try bare "help" subcommand
     let help_sub: Vec<&str> = vec!["help"];
     let variants: Vec<Vec<&str>> = if args.is_empty() {
@@ -64,10 +63,10 @@ fn run_help(cmd: &str, args: &[&str]) -> Option<String> {
     };
 
     for variant in &variants {
-        if let Some(text) = run_cmd(cmd, variant) {
-            if !text.trim().is_empty() {
-                return Some(text);
-            }
+        if let Some(text) = run_cmd(cmd, variant)
+            && !text.trim().is_empty()
+        {
+            return Some(text);
         }
     }
     None
@@ -84,8 +83,16 @@ fn run_cmd(cmd: &str, args: &[&str]) -> Option<String> {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
             let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
-            let text = if stdout.trim().is_empty() { stderr } else { stdout };
-            if text.trim().is_empty() { None } else { Some(text) }
+            let text = if stdout.trim().is_empty() {
+                stderr
+            } else {
+                stdout
+            };
+            if text.trim().is_empty() {
+                None
+            } else {
+                Some(text)
+            }
         }
         Err(_) => None,
     }
@@ -116,15 +123,19 @@ fn parse_help_text(text: &str, cmd_name: &str) -> Vec<ParsedSubcommand> {
         }
 
         // A non-indented non-empty line that doesn't look like a subcommand ends the section
-        if in_commands_section && !line.starts_with(' ') && !line.starts_with('\t') {
-            if !trimmed.is_empty() {
-                in_commands_section = false;
-                continue;
-            }
+        if in_commands_section
+            && !line.starts_with(' ')
+            && !line.starts_with('\t')
+            && !trimmed.is_empty()
+        {
+            in_commands_section = false;
+            continue;
         }
 
         if in_commands_section && (line.starts_with("  ") || line.starts_with('\t')) {
-            if trimmed.is_empty() { continue; }
+            if trimmed.is_empty() {
+                continue;
+            }
             let (raw_name, desc) = split_subcmd_line(trimmed);
             // Strip trailing colon — gh uses "auth:  desc" format
             let name = raw_name.trim_end_matches(':');
@@ -141,7 +152,9 @@ fn parse_help_text(text: &str, cmd_name: &str) -> Vec<ParsedSubcommand> {
     // Fallback: no section found — try any indented 2-column line
     if results.is_empty() {
         for line in text.lines() {
-            if !(line.starts_with("  ") || line.starts_with('\t')) { continue; }
+            if !(line.starts_with("  ") || line.starts_with('\t')) {
+                continue;
+            }
             let trimmed = line.trim();
             let (raw_name, desc) = split_subcmd_line(trimmed);
             let name = raw_name.trim_end_matches(':');
@@ -170,7 +183,9 @@ fn split_subcmd_line(line: &str) -> (&str, &str) {
         if bytes[i] == b' ' {
             // Count run of spaces
             let start = i;
-            while i < bytes.len() && bytes[i] == b' ' { i += 1; }
+            while i < bytes.len() && bytes[i] == b' ' {
+                i += 1;
+            }
             if i - start >= 2 {
                 return (line[..start].trim(), line[i..].trim());
             }
@@ -182,10 +197,17 @@ fn split_subcmd_line(line: &str) -> (&str, &str) {
 }
 
 fn is_valid_subcommand(s: &str) -> bool {
-    if s.is_empty() || s.len() > 40 { return false; }
-    if s.starts_with('-') { return false; }  // flag
-    if s.contains('/') || s.contains('\\') || s.contains('.') { return false; }
-    s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    if s.is_empty() || s.len() > 40 {
+        return false;
+    }
+    if s.starts_with('-') {
+        return false;
+    } // flag
+    if s.contains('/') || s.contains('\\') || s.contains('.') {
+        return false;
+    }
+    s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 #[cfg(test)]
@@ -206,7 +228,7 @@ mod tests {
         let text = "Work with GitHub.\n\nCORE COMMANDS\n  auth:     Authenticate\n  pr:       Manage PRs\n\nFLAGS\n  --help\n";
         let r = parse_help_text(text, "gh");
         assert_eq!(r.len(), 2);
-        assert_eq!(r[0].name, "gh.auth");  // colon stripped
+        assert_eq!(r[0].name, "gh.auth"); // colon stripped
         assert_eq!(r[1].name, "gh.pr");
     }
 
@@ -220,8 +242,14 @@ mod tests {
 
     #[test]
     fn test_split_subcmd_line() {
-        assert_eq!(split_subcmd_line("auth:     Authenticate"), ("auth:", "Authenticate"));
-        assert_eq!(split_subcmd_line("list  List items"), ("list", "List items"));
+        assert_eq!(
+            split_subcmd_line("auth:     Authenticate"),
+            ("auth:", "Authenticate")
+        );
+        assert_eq!(
+            split_subcmd_line("list  List items"),
+            ("list", "List items")
+        );
         assert_eq!(split_subcmd_line("create"), ("create", ""));
     }
 }

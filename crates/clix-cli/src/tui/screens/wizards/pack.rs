@@ -1,18 +1,18 @@
-use crossterm::event::KeyCode;
-use ratatui::{prelude::*, widgets::*};
-use clix_core::discovery::{DiscoveredBinary, ParsedSubcommand, Classification};
-use clix_core::packs::scaffold::Preset;
+use super::profile::render_text_field;
 use crate::tui::theme;
 use crate::tui::widgets::checklist::{Checklist, ChecklistItem};
 use crate::tui::widgets::form::{FieldInput, SelectField};
-use super::profile::render_text_field;
+use clix_core::discovery::{Classification, DiscoveredBinary, ParsedSubcommand};
+use clix_core::packs::scaffold::Preset;
+use crossterm::event::KeyCode;
+use ratatui::{prelude::*, widgets::*};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PackWizardStep {
-    Identity,       // step 0
+    Identity,         // step 0
     DiscoverBinaries, // step 1
-    SelectSubcmds,  // step 2
-    Preview,        // step 3
+    SelectSubcmds,    // step 2
+    Preview,          // step 3
 }
 
 #[derive(Debug, Clone)]
@@ -30,15 +30,15 @@ pub struct PackWizard {
     pub author: FieldInput,
     pub seed_command: FieldInput,
     pub preset: SelectField,
-    pub active_field: usize,  // 0=name,1=desc,2=author,3=seed_cmd,4=preset
+    pub active_field: usize, // 0=name,1=desc,2=author,3=seed_cmd,4=preset
     // Step 1 — discover binaries
     pub all_binaries: Vec<DiscoveredBinary>,
     pub binary_checklist: Checklist,
     pub scanning: bool,
     // Step 2 — subcommands
     pub all_subcmds: Vec<DiscoveredSubcmd>,
-    pub pending_subcmds: Vec<DiscoveredSubcmd>,  // accumulates async parse results
-    pub pending_help_jobs: usize,                 // count of outstanding ParseHelp jobs
+    pub pending_subcmds: Vec<DiscoveredSubcmd>, // accumulates async parse results
+    pub pending_help_jobs: usize,               // count of outstanding ParseHelp jobs
     pub subcmd_checklist: Checklist,
     pub parsing_help: bool,
     pub heuristic_filter: bool,
@@ -113,7 +113,9 @@ impl PackWizard {
         match code {
             KeyCode::Esc => return PackWizardAction::Cancel,
             KeyCode::Tab => self.active_field = (self.active_field + 1) % FIELDS,
-            KeyCode::BackTab => self.active_field = self.active_field.checked_sub(1).unwrap_or(FIELDS - 1),
+            KeyCode::BackTab => {
+                self.active_field = self.active_field.checked_sub(1).unwrap_or(FIELDS - 1)
+            }
             KeyCode::Enter => {
                 let name = self.name.value.trim().to_string();
                 if name.is_empty() {
@@ -147,17 +149,21 @@ impl PackWizard {
     fn start_scan(&mut self) {
         self.scanning = true;
         self.all_binaries = clix_core::discovery::scan_path();
-        let items: Vec<ChecklistItem> = self.all_binaries.iter().map(|b| {
-            let size_str = human_size(b.size_bytes);
-            ChecklistItem::new(
-                &b.name,
-                &b.name,
-                &b.path.to_string_lossy(),
-                &size_str,
-                theme::TEXT_DIM,
-                "",
-            )
-        }).collect();
+        let items: Vec<ChecklistItem> = self
+            .all_binaries
+            .iter()
+            .map(|b| {
+                let size_str = human_size(b.size_bytes);
+                ChecklistItem::new(
+                    &b.name,
+                    &b.name,
+                    &b.path.to_string_lossy(),
+                    &size_str,
+                    theme::TEXT_DIM,
+                    "",
+                )
+            })
+            .collect();
         self.binary_checklist = Checklist::new(items);
         // Pre-filter and pre-select based on seed_command
         let seed = self.seed_command.value.trim().to_lowercase();
@@ -189,18 +195,30 @@ impl PackWizard {
                 self.pending_subcmds.clear();
                 return PackWizardAction::ParseHelpFor(selected_names);
             }
-            _ => { self.binary_checklist.handle_key(code); }
+            _ => {
+                self.binary_checklist.handle_key(code);
+            }
         }
         PackWizardAction::None
     }
 
     /// Called by App::tick() when a HelpParsed result arrives.
-    pub fn deliver_help(&mut self, job_id: crate::tui::work::JobId, command: &str, subcmds: Vec<clix_core::discovery::ParsedSubcommand>) {
-        if !self.parsing_help { return; }
+    pub fn deliver_help(
+        &mut self,
+        job_id: crate::tui::work::JobId,
+        command: &str,
+        subcmds: Vec<clix_core::discovery::ParsedSubcommand>,
+    ) {
+        if !self.parsing_help {
+            return;
+        }
         let _ = job_id; // we don't track by job_id — any result counts toward pending
         for p in subcmds {
             let cls = clix_core::discovery::classify(&p.name, &p.description);
-            self.pending_subcmds.push(DiscoveredSubcmd { parsed: p, classification: cls });
+            self.pending_subcmds.push(DiscoveredSubcmd {
+                parsed: p,
+                classification: cls,
+            });
         }
         self.pending_help_jobs = self.pending_help_jobs.saturating_sub(1);
         if self.pending_help_jobs == 0 {
@@ -235,40 +253,47 @@ impl PackWizard {
             &self.all_subcmds
         };
         let preset_str = self.preset.current().to_string();
-        let items: Vec<ChecklistItem> = subcmds.iter().map(|sc| {
-            let risk_str = match sc.classification.risk {
-                clix_core::manifest::capability::RiskLevel::Low => "low",
-                clix_core::manifest::capability::RiskLevel::Medium => "med",
-                clix_core::manifest::capability::RiskLevel::High => "high",
-                clix_core::manifest::capability::RiskLevel::Critical => "crit",
-            };
-            let se_str = match sc.classification.side_effect {
-                clix_core::manifest::capability::SideEffectClass::None => "—",
-                clix_core::manifest::capability::SideEffectClass::ReadOnly => "read",
-                clix_core::manifest::capability::SideEffectClass::Additive => "add",
-                clix_core::manifest::capability::SideEffectClass::Mutating => "mutate",
-                clix_core::manifest::capability::SideEffectClass::Destructive => "destr",
-            };
-            let tag = format!("{:<4} {}", risk_str, se_str);
-            let tag_color = theme::risk_color(risk_str);
-            let mut item = ChecklistItem::new(
-                &sc.parsed.name,
-                &sc.parsed.name,
-                &sc.parsed.description,
-                &tag,
-                tag_color,
-                "",
-            );
-            item.selected = match preset_str.as_str() {
-                "read-only" => matches!(sc.classification.side_effect,
-                    clix_core::manifest::capability::SideEffectClass::ReadOnly |
-                    clix_core::manifest::capability::SideEffectClass::None),
-                "change-controlled" => !matches!(sc.classification.risk,
-                    clix_core::manifest::capability::RiskLevel::Critical),
-                _ => true,
-            };
-            item
-        }).collect();
+        let items: Vec<ChecklistItem> = subcmds
+            .iter()
+            .map(|sc| {
+                let risk_str = match sc.classification.risk {
+                    clix_core::manifest::capability::RiskLevel::Low => "low",
+                    clix_core::manifest::capability::RiskLevel::Medium => "med",
+                    clix_core::manifest::capability::RiskLevel::High => "high",
+                    clix_core::manifest::capability::RiskLevel::Critical => "crit",
+                };
+                let se_str = match sc.classification.side_effect {
+                    clix_core::manifest::capability::SideEffectClass::None => "—",
+                    clix_core::manifest::capability::SideEffectClass::ReadOnly => "read",
+                    clix_core::manifest::capability::SideEffectClass::Additive => "add",
+                    clix_core::manifest::capability::SideEffectClass::Mutating => "mutate",
+                    clix_core::manifest::capability::SideEffectClass::Destructive => "destr",
+                };
+                let tag = format!("{:<4} {}", risk_str, se_str);
+                let tag_color = theme::risk_color(risk_str);
+                let mut item = ChecklistItem::new(
+                    &sc.parsed.name,
+                    &sc.parsed.name,
+                    &sc.parsed.description,
+                    &tag,
+                    tag_color,
+                    "",
+                );
+                item.selected = match preset_str.as_str() {
+                    "read-only" => matches!(
+                        sc.classification.side_effect,
+                        clix_core::manifest::capability::SideEffectClass::ReadOnly
+                            | clix_core::manifest::capability::SideEffectClass::None
+                    ),
+                    "change-controlled" => !matches!(
+                        sc.classification.risk,
+                        clix_core::manifest::capability::RiskLevel::Critical
+                    ),
+                    _ => true,
+                };
+                item
+            })
+            .collect();
         self.subcmd_checklist = Checklist::new(items);
     }
 
@@ -281,7 +306,9 @@ impl PackWizard {
             KeyCode::Char('h') => {
                 self.heuristic_filter = !self.heuristic_filter;
             }
-            _ => { self.subcmd_checklist.handle_key(code); }
+            _ => {
+                self.subcmd_checklist.handle_key(code);
+            }
         }
         PackWizardAction::None
     }
@@ -330,7 +357,10 @@ impl PackWizard {
             PackWizardStep::SelectSubcmds => "Select capabilities",
             PackWizardStep::Preview => "Preview & write",
         };
-        let dots = (0..4usize).map(|i| if i == step_n { "●" } else { "○" }).collect::<Vec<_>>().join("");
+        let dots = (0..4usize)
+            .map(|i| if i == step_n { "●" } else { "○" })
+            .collect::<Vec<_>>()
+            .join("");
         let title = format!(" New Pack · {} {} ", dots, step_label);
 
         let block = Block::default()
@@ -350,32 +380,55 @@ impl PackWizard {
 
     fn render_identity(&self, f: &mut Frame, area: Rect) {
         let chunks = Layout::vertical([
-                Constraint::Length(3),  // name
-                Constraint::Length(3),  // description
-                Constraint::Length(3),  // author
-                Constraint::Length(3),  // seed command
-                Constraint::Length(5),  // preset radio
-                Constraint::Length(1),  // error/hint
-                Constraint::Min(0),
-            ])
-            .margin(1)
-            .split(area);
+            Constraint::Length(3), // name
+            Constraint::Length(3), // description
+            Constraint::Length(3), // author
+            Constraint::Length(3), // seed command
+            Constraint::Length(5), // preset radio
+            Constraint::Length(1), // error/hint
+            Constraint::Min(0),
+        ])
+        .margin(1)
+        .split(area);
 
-        render_text_field(f, &self.name, "Pack name *", self.active_field == 0, chunks[0]);
-        render_text_field(f, &self.description, "Description", self.active_field == 1, chunks[1]);
+        render_text_field(
+            f,
+            &self.name,
+            "Pack name *",
+            self.active_field == 0,
+            chunks[0],
+        );
+        render_text_field(
+            f,
+            &self.description,
+            "Description",
+            self.active_field == 1,
+            chunks[1],
+        );
         render_text_field(f, &self.author, "Author", self.active_field == 2, chunks[2]);
-        render_text_field(f, &self.seed_command, "Seed command (optional, pre-selects in discovery)", self.active_field == 3, chunks[3]);
+        render_text_field(
+            f,
+            &self.seed_command,
+            "Seed command (optional, pre-selects in discovery)",
+            self.active_field == 3,
+            chunks[3],
+        );
 
         // Preset radio group
         render_preset(f, &self.preset, self.active_field == 4, chunks[4]);
 
         if let Some(err) = &self.error {
-            f.render_widget(Paragraph::new(Span::styled(err.as_str(), theme::danger())), chunks[5]);
+            f.render_widget(
+                Paragraph::new(Span::styled(err.as_str(), theme::danger())),
+                chunks[5],
+            );
         } else {
             f.render_widget(
-                Paragraph::new("tab: next field   ← →: change preset   enter: continue   esc: cancel")
-                    .style(theme::muted()),
-                chunks[5]
+                Paragraph::new(
+                    "tab: next field   ← →: change preset   enter: continue   esc: cancel",
+                )
+                .style(theme::muted()),
+                chunks[5],
             );
         }
     }
@@ -387,15 +440,15 @@ impl PackWizard {
             return;
         }
 
-        let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)])
-            .split(area);
+        let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
 
         let count_str = format!("{} executables found", self.all_binaries.len());
         let title = format!("Binaries — {}", count_str);
         self.binary_checklist.render(f, chunks[0], &title, true);
 
-        let hint = Paragraph::new("↑↓ move   space toggle   / filter   a all   enter next   esc back")
-            .style(theme::muted());
+        let hint =
+            Paragraph::new("↑↓ move   space toggle   / filter   a all   enter next   esc back")
+                .style(theme::muted());
         f.render_widget(hint, chunks[1]);
     }
 
@@ -406,8 +459,7 @@ impl PackWizard {
             return;
         }
 
-        let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)])
-            .split(area);
+        let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
 
         let title = format!("Capabilities — {} found", self.all_subcmds.len());
         self.subcmd_checklist.render(f, chunks[0], &title, true);
@@ -435,21 +487,42 @@ impl PackWizard {
             ]),
             Line::from(vec![
                 Span::styled("  Capabilities ", theme::muted()),
-                Span::styled(format!("{} will be written", selected.len()), theme::normal()),
+                Span::styled(
+                    format!("{} will be written", selected.len()),
+                    theme::normal(),
+                ),
             ]),
             Line::from(""),
         ];
 
         let pack_name_rust = name.replace('-', "_");
-        lines.push(Line::from(Span::styled(format!("  ~/.clix/packs/{}/", name), theme::dim())));
-        lines.push(Line::from(Span::styled(format!("    pack.yaml"), theme::dim())));
-        lines.push(Line::from(Span::styled(format!("    capabilities/"), theme::dim())));
-        lines.push(Line::from(Span::styled(format!("      {}.version.yaml  (seed)", pack_name_rust), theme::muted())));
+        lines.push(Line::from(Span::styled(
+            format!("  ~/.clix/packs/{}/", name),
+            theme::dim(),
+        )));
+        lines.push(Line::from(Span::styled(
+            "    pack.yaml".to_string(),
+            theme::dim(),
+        )));
+        lines.push(Line::from(Span::styled(
+            "    capabilities/".to_string(),
+            theme::dim(),
+        )));
+        lines.push(Line::from(Span::styled(
+            format!("      {}.version.yaml  (seed)", pack_name_rust),
+            theme::muted(),
+        )));
         for cap in selected.iter().take(4) {
-            lines.push(Line::from(Span::styled(format!("      {}.yaml", cap), theme::muted())));
+            lines.push(Line::from(Span::styled(
+                format!("      {}.yaml", cap),
+                theme::muted(),
+            )));
         }
         if selected.len() > 4 {
-            lines.push(Line::from(Span::styled(format!("      … {} more", selected.len() - 4), theme::muted())));
+            lines.push(Line::from(Span::styled(
+                format!("      … {} more", selected.len() - 4),
+                theme::muted(),
+            )));
         }
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
@@ -465,26 +538,49 @@ impl PackWizard {
 }
 
 fn render_preset(f: &mut Frame, field: &SelectField, focused: bool, area: Rect) {
-    let border_style = if focused { theme::border_focused() } else { theme::border_normal() };
-    let descriptions = ["no writes, no approvals", "writes require approval", "full trust, operators only"];
-    let options = field.options.iter().enumerate().map(|(i, opt)| {
-        let bullet = if i == field.idx { "●" } else { "○" };
-        let style = if i == field.idx { theme::accent() } else { theme::muted() };
-        let desc = descriptions.get(i).copied().unwrap_or("");
-        Line::from(vec![
-            Span::styled(format!("  {} ", bullet), style),
-            Span::styled(format!("{:<20}", opt), style),
-            Span::styled(desc, theme::muted()),
-        ])
-    }).collect::<Vec<_>>();
+    let border_style = if focused {
+        theme::border_focused()
+    } else {
+        theme::border_normal()
+    };
+    let descriptions = [
+        "no writes, no approvals",
+        "writes require approval",
+        "full trust, operators only",
+    ];
+    let options = field
+        .options
+        .iter()
+        .enumerate()
+        .map(|(i, opt)| {
+            let bullet = if i == field.idx { "●" } else { "○" };
+            let style = if i == field.idx {
+                theme::accent()
+            } else {
+                theme::muted()
+            };
+            let desc = descriptions.get(i).copied().unwrap_or("");
+            Line::from(vec![
+                Span::styled(format!("  {} ", bullet), style),
+                Span::styled(format!("{:<20}", opt), style),
+                Span::styled(desc, theme::muted()),
+            ])
+        })
+        .collect::<Vec<_>>();
 
-    let para = Paragraph::new(options)
-        .block(Block::default().borders(Borders::ALL).title("Preset").border_style(border_style));
+    let para = Paragraph::new(options).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Preset")
+            .border_style(border_style),
+    );
     f.render_widget(para, area);
 }
 
 fn human_size(bytes: u64) -> String {
-    if bytes == 0 { return "0 B".into(); }
+    if bytes == 0 {
+        return "0 B".into();
+    }
     let units = ["B", "KB", "MB", "GB"];
     let mut size = bytes as f64;
     let mut unit = 0;

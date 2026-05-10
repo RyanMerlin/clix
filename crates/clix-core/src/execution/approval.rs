@@ -1,10 +1,10 @@
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use super::ExecutionOutcome;
+use super::broker_client::{ApprovalPollResult, BrokerClient};
 use crate::error::{ClixError, Result};
 use crate::manifest::capability::CapabilityManifest;
 use crate::state::ApprovalGateConfig;
-use super::broker_client::{ApprovalPollResult, BrokerClient};
-use super::ExecutionOutcome;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,12 +29,25 @@ pub struct ApprovalResponse {
 
 impl ApprovalResponse {
     pub fn denied(reason: impl Into<String>) -> Self {
-        ApprovalResponse { approved: false, reason: Some(reason.into()), approver: None }
+        ApprovalResponse {
+            approved: false,
+            reason: Some(reason.into()),
+            approver: None,
+        }
     }
 }
 
-pub fn request_approval(cfg: &ApprovalGateConfig, cap: &CapabilityManifest, input: &serde_json::Value, policy_reason: &str) -> Result<ApprovalResponse> {
-    let timeout = if cfg.timeout_seconds > 0 { cfg.timeout_seconds } else { 300 };
+pub fn request_approval(
+    cfg: &ApprovalGateConfig,
+    cap: &CapabilityManifest,
+    input: &serde_json::Value,
+    policy_reason: &str,
+) -> Result<ApprovalResponse> {
+    let timeout = if cfg.timeout_seconds > 0 {
+        cfg.timeout_seconds
+    } else {
+        300
+    };
     let req = ApprovalRequest {
         request_id: Uuid::new_v4().to_string(),
         capability: cap.name.clone(),
@@ -45,19 +58,31 @@ pub fn request_approval(cfg: &ApprovalGateConfig, cap: &CapabilityManifest, inpu
     };
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(timeout))
-        .build().map_err(|e| ClixError::ApprovalGate(e.to_string()))?;
+        .build()
+        .map_err(|e| ClixError::ApprovalGate(e.to_string()))?;
     let mut builder = client.post(&cfg.webhook_url).json(&req);
-    for (k, v) in &cfg.headers { builder = builder.header(k, v); }
+    for (k, v) in &cfg.headers {
+        builder = builder.header(k, v);
+    }
     let http_resp = match builder.send() {
-        Err(e) => return Ok(ApprovalResponse::denied(format!("webhook unreachable: {e}"))),
+        Err(e) => {
+            return Ok(ApprovalResponse::denied(format!(
+                "webhook unreachable: {e}"
+            )));
+        }
         Ok(r) => r,
     };
     if !http_resp.status().is_success() {
-        return Ok(ApprovalResponse::denied(format!("webhook HTTP {}", http_resp.status())));
+        return Ok(ApprovalResponse::denied(format!(
+            "webhook HTTP {}",
+            http_resp.status()
+        )));
     }
     match http_resp.json::<ApprovalResponse>() {
         Ok(r) => Ok(r),
-        Err(e) => Ok(ApprovalResponse::denied(format!("webhook decode failed: {e}"))),
+        Err(e) => Ok(ApprovalResponse::denied(format!(
+            "webhook decode failed: {e}"
+        ))),
     }
 }
 
@@ -70,9 +95,8 @@ pub fn wait_for_broker_approval(
     ctx_value: &serde_json::Value,
     reason: &str,
 ) -> Result<ExecutionOutcome> {
-    let mut client = BrokerClient::connect().map_err(|e| {
-        ClixError::Broker(format!("cannot connect to broker for approval: {e}"))
-    })?;
+    let mut client = BrokerClient::connect()
+        .map_err(|e| ClixError::Broker(format!("cannot connect to broker for approval: {e}")))?;
 
     client.send_request_approval(receipt_id, capability, input, ctx_value, reason)?;
 
@@ -99,7 +123,9 @@ pub fn wait_for_broker_approval(
                     reason: None,
                 });
             }
-            ApprovalPollResult::Denied { reason: denial_reason } => {
+            ApprovalPollResult::Denied {
+                reason: denial_reason,
+            } => {
                 return Ok(ExecutionOutcome {
                     ok: false,
                     approval_required: false,

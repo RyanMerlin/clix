@@ -13,10 +13,7 @@ use std::process::{Command, Output};
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 fn git(args: &[&str], cwd: &Path) -> io::Result<Output> {
-    Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
+    Command::new("git").args(args).current_dir(cwd).output()
 }
 
 fn git_ok(args: &[&str], cwd: &Path) -> io::Result<String> {
@@ -25,7 +22,7 @@ fn git_ok(args: &[&str], cwd: &Path) -> io::Result<String> {
         Ok(String::from_utf8_lossy(&out.stdout).trim_end().to_string())
     } else {
         let stderr = String::from_utf8_lossy(&out.stderr).trim_end().to_string();
-        Err(io::Error::new(io::ErrorKind::Other, stderr))
+        Err(io::Error::other(stderr))
     }
 }
 
@@ -75,8 +72,20 @@ pub fn init(dir: &Path, remote_url: &str, branch: &str) -> io::Result<()> {
         // Fetch + pull if there's a remote branch
         let _ = git_ok(&["fetch", "origin"], dir);
         let remote_ref = format!("origin/{branch}");
-        if git(&["rev-parse", "--verify", &remote_ref], dir).map(|o| o.status.success()).unwrap_or(false) {
-            git_ok(&["pull", "--rebase", "--allow-unrelated-histories", "origin", branch], dir)?;
+        if git(&["rev-parse", "--verify", &remote_ref], dir)
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            git_ok(
+                &[
+                    "pull",
+                    "--rebase",
+                    "--allow-unrelated-histories",
+                    "origin",
+                    branch,
+                ],
+                dir,
+            )?;
         }
     } else {
         git_ok(&["init", "-b", branch], dir)?;
@@ -95,8 +104,25 @@ pub fn init(dir: &Path, remote_url: &str, branch: &str) -> io::Result<()> {
                 .map(|o| o.status.success())
                 .unwrap_or(false);
             if has_remote {
-                git_ok(&["pull", "--rebase", "--allow-unrelated-histories", "origin", branch], dir)?;
-                git_ok(&["branch", "--set-upstream-to", &format!("origin/{branch}"), branch], dir)?;
+                git_ok(
+                    &[
+                        "pull",
+                        "--rebase",
+                        "--allow-unrelated-histories",
+                        "origin",
+                        branch,
+                    ],
+                    dir,
+                )?;
+                git_ok(
+                    &[
+                        "branch",
+                        "--set-upstream-to",
+                        &format!("origin/{branch}"),
+                        branch,
+                    ],
+                    dir,
+                )?;
             } else {
                 // Remote exists but has no commits yet → push our init commit
                 git_ok(&["push", "-u", "origin", branch], dir)?;
@@ -117,7 +143,10 @@ pub fn push(dir: &Path, branch: &str) -> io::Result<String> {
         false
     } else {
         let timestamp = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
-        git_ok(&["commit", "-m", &format!("chore: clix sync {timestamp}")], dir)?;
+        git_ok(
+            &["commit", "-m", &format!("chore: clix sync {timestamp}")],
+            dir,
+        )?;
         true
     };
 
@@ -154,13 +183,26 @@ pub fn status(dir: &Path) -> io::Result<String> {
 
     // Current branch + upstream tracking
     if let Ok(branch) = git_ok(&["rev-parse", "--abbrev-ref", "HEAD"], dir) {
-        if let Ok(upstream) = git_ok(&["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], dir) {
+        if let Ok(upstream) = git_ok(
+            &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+            dir,
+        ) {
             // commits ahead/behind
-            if let Ok(counts) = git_ok(&["rev-list", "--left-right", "--count", &format!("{upstream}...HEAD")], dir) {
+            if let Ok(counts) = git_ok(
+                &[
+                    "rev-list",
+                    "--left-right",
+                    "--count",
+                    &format!("{upstream}...HEAD"),
+                ],
+                dir,
+            ) {
                 let mut iter = counts.split_whitespace();
                 let behind = iter.next().unwrap_or("?");
-                let ahead  = iter.next().unwrap_or("?");
-                parts.push(format!("branch: {branch} — {ahead} ahead, {behind} behind {upstream}"));
+                let ahead = iter.next().unwrap_or("?");
+                parts.push(format!(
+                    "branch: {branch} — {ahead} ahead, {behind} behind {upstream}"
+                ));
             } else {
                 parts.push(format!("branch: {branch} → {upstream}"));
             }

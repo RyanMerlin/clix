@@ -1,8 +1,8 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
 use crate::error::{ClixError, Result};
 #[cfg(target_os = "macos")]
 use crate::manifest::capability::SideEffectClass;
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct SubprocessResult {
@@ -11,14 +11,25 @@ pub struct SubprocessResult {
     pub stderr: String,
 }
 
-pub fn run_subprocess(command: &str, args: &[String], cwd: &PathBuf, secrets: &HashMap<String, String>) -> Result<SubprocessResult> {
+pub fn run_subprocess(
+    command: &str,
+    args: &[String],
+    cwd: &PathBuf,
+    secrets: &HashMap<String, String>,
+) -> Result<SubprocessResult> {
     let mut cmd = std::process::Command::new(command);
     cmd.args(args).current_dir(cwd);
     let mut env: HashMap<String, String> = std::env::vars().collect();
-    for (k, v) in secrets { env.insert(k.clone(), v.clone()); }
+    for (k, v) in secrets {
+        env.insert(k.clone(), v.clone());
+    }
     cmd.env_clear();
-    for (k, v) in &env { cmd.env(k, v); }
-    let output = cmd.output()
+    for (k, v) in &env {
+        cmd.env(k, v);
+    }
+    #[allow(clippy::bind_instead_of_map)]
+    let output = cmd
+        .output()
         .or_else(|e| {
             // On Windows, many CLIs ship as .cmd wrappers; retry with that extension.
             #[cfg(target_os = "windows")]
@@ -27,7 +38,9 @@ pub fn run_subprocess(command: &str, args: &[String], cwd: &PathBuf, secrets: &H
                 let mut cmd2 = std::process::Command::new(&cmd_name);
                 cmd2.args(args).current_dir(cwd);
                 cmd2.env_clear();
-                for (k, v) in &env { cmd2.env(k, v); }
+                for (k, v) in &env {
+                    cmd2.env(k, v);
+                }
                 return cmd2.output().map_err(|_| e);
             }
             Err(e)
@@ -62,9 +75,17 @@ pub fn run_subprocess_sandboxed(
 }
 
 pub fn expand_secret_refs(args: &[String], secrets: &HashMap<String, String>) -> Vec<String> {
-    args.iter().map(|arg| os_str_expand(arg, |key| {
-        secrets.get(key).cloned().or_else(|| std::env::var(key).ok()).unwrap_or_default()
-    })).collect()
+    args.iter()
+        .map(|arg| {
+            os_str_expand(arg, |key| {
+                secrets
+                    .get(key)
+                    .cloned()
+                    .or_else(|| std::env::var(key).ok())
+                    .unwrap_or_default()
+            })
+        })
+        .collect()
 }
 
 fn os_str_expand(s: &str, lookup: impl Fn(&str) -> String) -> String {
@@ -77,7 +98,9 @@ fn os_str_expand(s: &str, lookup: impl Fn(&str) -> String) -> String {
                 let key: String = chars.by_ref().take_while(|&c| c != '}').collect();
                 (key, true)
             } else {
-                let key: String = std::iter::from_fn(|| chars.next_if(|c| c.is_alphanumeric() || *c == '_')).collect();
+                let key: String =
+                    std::iter::from_fn(|| chars.next_if(|c| c.is_alphanumeric() || *c == '_'))
+                        .collect();
                 (key, false)
             };
             result.push_str(&lookup(&key));
@@ -104,7 +127,13 @@ mod tests {
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn test_run_echo() {
-        let result = run_subprocess("echo", &["hello".to_string()], &PathBuf::from("."), &HashMap::new()).unwrap();
+        let result = run_subprocess(
+            "echo",
+            &["hello".to_string()],
+            &PathBuf::from("."),
+            &HashMap::new(),
+        )
+        .unwrap();
         assert_eq!(result.exit_code, 0);
         assert!(result.stdout.contains("hello"));
     }

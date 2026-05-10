@@ -106,13 +106,20 @@ pub mod mem {
         }
 
         pub fn seed(&self, path: impl Into<PathBuf>, content: impl Into<Vec<u8>>) {
-            self.files.lock().unwrap().insert(path.into(), content.into());
+            self.files
+                .lock()
+                .unwrap()
+                .insert(path.into(), content.into());
         }
     }
 
     impl Storage for MemStorage {
         fn read_bytes(&self, path: &Path) -> io::Result<Vec<u8>> {
-            self.files.lock().unwrap().get(path).cloned()
+            self.files
+                .lock()
+                .unwrap()
+                .get(path)
+                .cloned()
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, path.display().to_string()))
         }
 
@@ -122,7 +129,10 @@ pub mod mem {
         }
 
         fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
-            self.files.lock().unwrap().insert(path.to_path_buf(), bytes.to_vec());
+            self.files
+                .lock()
+                .unwrap()
+                .insert(path.to_path_buf(), bytes.to_vec());
             Ok(())
         }
 
@@ -196,8 +206,8 @@ pub fn default_storage() -> StorageRef {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::mem::MemStorage;
+    use super::*;
     use std::path::Path;
 
     #[test]
@@ -240,11 +250,14 @@ mod tests {
         store.write(Path::new("/d/sub/c.txt"), b"").unwrap();
         let mut children = store.list(Path::new("/d")).unwrap();
         children.sort();
-        assert_eq!(children, vec![
-            PathBuf::from("/d/a.txt"),
-            PathBuf::from("/d/b.txt"),
-            PathBuf::from("/d/sub"),
-        ]);
+        assert_eq!(
+            children,
+            vec![
+                PathBuf::from("/d/a.txt"),
+                PathBuf::from("/d/b.txt"),
+                PathBuf::from("/d/sub"),
+            ]
+        );
     }
 
     #[test]
@@ -252,9 +265,16 @@ mod tests {
         let store = MemStorage::new();
         store.write(Path::new("/src/x.txt"), b"x").unwrap();
         store.write(Path::new("/src/nested/y.txt"), b"y").unwrap();
-        store.copy_dir(Path::new("/src"), Path::new("/dst")).unwrap();
+        store
+            .copy_dir(Path::new("/src"), Path::new("/dst"))
+            .unwrap();
         assert_eq!(store.read_to_string(Path::new("/dst/x.txt")).unwrap(), "x");
-        assert_eq!(store.read_to_string(Path::new("/dst/nested/y.txt")).unwrap(), "y");
+        assert_eq!(
+            store
+                .read_to_string(Path::new("/dst/nested/y.txt"))
+                .unwrap(),
+            "y"
+        );
     }
 
     #[test]
@@ -264,12 +284,15 @@ mod tests {
 
         let store = MemStorage::new();
         let config_yaml = "schemaVersion: 1\ndefaultEnv: test\n";
-        store.write(Path::new("/home/.clix/config.yaml"), config_yaml.as_bytes()).unwrap();
+        store
+            .write(Path::new("/home/.clix/config.yaml"), config_yaml.as_bytes())
+            .unwrap();
 
         let state = ClixState::load_with_storage(
             PathBuf::from("/home/.clix"),
             Arc::clone(&store) as StorageRef,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(state.config.default_env, "test");
     }
 }

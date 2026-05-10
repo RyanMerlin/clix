@@ -3,7 +3,10 @@ use crate::error::{ClixError, Result};
 pub fn validate_input(schema: &serde_json::Value, input: &serde_json::Value) -> Result<()> {
     let validator = jsonschema::validator_for(schema)
         .map_err(|e| ClixError::Schema(format!("invalid schema: {e}")))?;
-    let errors: Vec<String> = validator.iter_errors(input).map(|e| e.to_string()).collect();
+    let errors: Vec<String> = validator
+        .iter_errors(input)
+        .map(|e| e.to_string())
+        .collect();
     if errors.is_empty() {
         Ok(())
     } else {

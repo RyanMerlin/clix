@@ -1,4 +1,4 @@
-use prometheus::{IntCounterVec, Opts, Registry, TextEncoder, Encoder};
+use prometheus::{Encoder, IntCounterVec, Opts, Registry, TextEncoder};
 use std::sync::OnceLock;
 
 static REGISTRY: OnceLock<Registry> = OnceLock::new();
@@ -11,15 +11,24 @@ pub fn init() {
     let calls = IntCounterVec::new(
         Opts::new("clix_capability_calls_total", "Total capability calls"),
         &["capability", "status"],
-    ).unwrap();
+    )
+    .unwrap();
     let denials = IntCounterVec::new(
-        Opts::new("clix_capability_denials_total", "Capability calls denied by policy"),
+        Opts::new(
+            "clix_capability_denials_total",
+            "Capability calls denied by policy",
+        ),
         &["capability"],
-    ).unwrap();
+    )
+    .unwrap();
     let errors = IntCounterVec::new(
-        Opts::new("clix_capability_errors_total", "Capability calls that errored"),
+        Opts::new(
+            "clix_capability_errors_total",
+            "Capability calls that errored",
+        ),
         &["capability"],
-    ).unwrap();
+    )
+    .unwrap();
     registry.register(Box::new(calls.clone())).unwrap();
     registry.register(Box::new(denials.clone())).unwrap();
     registry.register(Box::new(errors.clone())).unwrap();
@@ -30,15 +39,21 @@ pub fn init() {
 }
 
 pub fn record_call(capability: &str, status: &str) {
-    if let Some(c) = CALLS_TOTAL.get() { c.with_label_values(&[capability, status]).inc(); }
+    if let Some(c) = CALLS_TOTAL.get() {
+        c.with_label_values(&[capability, status]).inc();
+    }
 }
 
 pub fn record_denial(capability: &str) {
-    if let Some(c) = DENIALS_TOTAL.get() { c.with_label_values(&[capability]).inc(); }
+    if let Some(c) = DENIALS_TOTAL.get() {
+        c.with_label_values(&[capability]).inc();
+    }
 }
 
 pub fn record_error(capability: &str) {
-    if let Some(c) = ERRORS_TOTAL.get() { c.with_label_values(&[capability]).inc(); }
+    if let Some(c) = ERRORS_TOTAL.get() {
+        c.with_label_values(&[capability]).inc();
+    }
 }
 
 pub fn render() -> String {

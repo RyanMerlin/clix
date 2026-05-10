@@ -1,8 +1,8 @@
 //! Test mocks: wiremock OAuth2 endpoint and Unix-socket broker echo server.
 
 use std::collections::HashMap;
-use wiremock::{MockServer, Mock, ResponseTemplate};
 use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 // ─── OAuth2 mock ──────────────────────────────────────────────────────────────
 
@@ -54,7 +54,10 @@ impl Default for BrokerServerConfig {
         let mut responses = HashMap::new();
         // gcloud: return a mock token
         let mut gcloud_env = HashMap::new();
-        gcloud_env.insert("GOOGLE_OAUTH_ACCESS_TOKEN".to_string(), "ya29.mock-token".to_string());
+        gcloud_env.insert(
+            "GOOGLE_OAUTH_ACCESS_TOKEN".to_string(),
+            "ya29.mock-token".to_string(),
+        );
         responses.insert("gcloud".to_string(), gcloud_env);
         Self { responses }
     }
@@ -81,29 +84,33 @@ pub fn spawn_broker_socket(tmp: &tempfile::TempDir, config: BrokerServerConfig) 
                 let reader = BufReader::new(stream);
                 for line in reader.lines() {
                     let Ok(line) = line else { break };
-                    let resp: BrokerMintResponse = match serde_json::from_str::<BrokerMintRequest>(&line) {
-                        Ok(BrokerMintRequest::Ping) => {
-                            BrokerMintResponse::Pong { version: "test".to_string() }
-                        }
-                        Ok(BrokerMintRequest::Mint { cli, .. }) => {
-                            match responses.get(&cli) {
+                    let resp: BrokerMintResponse =
+                        match serde_json::from_str::<BrokerMintRequest>(&line) {
+                            Ok(BrokerMintRequest::Ping) => BrokerMintResponse::Pong {
+                                version: "test".to_string(),
+                            },
+                            Ok(BrokerMintRequest::Mint { cli, .. }) => match responses.get(&cli) {
                                 Some(env) => BrokerMintResponse::MintResult {
-                                    ok: true, env: env.clone(), error: None,
+                                    ok: true,
+                                    env: env.clone(),
+                                    error: None,
                                 },
                                 None => BrokerMintResponse::MintResult {
                                     ok: false,
                                     env: Default::default(),
                                     error: Some(format!("no canned response for {cli}")),
                                 },
-                            }
-                        }
-                        _ => BrokerMintResponse::MintResult {
-                            ok: false, env: Default::default(),
-                            error: Some("unsupported in test broker".to_string()),
-                        },
-                    };
+                            },
+                            _ => BrokerMintResponse::MintResult {
+                                ok: false,
+                                env: Default::default(),
+                                error: Some("unsupported in test broker".to_string()),
+                            },
+                        };
                     let msg = serde_json::to_string(&resp).unwrap() + "\n";
-                    if writer.write_all(msg.as_bytes()).is_err() { break; }
+                    if writer.write_all(msg.as_bytes()).is_err() {
+                        break;
+                    }
                 }
             });
         }

@@ -2,11 +2,12 @@
 //!
 //! Verifies that `SecretRedactor` masks secret values correctly in various contexts.
 
-use std::collections::HashMap;
 use clix_core::secrets::redact::SecretRedactor;
+use std::collections::HashMap;
 
 fn make_redactor(pairs: &[(&str, &str)]) -> SecretRedactor {
-    let map: HashMap<String, String> = pairs.iter()
+    let map: HashMap<String, String> = pairs
+        .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
     SecretRedactor::new(map)
@@ -17,7 +18,10 @@ fn make_redactor(pairs: &[(&str, &str)]) -> SecretRedactor {
 fn test_redact_replaces_secret() {
     let r = make_redactor(&[("TOKEN", "super-secret-token")]);
     let output = r.redact("Bearer super-secret-token in header");
-    assert!(!output.contains("super-secret-token"), "secret must not appear in output");
+    assert!(
+        !output.contains("super-secret-token"),
+        "secret must not appear in output"
+    );
     assert!(output.contains("[REDACTED]"), "placeholder should appear");
 }
 
@@ -35,7 +39,10 @@ fn test_redact_multiple_secrets() {
     let r = make_redactor(&[("A", "token-a"), ("B", "token-b")]);
     let output = r.redact("token-a and token-b are both secrets");
     assert!(!output.contains("token-a"), "first secret must be redacted");
-    assert!(!output.contains("token-b"), "second secret must be redacted");
+    assert!(
+        !output.contains("token-b"),
+        "second secret must be redacted"
+    );
 }
 
 /// Empty secret map leaves content unchanged.
@@ -50,7 +57,10 @@ fn test_redact_no_secrets() {
 fn test_redact_repeated_secret() {
     let r = make_redactor(&[("KEY", "abc123")]);
     let output = r.redact("key=abc123 foo key=abc123 bar");
-    assert!(!output.contains("abc123"), "all occurrences must be redacted");
+    assert!(
+        !output.contains("abc123"),
+        "all occurrences must be redacted"
+    );
 }
 
 /// Longer secret shadows shorter prefix match (longest-first ordering).
@@ -68,5 +78,8 @@ fn test_redact_longest_match_first() {
 fn test_empty_secret_excluded() {
     let r = make_redactor(&[("EMPTY", "")]);
     let output = r.redact("value:  trailing");
-    assert_eq!(output, "value:  trailing", "empty secret should not cause spurious redaction");
+    assert_eq!(
+        output, "value:  trailing",
+        "empty secret should not cause spurious redaction"
+    );
 }

@@ -9,12 +9,12 @@ use crate::error::{ClixError, Result};
 use crate::manifest::capability::Backend;
 use crate::manifest::profile::{ProfileFolderBinding, ProfileSecretBinding};
 use crate::manifest::workflow::StepFailurePolicy;
-use crate::policy::{evaluate::ExecutionContext, evaluate_policy, Decision, PolicyBundle};
+use crate::policy::{Decision, PolicyBundle, evaluate::ExecutionContext, evaluate_policy};
 use crate::receipts::{Receipt, ReceiptKind, ReceiptStatus, ReceiptStore};
 use crate::registry::{CapabilityRegistry, WorkflowRegistry};
 use crate::sandbox::sandbox_enforced;
 use crate::schema::validate_input;
-use crate::secrets::{resolve_credentials, SecretRedactor};
+use crate::secrets::{SecretRedactor, resolve_credentials};
 use crate::state::InfisicalProfiles;
 use crate::template::render_args;
 use backends::{builtin_handler, expand_secret_refs, run_isolated, run_remote, run_subprocess};
@@ -37,6 +37,7 @@ pub struct ExecutionOutcome {
     pub reason: Option<String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_capability(
     registry: &CapabilityRegistry,
     policy: &PolicyBundle,
@@ -269,6 +270,7 @@ pub fn run_capability(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_workflow(
     cap_registry: &CapabilityRegistry,
     wf_registry: &WorkflowRegistry,
@@ -337,9 +339,7 @@ fn merge_inputs(base: &serde_json::Value, step: &serde_json::Value) -> serde_jso
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manifest::capability::{
-        Backend, CapabilityManifest, IsolationTier, RiskLevel, SideEffectClass,
-    };
+    use crate::manifest::capability::{Backend, CapabilityManifest, RiskLevel, SideEffectClass};
     use crate::policy::{PolicyAction, PolicyBundle, PolicyRule};
     use crate::state::InfisicalProfiles;
     use std::collections::BTreeMap;
@@ -421,19 +421,21 @@ mod tests {
         let map = BTreeMap::new();
         let infisical = no_infisical(&map);
         let reg = CapabilityRegistry::from_vec(vec![]);
-        assert!(run_capability(
-            &reg,
-            &PolicyBundle::default(),
-            &infisical,
-            &store(),
-            None,
-            "nope",
-            serde_json::json!({}),
-            ctx(),
-            &[],
-            &[]
-        )
-        .is_err());
+        assert!(
+            run_capability(
+                &reg,
+                &PolicyBundle::default(),
+                &infisical,
+                &store(),
+                None,
+                "nope",
+                serde_json::json!({}),
+                ctx(),
+                &[],
+                &[]
+            )
+            .is_err()
+        );
     }
 
     #[test]

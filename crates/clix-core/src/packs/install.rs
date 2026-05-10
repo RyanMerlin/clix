@@ -1,8 +1,8 @@
-use std::path::{Path, PathBuf};
+use super::signing;
 use crate::error::{ClixError, Result};
 use crate::manifest::loader::load_manifest;
 use crate::manifest::pack::PackManifest;
-use super::signing;
+use std::path::{Path, PathBuf};
 
 /// Install a pack from a source directory or .clixpack.zip archive into packs_dir.
 /// Returns the installed pack directory path.
@@ -21,15 +21,21 @@ pub fn install_pack_verified(
     } else if src.is_dir() {
         install_from_dir(src, packs_dir)
     } else {
-        Err(ClixError::Pack(format!("pack source not found: {}", src.display())))
+        Err(ClixError::Pack(format!(
+            "pack source not found: {}",
+            src.display()
+        )))
     }
 }
-
 
 fn install_from_dir(src: &Path, packs_dir: &Path) -> Result<PathBuf> {
     let manifest_path = {
         let yaml = src.join("pack.yaml");
-        if yaml.exists() { yaml } else { src.join("pack.json") }
+        if yaml.exists() {
+            yaml
+        } else {
+            src.join("pack.json")
+        }
     };
     let manifest: PackManifest = load_manifest(&manifest_path)?;
     let dest = packs_dir.join(&manifest.name);
@@ -52,7 +58,9 @@ fn install_from_zip(
     if verify_sig {
         let sig_path = PathBuf::from(format!("{}.sig", zip_path.display()));
         if !sig_path.exists() {
-            return Err(ClixError::Pack("no signature found — pack is unsigned".to_string()));
+            return Err(ClixError::Pack(
+                "no signature found — pack is unsigned".to_string(),
+            ));
         }
         let sig_hex = std::fs::read_to_string(&sig_path)?;
         let sig_hex = sig_hex.trim();
@@ -64,11 +72,12 @@ fn install_from_zip(
                 sig_bytes.len()
             )));
         }
-        let sig_arr: [u8; 64] = sig_bytes.try_into()
+        let sig_arr: [u8; 64] = sig_bytes
+            .try_into()
             .map_err(|_| ClixError::Pack("signature must be 64 bytes".to_string()))?;
 
         // Re-compute SHA-256 of the zip for verification
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let data = std::fs::read(zip_path)?;
         let mut hasher = Sha256::new();
         hasher.update(&data);
@@ -78,9 +87,8 @@ fn install_from_zip(
         let keys_dir = match trusted_keys_dir {
             Some(d) => d,
             None => {
-                fallback_dir = crate::packs::signing::default_trusted_keys_dir(
-                    &crate::state::home_dir(),
-                );
+                fallback_dir =
+                    crate::packs::signing::default_trusted_keys_dir(&crate::state::home_dir());
                 &fallback_dir
             }
         };
@@ -89,15 +97,16 @@ fn install_from_zip(
     }
 
     let file = std::fs::File::open(zip_path)?;
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| ClixError::Pack(format!("zip open: {e}")))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| ClixError::Pack(format!("zip open: {e}")))?;
 
     let pack_name = read_pack_name_from_zip(&mut archive)?;
     let dest = packs_dir.join(&pack_name);
     std::fs::create_dir_all(&dest)?;
 
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i)
+        let mut file = archive
+            .by_index(i)
             .map_err(|e| ClixError::Pack(format!("zip entry: {e}")))?;
         let out_path = dest.join(file.name());
         // Guard against zip slip: reject paths that escape the destination directory
@@ -133,11 +142,13 @@ fn read_pack_name_from_zip(archive: &mut zip::ZipArchive<std::fs::File>) -> Resu
             return Ok(manifest.name);
         }
     }
-    Err(ClixError::Pack("pack.yaml not found in archive".to_string()))
+    Err(ClixError::Pack(
+        "pack.yaml not found in archive".to_string(),
+    ))
 }
 
 fn verify_checksum(zip_path: &Path, sha_path: &Path) -> Result<()> {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let data = std::fs::read(zip_path)?;
     let mut hasher = Sha256::new();
     hasher.update(&data);
@@ -175,7 +186,11 @@ mod tests {
     #[test]
     fn test_install_from_directory() {
         let src = TempDir::new().unwrap();
-        fs::write(src.path().join("pack.yaml"), "name: test-pack\nversion: 1\n").unwrap();
+        fs::write(
+            src.path().join("pack.yaml"),
+            "name: test-pack\nversion: 1\n",
+        )
+        .unwrap();
         let dest = TempDir::new().unwrap();
         install_pack(src.path(), dest.path()).unwrap();
         assert!(dest.path().join("test-pack").join("pack.yaml").exists());

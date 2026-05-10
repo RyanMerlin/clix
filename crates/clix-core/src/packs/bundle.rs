@@ -1,10 +1,10 @@
-use std::path::{Path, PathBuf};
-use sha2::{Sha256, Digest};
-use crate::error::{ClixError, Result};
 use super::install::copy_dir_all;
+use super::signing;
+use crate::error::{ClixError, Result};
 use crate::manifest::loader::load_manifest;
 use crate::manifest::pack::PackManifest;
-use super::signing;
+use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
 
 /// Bundle a pack directory into a .clixpack.zip archive with a .sha256 sidecar.
 /// If `signing_key_path` is Some, also writes a `.sig` and `.fingerprint` sidecar.
@@ -13,7 +13,11 @@ pub fn bundle_pack(pack_path: &Path, out_dir: &Path) -> Result<PathBuf> {
     bundle_pack_signed(pack_path, out_dir, None)
 }
 
-pub fn bundle_pack_signed(pack_path: &Path, out_dir: &Path, signing_key_path: Option<&Path>) -> Result<PathBuf> {
+pub fn bundle_pack_signed(
+    pack_path: &Path,
+    out_dir: &Path,
+    signing_key_path: Option<&Path>,
+) -> Result<PathBuf> {
     let manifest_path = ["pack.yaml", "pack.yml", "pack.json"]
         .iter()
         .map(|f| pack_path.join(f))
@@ -31,7 +35,8 @@ pub fn bundle_pack_signed(pack_path: &Path, out_dir: &Path, signing_key_path: Op
         .compression_method(zip::CompressionMethod::Deflated);
 
     add_dir_to_zip(&mut zip, pack_path, pack_path, &options)?;
-    zip.finish().map_err(|e| ClixError::Pack(format!("zip finish: {e}")))?;
+    zip.finish()
+        .map_err(|e| ClixError::Pack(format!("zip finish: {e}")))?;
 
     let data = std::fs::read(&zip_path)?;
     let mut hasher = Sha256::new();
@@ -66,7 +71,12 @@ fn add_dir_to_zip(
     for entry in std::fs::read_dir(current)? {
         let entry = entry?;
         let path = entry.path();
-        let name = path.strip_prefix(base).unwrap().to_str().unwrap().replace('\\', "/");
+        let name = path
+            .strip_prefix(base)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/");
         if path.is_dir() {
             zip.add_directory(&name, *options)
                 .map_err(|e| ClixError::Pack(format!("zip dir: {e}")))?;

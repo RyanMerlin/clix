@@ -1,7 +1,7 @@
-pub mod path_scan;
-pub mod help_parse;
 pub mod classify;
+pub mod help_parse;
+pub mod path_scan;
 
-pub use path_scan::{scan_path, DiscoveredBinary};
-pub use help_parse::{parse_help, ParsedSubcommand};
-pub use classify::{classify, Classification};
+pub use classify::{Classification, classify};
+pub use help_parse::{ParsedSubcommand, parse_help};
+pub use path_scan::{DiscoveredBinary, scan_path};

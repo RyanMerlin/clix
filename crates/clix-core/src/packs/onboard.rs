@@ -1,9 +1,9 @@
-use std::path::Path;
-use serde::Serialize;
-use chrono::{DateTime, Utc};
+use super::scaffold::{Preset, scaffold_pack};
 use crate::error::Result;
 use crate::manifest::capability::CapabilityManifest;
-use super::scaffold::{scaffold_pack, Preset};
+use chrono::{DateTime, Utc};
+use serde::Serialize;
+use std::path::Path;
 
 #[derive(Debug, Serialize)]
 pub struct OnboardReport {
@@ -20,11 +20,7 @@ pub struct OnboardReport {
 }
 
 /// Probe a CLI binary and generate a pack scaffold + OnboardReport.
-pub fn onboard_cli(
-    pack_name: &str,
-    command: &str,
-    out_dir: &Path,
-) -> Result<OnboardReport> {
+pub fn onboard_cli(pack_name: &str, command: &str, out_dir: &Path) -> Result<OnboardReport> {
     let probed_at = Utc::now();
     let mut warnings = vec![];
 
@@ -84,9 +80,14 @@ fn infer_subcommands(help: &str) -> Vec<String> {
 
 fn infer_preset(help: &str, subcommands: &[String]) -> (Preset, f32) {
     let lower = help.to_lowercase();
-    let has_destructive = subcommands.iter().any(|s| matches!(s.as_str(), "apply" | "delete" | "destroy" | "rm" | "remove"))
-        || lower.contains("apply") || lower.contains("destroy") || lower.contains("delete");
-    let has_operator = lower.contains("reconcile") || lower.contains("sync") || lower.contains("deploy");
+    let has_destructive = subcommands
+        .iter()
+        .any(|s| matches!(s.as_str(), "apply" | "delete" | "destroy" | "rm" | "remove"))
+        || lower.contains("apply")
+        || lower.contains("destroy")
+        || lower.contains("delete");
+    let has_operator =
+        lower.contains("reconcile") || lower.contains("sync") || lower.contains("deploy");
 
     if has_destructive {
         (Preset::ChangeControlled, 0.7)

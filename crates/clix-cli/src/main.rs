@@ -17,7 +17,7 @@ use clix_core::execution::run_capability;
 use clix_core::loader::{active_profile_bindings, build_registry, load_policy};
 use clix_core::policy::evaluate::ExecutionContext;
 use clix_core::receipts::ReceiptStore;
-use clix_core::state::{home_dir, ClixState};
+use clix_core::state::{ClixState, home_dir};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -40,11 +40,11 @@ async fn main() -> Result<()> {
     // --- Static dispatch ---
     // If the matched subcommand is a known static command, reconstruct the
     // typed enum from ArgMatches and dispatch as before.
-    if let Some((name, _)) = matches.subcommand() {
-        if cli::STATIC_COMMANDS.contains(&name) {
-            let cli = Cli::from_arg_matches(&matches).map_err(|e| anyhow::anyhow!("{e}"))?;
-            return dispatch_static(cli).await;
-        }
+    if let Some((name, _)) = matches.subcommand()
+        && cli::STATIC_COMMANDS.contains(&name)
+    {
+        let cli = Cli::from_arg_matches(&matches).map_err(|e| anyhow::anyhow!("{e}"))?;
+        return dispatch_static(cli).await;
     }
 
     // --- Dynamic dispatch ---
@@ -97,17 +97,20 @@ async fn main() -> Result<()> {
             &profile_secret_bindings,
             &profile_folder_bindings,
         )?;
-        if format != output::OutputFormat::Json && outcome.result.is_some() {
-            let result = outcome.result.as_ref().unwrap();
-            print!("{}", output::format_value(result, &format));
+        if format != output::OutputFormat::Json {
+            if let Some(result) = outcome.result.as_ref() {
+                print!("{}", output::format_value(result, &format));
+            } else {
+                println!("{}", serde_json::to_string_pretty(&outcome)?);
+            }
         } else if json || outcome.result.is_none() {
             println!("{}", serde_json::to_string_pretty(&outcome)?);
         } else {
             println!("ok — receipt {}", outcome.receipt_id);
-            if let Some(ref result) = outcome.result {
-                if let Some(stdout) = result["stdout"].as_str() {
-                    print!("{stdout}");
-                }
+            if let Some(ref result) = outcome.result
+                && let Some(stdout) = result["stdout"].as_str()
+            {
+                print!("{stdout}");
             }
         }
         return Ok(());
@@ -271,7 +274,7 @@ async fn dispatch_static(cli: Cli) -> Result<()> {
 }
 
 fn init_tracing() {
-    use tracing_subscriber::{fmt, EnvFilter};
+    use tracing_subscriber::{EnvFilter, fmt};
     let filter = EnvFilter::try_from_env("CLIX_LOG").unwrap_or_else(|_| EnvFilter::new("warn"));
     if std::env::var("CLIX_LOG_JSON").is_ok() {
         fmt()

@@ -7,23 +7,36 @@ pub struct Classification {
 }
 
 static READ_VERBS: &[&str] = &[
-    "list", "get", "describe", "show", "ls", "cat", "read", "status",
-    "info", "head", "view", "display", "print", "fetch", "check",
-    "inspect", "query", "find", "search", "scan", "diff", "log",
-    "history", "audit", "verify",
+    "list", "get", "describe", "show", "ls", "cat", "read", "status", "info", "head", "view",
+    "display", "print", "fetch", "check", "inspect", "query", "find", "search", "scan", "diff",
+    "log", "history", "audit", "verify",
 ];
 
 static MUTATE_VERBS: &[&str] = &[
-    "create", "add", "put", "set", "update", "write", "tag", "label",
-    "mark", "edit", "modify", "change", "patch", "move", "copy",
-    "install", "enable", "disable", "start", "stop", "restart", "reload",
-    "apply", "deploy", "publish", "push", "upload", "sync",
+    "create", "add", "put", "set", "update", "write", "tag", "label", "mark", "edit", "modify",
+    "change", "patch", "move", "copy", "install", "enable", "disable", "start", "stop", "restart",
+    "reload", "apply", "deploy", "publish", "push", "upload", "sync",
 ];
 
 static DESTRUCTIVE_VERBS: &[&str] = &[
-    "delete", "rm", "remove", "destroy", "drop", "purge", "wipe",
-    "kill", "terminate", "cancel", "revoke", "expire", "clear",
-    "flush", "reset", "nuke", "erase", "clean",
+    "delete",
+    "rm",
+    "remove",
+    "destroy",
+    "drop",
+    "purge",
+    "wipe",
+    "kill",
+    "terminate",
+    "cancel",
+    "revoke",
+    "expire",
+    "clear",
+    "flush",
+    "reset",
+    "nuke",
+    "erase",
+    "clean",
 ];
 
 static DESTRUCTIVE_FLAG_HINTS: &[&str] = &["--force", "--recursive", "--no-dry-run", "-rf", "-f"];
@@ -33,14 +46,20 @@ static SAFE_FLAG_HINTS: &[&str] = &["--dry-run", "--output", "--format", "--read
 /// Classify a subcommand based on its name and the binary's overall flags/description.
 pub fn classify(subcommand_dotted: &str, description: &str) -> Classification {
     // Take the last segment of "cmd.sub.subsub" for verb matching
-    let last_part = subcommand_dotted.rsplit('.').next().unwrap_or(subcommand_dotted);
+    let last_part = subcommand_dotted
+        .rsplit('.')
+        .next()
+        .unwrap_or(subcommand_dotted);
     let lower_name = last_part.to_lowercase();
     let lower_desc = description.to_lowercase();
 
     // Check for destructive signals first (conservative — flag high risk early)
-    let is_destructive = DESTRUCTIVE_VERBS.iter().any(|v| {
-        lower_name == *v || lower_name.starts_with(v) || lower_name.ends_with(v)
-    }) || DESTRUCTIVE_FLAG_HINTS.iter().any(|f| lower_desc.contains(f));
+    let is_destructive = DESTRUCTIVE_VERBS
+        .iter()
+        .any(|v| lower_name == *v || lower_name.starts_with(v) || lower_name.ends_with(v))
+        || DESTRUCTIVE_FLAG_HINTS
+            .iter()
+            .any(|f| lower_desc.contains(f));
 
     if is_destructive {
         return Classification {
@@ -49,9 +68,9 @@ pub fn classify(subcommand_dotted: &str, description: &str) -> Classification {
         };
     }
 
-    let is_mutate = MUTATE_VERBS.iter().any(|v| {
-        lower_name == *v || lower_name.starts_with(v)
-    });
+    let is_mutate = MUTATE_VERBS
+        .iter()
+        .any(|v| lower_name == *v || lower_name.starts_with(v));
 
     if is_mutate {
         // Bump risk if description hints at force/no-dry-run
@@ -66,9 +85,10 @@ pub fn classify(subcommand_dotted: &str, description: &str) -> Classification {
         };
     }
 
-    let is_read = READ_VERBS.iter().any(|v| {
-        lower_name == *v || lower_name.starts_with(v)
-    }) || SAFE_FLAG_HINTS.iter().any(|f| lower_desc.contains(f));
+    let is_read = READ_VERBS
+        .iter()
+        .any(|v| lower_name == *v || lower_name.starts_with(v))
+        || SAFE_FLAG_HINTS.iter().any(|f| lower_desc.contains(f));
 
     if is_read {
         return Classification {

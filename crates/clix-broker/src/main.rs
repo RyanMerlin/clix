@@ -1,3 +1,7 @@
+use base64::Engine as _;
+use clix_core::execution::worker_protocol::{BrokerMintRequest, BrokerMintResponse};
+use std::collections::HashMap;
+use std::fs;
 /// clix-broker: credential store and ephemeral token minter.
 ///
 /// The broker is a long-running daemon that:
@@ -9,10 +13,10 @@
 ///      returns an ephemeral token set (`BrokerMintResponse`).
 ///
 /// Currently supported CLIs:
-///   - `gcloud`:  reads an ADC JSON file, returns `GOOGLE_OAUTH_ACCESS_TOKEN` from its
-///                `token_uri` / `client_id` / `refresh_token` fields via the OAuth2 refresh flow.
+///   - `gcloud`: reads an ADC JSON file, returns `GOOGLE_OAUTH_ACCESS_TOKEN` from its
+///     `token_uri` / `client_id` / `refresh_token` fields via the OAuth2 refresh flow.
 ///   - `kubectl`: reads a kubeconfig, generates an in-memory kubeconfig with a short-lived
-///                `KUBECONFIG` pointing to a tmpfile containing a bearer token.
+///     `KUBECONFIG` pointing to a tmpfile containing a bearer token.
 ///   - `generic`: reads the credential as an env var and re-injects it verbatim.
 ///
 /// On startup the broker:
@@ -21,19 +25,13 @@
 ///   - Drops supplementary groups (if run as root, also drops to a dedicated user — TODO).
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
-use base64::Engine as _;
 #[cfg(target_os = "linux")]
 use std::os::unix::net::UnixStream;
-#[cfg(unix)]
-use libc;
 use std::path::{Path, PathBuf};
-use std::fs;
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
-use uuid::Uuid;
-use clix_core::execution::worker_protocol::{BrokerMintRequest, BrokerMintResponse};
+use std::sync::{Mutex, OnceLock};
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 const DEFAULT_SOCKET_PATH: &str = "/tmp/clix-broker.sock";
 
@@ -48,8 +46,12 @@ enum ApprovalState {
         reason: String,
         requested_at: std::time::Instant,
     },
-    Granted { approver: String },
-    Denied { reason: String },
+    Granted {
+        approver: String,
+    },
+    Denied {
+        reason: String,
+    },
 }
 
 static PENDING_APPROVALS: OnceLock<Mutex<HashMap<Uuid, ApprovalState>>> = OnceLock::new();
@@ -63,20 +65,26 @@ static SOCKET_PATH_GLOBAL: OnceLock<String> = OnceLock::new();
 
 fn init_tracing() {
     use tracing_subscriber::{EnvFilter, fmt};
-    let filter = EnvFilter::try_from_env("CLIX_LOG")
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::try_from_env("CLIX_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
     if std::env::var("CLIX_LOG_JSON").is_ok() {
-        fmt().json().with_env_filter(filter).with_writer(std::io::stderr).init();
+        fmt()
+            .json()
+            .with_env_filter(filter)
+            .with_writer(std::io::stderr)
+            .init();
     } else {
-        fmt().with_env_filter(filter).with_writer(std::io::stderr).init();
+        fmt()
+            .with_env_filter(filter)
+            .with_writer(std::io::stderr)
+            .init();
     }
 }
 
 fn main() {
     init_tracing();
 
-    let socket_path = std::env::var("CLIX_BROKER_SOCKET")
-        .unwrap_or_else(|_| DEFAULT_SOCKET_PATH.to_string());
+    let socket_path =
+        std::env::var("CLIX_BROKER_SOCKET").unwrap_or_else(|_| DEFAULT_SOCKET_PATH.to_string());
     let _ = SOCKET_PATH_GLOBAL.set(socket_path.clone());
     let creds_dir = creds_dir();
 
@@ -96,7 +104,10 @@ fn main() {
             }
             unsafe { libc::exit(0) };
         }
-        libc::signal(libc::SIGTERM, on_sigterm as extern "C" fn(libc::c_int) as *const () as libc::sighandler_t);
+        libc::signal(
+            libc::SIGTERM,
+            on_sigterm as extern "C" fn(libc::c_int) as *const () as libc::sighandler_t,
+        );
     }
 
     // Remove stale socket
@@ -120,7 +131,9 @@ fn main() {
     info!(socket = %socket_path, creds = %creds_dir.display(), "clix-broker listening");
 
     for stream in listener.incoming() {
-        if SHUTDOWN.load(Ordering::SeqCst) { break; }
+        if SHUTDOWN.load(Ordering::SeqCst) {
+            break;
+        }
         match stream {
             Ok(s) => {
                 let creds_dir = creds_dir.clone();
@@ -145,7 +158,10 @@ fn handle_connection(stream: std::os::unix::net::UnixStream, creds_dir: &Path) {
 
     let mut writer = match stream.try_clone() {
         Ok(w) => w,
-        Err(e) => { warn!(error = %e, "failed to clone broker stream"); return; }
+        Err(e) => {
+            warn!(error = %e, "failed to clone broker stream");
+            return;
+        }
     };
     let reader = BufReader::new(stream);
 
@@ -157,14 +173,20 @@ fn handle_connection(stream: std::os::unix::net::UnixStream, creds_dir: &Path) {
         let req: BrokerMintRequest = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {
-                let resp = BrokerMintResponse::MintResult { ok: false, env: Default::default(), error: Some(format!("bad request: {e}")) };
+                let resp = BrokerMintResponse::MintResult {
+                    ok: false,
+                    env: Default::default(),
+                    error: Some(format!("bad request: {e}")),
+                };
                 let _ = write_json(&mut writer, &resp);
                 continue;
             }
         };
 
         let resp = dispatch_request(&req, creds_dir);
-        if write_json(&mut writer, &resp).is_err() { break; }
+        if write_json(&mut writer, &resp).is_err() {
+            break;
+        }
     }
 }
 
@@ -174,24 +196,33 @@ fn dispatch_request(req: &BrokerMintRequest, creds_dir: &Path) -> BrokerMintResp
         BrokerMintRequest::Ping => BrokerMintResponse::Pong {
             version: env!("CARGO_PKG_VERSION").to_string(),
         },
-        BrokerMintRequest::Mint { cli, duration_secs } => {
-            match cli.as_str() {
-                "gcloud" => mint_gcloud(creds_dir, *duration_secs),
-                "kubectl" => mint_kubectl(creds_dir),
-                _ => mint_generic(cli, creds_dir),
-            }
-        }
-        BrokerMintRequest::RequestApproval { receipt_id, capability, input, context, reason } => {
+        BrokerMintRequest::Mint { cli, duration_secs } => match cli.as_str() {
+            "gcloud" => mint_gcloud(creds_dir, *duration_secs),
+            "kubectl" => mint_kubectl(creds_dir),
+            _ => mint_generic(cli, creds_dir),
+        },
+        BrokerMintRequest::RequestApproval {
+            receipt_id,
+            capability,
+            input,
+            context,
+            reason,
+        } => {
             let mut map = approvals().lock().unwrap_or_else(|e| e.into_inner());
-            map.insert(*receipt_id, ApprovalState::Pending {
-                capability: capability.clone(),
-                input: input.clone(),
-                context: context.clone(),
-                reason: reason.clone(),
-                requested_at: std::time::Instant::now(),
-            });
+            map.insert(
+                *receipt_id,
+                ApprovalState::Pending {
+                    capability: capability.clone(),
+                    input: input.clone(),
+                    context: context.clone(),
+                    reason: reason.clone(),
+                    requested_at: std::time::Instant::now(),
+                },
+            );
             info!(%receipt_id, capability, "approval requested");
-            BrokerMintResponse::ApprovalPending { receipt_id: *receipt_id }
+            BrokerMintResponse::ApprovalPending {
+                receipt_id: *receipt_id,
+            }
         }
         BrokerMintRequest::PollApproval { receipt_id } => {
             let mut map = approvals().lock().unwrap_or_else(|e| e.into_inner());
@@ -208,29 +239,49 @@ fn dispatch_request(req: &BrokerMintRequest, creds_dir: &Path) -> BrokerMintResp
                             reason: "timeout".to_string(),
                         }
                     } else {
-                        BrokerMintResponse::ApprovalPending { receipt_id: *receipt_id }
+                        BrokerMintResponse::ApprovalPending {
+                            receipt_id: *receipt_id,
+                        }
                     }
                 }
                 Some(ApprovalState::Granted { approver }) => {
                     let approver = approver.clone();
                     map.remove(receipt_id);
-                    BrokerMintResponse::ApprovalGranted { receipt_id: *receipt_id, approver }
+                    BrokerMintResponse::ApprovalGranted {
+                        receipt_id: *receipt_id,
+                        approver,
+                    }
                 }
                 Some(ApprovalState::Denied { reason }) => {
                     let reason = reason.clone();
                     map.remove(receipt_id);
-                    BrokerMintResponse::ApprovalDenied { receipt_id: *receipt_id, reason }
+                    BrokerMintResponse::ApprovalDenied {
+                        receipt_id: *receipt_id,
+                        reason,
+                    }
                 }
             }
         }
-        BrokerMintRequest::Approve { receipt_id, approver, comment } => {
+        BrokerMintRequest::Approve {
+            receipt_id,
+            approver,
+            comment,
+        } => {
             let mut map = approvals().lock().unwrap_or_else(|e| e.into_inner());
             match map.get(receipt_id) {
                 Some(ApprovalState::Pending { .. }) => {
                     info!(%receipt_id, approver, "approval granted");
                     let _ = comment; // stored in receipt by caller if needed
-                    map.insert(*receipt_id, ApprovalState::Granted { approver: approver.clone() });
-                    BrokerMintResponse::ApprovalGranted { receipt_id: *receipt_id, approver: approver.clone() }
+                    map.insert(
+                        *receipt_id,
+                        ApprovalState::Granted {
+                            approver: approver.clone(),
+                        },
+                    );
+                    BrokerMintResponse::ApprovalGranted {
+                        receipt_id: *receipt_id,
+                        approver: approver.clone(),
+                    }
                 }
                 _ => BrokerMintResponse::ApprovalDenied {
                     receipt_id: *receipt_id,
@@ -238,14 +289,28 @@ fn dispatch_request(req: &BrokerMintRequest, creds_dir: &Path) -> BrokerMintResp
                 },
             }
         }
-        BrokerMintRequest::Reject { receipt_id, approver, reason } => {
+        BrokerMintRequest::Reject {
+            receipt_id,
+            approver,
+            reason,
+        } => {
             let mut map = approvals().lock().unwrap_or_else(|e| e.into_inner());
-            let denial = reason.clone().unwrap_or_else(|| format!("rejected by {approver}"));
+            let denial = reason
+                .clone()
+                .unwrap_or_else(|| format!("rejected by {approver}"));
             match map.get(receipt_id) {
                 Some(ApprovalState::Pending { .. }) => {
                     info!(%receipt_id, approver, "approval rejected");
-                    map.insert(*receipt_id, ApprovalState::Denied { reason: denial.clone() });
-                    BrokerMintResponse::ApprovalDenied { receipt_id: *receipt_id, reason: denial }
+                    map.insert(
+                        *receipt_id,
+                        ApprovalState::Denied {
+                            reason: denial.clone(),
+                        },
+                    );
+                    BrokerMintResponse::ApprovalDenied {
+                        receipt_id: *receipt_id,
+                        reason: denial,
+                    }
                 }
                 _ => BrokerMintResponse::ApprovalDenied {
                     receipt_id: *receipt_id,
@@ -264,31 +329,47 @@ fn mint_gcloud(creds_dir: &Path, _duration_secs: u64) -> BrokerMintResponse {
         return BrokerMintResponse::MintResult {
             ok: false,
             env: Default::default(),
-            error: Some(format!("gcloud ADC not found at {}. Run: clix init --adopt-creds gcloud", adc_path.display())),
+            error: Some(format!(
+                "gcloud ADC not found at {}. Run: clix init --adopt-creds gcloud",
+                adc_path.display()
+            )),
         };
     }
 
     let adc_text = match fs::read_to_string(&adc_path) {
         Ok(t) => t,
-        Err(e) => return BrokerMintResponse::MintResult { ok: false, env: Default::default(), error: Some(format!("read ADC: {e}")) },
+        Err(e) => {
+            return BrokerMintResponse::MintResult {
+                ok: false,
+                env: Default::default(),
+                error: Some(format!("read ADC: {e}")),
+            };
+        }
     };
 
     let adc: serde_json::Value = match serde_json::from_str(&adc_text) {
         Ok(v) => v,
-        Err(e) => return BrokerMintResponse::MintResult { ok: false, env: Default::default(), error: Some(format!("parse ADC: {e}")) },
+        Err(e) => {
+            return BrokerMintResponse::MintResult {
+                ok: false,
+                env: Default::default(),
+                error: Some(format!("parse ADC: {e}")),
+            };
+        }
     };
 
     // If there's a cached access token and expiry, check if still valid (with 60s buffer)
-    if let (Some(token), Some(expiry)) = (adc["access_token"].as_str(), adc["token_expiry"].as_str()) {
-        if let Ok(expiry_dt) = chrono::DateTime::parse_from_rfc3339(expiry) {
-            let now = chrono::Utc::now();
-            if expiry_dt.with_timezone(&chrono::Utc) > now + chrono::Duration::seconds(60) {
-                return BrokerMintResponse::MintResult {
-                    ok: true,
-                    env: [("GOOGLE_OAUTH_ACCESS_TOKEN".to_string(), token.to_string())].into(),
-                    error: None,
-                };
-            }
+    if let (Some(token), Some(expiry)) =
+        (adc["access_token"].as_str(), adc["token_expiry"].as_str())
+        && let Ok(expiry_dt) = chrono::DateTime::parse_from_rfc3339(expiry)
+    {
+        let now = chrono::Utc::now();
+        if expiry_dt.with_timezone(&chrono::Utc) > now + chrono::Duration::seconds(60) {
+            return BrokerMintResponse::MintResult {
+                ok: true,
+                env: [("GOOGLE_OAUTH_ACCESS_TOKEN".to_string(), token.to_string())].into(),
+                error: None,
+            };
         }
     }
 
@@ -296,7 +377,9 @@ fn mint_gcloud(creds_dir: &Path, _duration_secs: u64) -> BrokerMintResponse {
     let refresh_token = adc["refresh_token"].as_str().unwrap_or_default();
     let client_id = adc["client_id"].as_str().unwrap_or_default();
     let client_secret = adc["client_secret"].as_str().unwrap_or_default();
-    let token_uri = adc["token_uri"].as_str().unwrap_or("https://oauth2.googleapis.com/token");
+    let token_uri = adc["token_uri"]
+        .as_str()
+        .unwrap_or("https://oauth2.googleapis.com/token");
 
     if refresh_token.is_empty() || client_id.is_empty() {
         // Service account — try SA JWT signing
@@ -336,7 +419,10 @@ fn mint_gcloud(creds_dir: &Path, _duration_secs: u64) -> BrokerMintResponse {
             let expiry = chrono::Utc::now() + chrono::Duration::seconds(3600);
             updated["access_token"] = serde_json::Value::String(access_token.clone());
             updated["token_expiry"] = serde_json::Value::String(expiry.to_rfc3339());
-            let _ = fs::write(&adc_path, serde_json::to_string_pretty(&updated).unwrap_or_default());
+            let _ = fs::write(
+                &adc_path,
+                serde_json::to_string_pretty(&updated).unwrap_or_default(),
+            );
 
             BrokerMintResponse::MintResult {
                 ok: true,
@@ -352,7 +438,12 @@ fn mint_gcloud(creds_dir: &Path, _duration_secs: u64) -> BrokerMintResponse {
     }
 }
 
-fn oauth2_refresh(token_uri: &str, client_id: &str, client_secret: &str, refresh_token: &str) -> Result<String, String> {
+fn oauth2_refresh(
+    token_uri: &str,
+    client_id: &str,
+    client_secret: &str,
+    refresh_token: &str,
+) -> Result<String, String> {
     let body = format!(
         "client_id={}&client_secret={}&refresh_token={}&grant_type=refresh_token",
         urlencoding::encode(client_id),
@@ -361,21 +452,38 @@ fn oauth2_refresh(token_uri: &str, client_id: &str, client_secret: &str, refresh
     );
 
     let output = std::process::Command::new("curl")
-        .args(["--silent", "--fail", "-X", "POST", token_uri,
-               "-H", "Content-Type: application/x-www-form-urlencoded",
-               "-d", &body])
+        .args([
+            "--silent",
+            "--fail",
+            "-X",
+            "POST",
+            token_uri,
+            "-H",
+            "Content-Type: application/x-www-form-urlencoded",
+            "-d",
+            &body,
+        ])
         .output()
         .map_err(|e| format!("curl: {e}"))?;
 
     if !output.status.success() {
-        return Err(format!("HTTP error: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "HTTP error: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
 
-    let resp: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("parse token response: {e}"))?;
-    resp["access_token"].as_str()
+    let resp: serde_json::Value =
+        serde_json::from_slice(&output.stdout).map_err(|e| format!("parse token response: {e}"))?;
+    resp["access_token"]
+        .as_str()
         .map(String::from)
-        .ok_or_else(|| format!("no access_token in response: {}", String::from_utf8_lossy(&output.stdout)))
+        .ok_or_else(|| {
+            format!(
+                "no access_token in response: {}",
+                String::from_utf8_lossy(&output.stdout)
+            )
+        })
 }
 
 /// kubectl: write a temporary kubeconfig with the cached bearer token and return `KUBECONFIG`.
@@ -385,7 +493,10 @@ fn mint_kubectl(creds_dir: &Path) -> BrokerMintResponse {
         return BrokerMintResponse::MintResult {
             ok: false,
             env: Default::default(),
-            error: Some(format!("kubectl config not found at {}. Run: clix init --adopt-creds kubectl", kubeconfig_path.display())),
+            error: Some(format!(
+                "kubectl config not found at {}. Run: clix init --adopt-creds kubectl",
+                kubeconfig_path.display()
+            )),
         };
     }
 
@@ -394,7 +505,11 @@ fn mint_kubectl(creds_dir: &Path) -> BrokerMintResponse {
     // fs policy must include an RO bind of this path — handled by the manifest).
     BrokerMintResponse::MintResult {
         ok: true,
-        env: [("KUBECONFIG".to_string(), kubeconfig_path.to_string_lossy().to_string())].into(),
+        env: [(
+            "KUBECONFIG".to_string(),
+            kubeconfig_path.to_string_lossy().to_string(),
+        )]
+        .into(),
         error: None,
     }
 }
@@ -411,38 +526,55 @@ fn mint_generic(cli: &str, creds_dir: &Path) -> BrokerMintResponse {
     }
     let text = match fs::read_to_string(&secret_path) {
         Ok(t) => t,
-        Err(e) => return BrokerMintResponse::MintResult { ok: false, env: Default::default(), error: Some(format!("read: {e}")) },
+        Err(e) => {
+            return BrokerMintResponse::MintResult {
+                ok: false,
+                env: Default::default(),
+                error: Some(format!("read: {e}")),
+            };
+        }
     };
     let mut env = std::collections::HashMap::new();
     for line in text.lines() {
         let line = line.trim();
-        if line.is_empty() || line.starts_with('#') { continue; }
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
         if let Some((k, v)) = line.split_once('=') {
             env.insert(k.to_string(), v.to_string());
         }
     }
-    BrokerMintResponse::MintResult { ok: true, env, error: None }
+    BrokerMintResponse::MintResult {
+        ok: true,
+        env,
+        error: None,
+    }
 }
 
 /// Sign a JWT and exchange it for a Google access token using a service account JSON.
 fn mint_sa_token(sa_json: &serde_json::Value) -> Result<(String, u64), String> {
-    use rsa::{RsaPrivateKey, pkcs1v15::SigningKey, pkcs8::DecodePrivateKey};
     use rsa::signature::{SignatureEncoding, Signer};
+    use rsa::{RsaPrivateKey, pkcs1v15::SigningKey, pkcs8::DecodePrivateKey};
     use sha2::Sha256;
 
-    let client_email = sa_json["client_email"].as_str()
+    let client_email = sa_json["client_email"]
+        .as_str()
         .ok_or("missing client_email")?;
-    let private_key_pem = sa_json["private_key"].as_str()
+    let private_key_pem = sa_json["private_key"]
+        .as_str()
         .ok_or("missing private_key")?;
-    let token_uri = sa_json["token_uri"].as_str()
+    let token_uri = sa_json["token_uri"]
+        .as_str()
         .unwrap_or("https://oauth2.googleapis.com/token");
 
     let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
 
     // Build JWT header and claims
-    let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(r#"{"alg":"RS256","typ":"JWT"}"#);
+    let header =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"RS256","typ":"JWT"}"#);
     let claims = serde_json::json!({
         "iss": client_email,
         "scope": "https://www.googleapis.com/auth/cloud-platform",
@@ -450,8 +582,7 @@ fn mint_sa_token(sa_json: &serde_json::Value) -> Result<(String, u64), String> {
         "exp": now + 3600,
         "iat": now,
     });
-    let claims_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(claims.to_string());
+    let claims_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(claims.to_string());
     let signing_input = format!("{}.{}", header, claims_b64);
 
     // Sign with RSA-SHA256 (PKCS1v15 — deterministic, no rng needed)
@@ -459,8 +590,7 @@ fn mint_sa_token(sa_json: &serde_json::Value) -> Result<(String, u64), String> {
         .map_err(|e| format!("parse private key: {e}"))?;
     let signing_key = SigningKey::<Sha256>::new(private_key);
     let sig = signing_key.sign(signing_input.as_bytes());
-    let sig_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(sig.to_bytes());
+    let sig_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sig.to_bytes());
 
     let jwt = format!("{}.{}", signing_input, sig_b64);
 
@@ -471,20 +601,37 @@ fn mint_sa_token(sa_json: &serde_json::Value) -> Result<(String, u64), String> {
         urlencoding::encode(&jwt),
     );
     let output = std::process::Command::new("curl")
-        .args(["--silent", "--fail", "-X", "POST", token_uri,
-               "-H", "Content-Type: application/x-www-form-urlencoded",
-               "-d", &body])
+        .args([
+            "--silent",
+            "--fail",
+            "-X",
+            "POST",
+            token_uri,
+            "-H",
+            "Content-Type: application/x-www-form-urlencoded",
+            "-d",
+            &body,
+        ])
         .output()
         .map_err(|e| format!("curl: {e}"))?;
 
     if !output.status.success() {
-        return Err(format!("HTTP error: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "HTTP error: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
 
-    let resp: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("parse token response: {e}"))?;
-    let token = resp["access_token"].as_str()
-        .ok_or_else(|| format!("no access_token in response: {}", String::from_utf8_lossy(&output.stdout)))?
+    let resp: serde_json::Value =
+        serde_json::from_slice(&output.stdout).map_err(|e| format!("parse token response: {e}"))?;
+    let token = resp["access_token"]
+        .as_str()
+        .ok_or_else(|| {
+            format!(
+                "no access_token in response: {}",
+                String::from_utf8_lossy(&output.stdout)
+            )
+        })?
         .to_string();
     let expires_in = resp["expires_in"].as_u64().unwrap_or(3600);
     Ok((token, expires_in))
@@ -498,7 +645,11 @@ fn validate_peer_cred(stream: &UnixStream) -> Result<(), String> {
     use std::os::unix::io::AsRawFd;
 
     let fd = stream.as_raw_fd();
-    let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
+    let mut cred = libc::ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
     let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
     let ret = unsafe {
         libc::getsockopt(
@@ -510,7 +661,10 @@ fn validate_peer_cred(stream: &UnixStream) -> Result<(), String> {
         )
     };
     if ret != 0 {
-        return Err(format!("getsockopt SO_PEERCRED: {}", std::io::Error::last_os_error()));
+        return Err(format!(
+            "getsockopt SO_PEERCRED: {}",
+            std::io::Error::last_os_error()
+        ));
     }
     let our_uid = unsafe { libc::getuid() };
     if cred.uid != our_uid {
@@ -545,7 +699,7 @@ fn creds_dir() -> PathBuf {
 }
 
 fn write_json<T: serde::Serialize>(writer: &mut impl Write, value: &T) -> std::io::Result<()> {
-    let line = serde_json::to_string(value).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let line = serde_json::to_string(value).map_err(std::io::Error::other)?;
     writer.write_all(line.as_bytes())?;
     writer.write_all(b"\n")?;
     writer.flush()

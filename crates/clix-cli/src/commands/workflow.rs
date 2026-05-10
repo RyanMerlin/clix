@@ -1,13 +1,13 @@
 use crate::commands::run::{build_worker_registry, parse_input_pairs};
 use crate::output::print_json;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clix_core::execution::run_workflow;
 use clix_core::loader::{
     active_profile_bindings, build_registry, build_workflow_registry, load_policy,
 };
 use clix_core::policy::evaluate::ExecutionContext;
 use clix_core::receipts::ReceiptStore;
-use clix_core::state::{home_dir, ClixState};
+use clix_core::state::{ClixState, home_dir};
 
 pub fn list(json: bool) -> Result<()> {
     let state = ClixState::load(home_dir())?;

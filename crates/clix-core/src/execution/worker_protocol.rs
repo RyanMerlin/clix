@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 /// Wire protocol for communication between the clix gateway and a clix-worker process.
 ///
 /// All messages are newline-delimited JSON written over a Unix stream socket.
@@ -8,7 +9,6 @@
 /// Worker → Gateway:
 ///   One or more `WorkerEvent` messages per request, terminated by `WorkerEvent::Exit`.
 use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 
 /// A single capability dispatch sent from the gateway to a warm worker.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,9 +103,7 @@ pub enum BrokerMintRequest {
     },
     /// Poll the approval state for a previously submitted request.
     #[serde(rename = "pollApproval")]
-    PollApproval {
-        receipt_id: uuid::Uuid,
-    },
+    PollApproval { receipt_id: uuid::Uuid },
     /// Grant a pending approval.
     #[serde(rename = "approve")]
     Approve {
@@ -124,7 +122,9 @@ pub enum BrokerMintRequest {
     },
 }
 
-fn default_duration() -> u64 { 3600 }
+fn default_duration() -> u64 {
+    3600
+}
 
 /// Response from the broker.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,14 +142,10 @@ pub enum BrokerMintResponse {
     },
     /// Response to a Ping request.
     #[serde(rename = "pong")]
-    Pong {
-        version: String,
-    },
+    Pong { version: String },
     /// Approval request registered; waiting for human decision.
     #[serde(rename = "approvalPending")]
-    ApprovalPending {
-        receipt_id: uuid::Uuid,
-    },
+    ApprovalPending { receipt_id: uuid::Uuid },
     /// Approval granted.
     #[serde(rename = "approvalGranted")]
     ApprovalGranted {

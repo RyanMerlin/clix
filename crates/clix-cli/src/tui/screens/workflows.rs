@@ -1,6 +1,6 @@
-use ratatui::{prelude::*, widgets::*};
 use crate::tui::app::{App, Focus};
 use crate::tui::theme;
+use ratatui::{prelude::*, widgets::*};
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let workflows = app.workflow_registry.all();
@@ -26,8 +26,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // Split into left list + right detail panel
-    let chunks = Layout::horizontal([Constraint::Length(32), Constraint::Fill(1)])
-        .split(area);
+    let chunks = Layout::horizontal([Constraint::Length(32), Constraint::Fill(1)]).split(area);
 
     // ── left: workflow list ──────────────────────────────────────────────────
     let list_block = Block::default()
@@ -35,11 +34,19 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         .title(Span::styled(" Workflows ", theme::accent_bold()))
         .border_style(theme::border_for(app.focus == Focus::Content));
 
-    let items: Vec<ListItem> = workflows.iter().enumerate().map(|(i, wf)| {
-        let style = if i == app.workflows_cursor { theme::selected() } else { theme::normal() };
-        let label = format!(" {}", wf.name);
-        ListItem::new(label).style(style)
-    }).collect();
+    let items: Vec<ListItem> = workflows
+        .iter()
+        .enumerate()
+        .map(|(i, wf)| {
+            let style = if i == app.workflows_cursor {
+                theme::selected()
+            } else {
+                theme::normal()
+            };
+            let label = format!(" {}", wf.name);
+            ListItem::new(label).style(style)
+        })
+        .collect();
 
     let list = List::new(items).block(list_block);
     f.render_widget(list, chunks[0]);
@@ -77,7 +84,11 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        format!("  {} step{}", wf.steps.len(), if wf.steps.len() == 1 { "" } else { "s" }),
+        format!(
+            "  {} step{}",
+            wf.steps.len(),
+            if wf.steps.len() == 1 { "" } else { "s" }
+        ),
         theme::muted(),
     )));
     lines.push(Line::from(""));
@@ -87,13 +98,14 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(format!("  {:2}. ", i + 1), theme::muted()),
             Span::styled(step.capability.as_str(), theme::normal()),
         ]));
-        if !step.input.is_null() && step.input != serde_json::Value::Object(Default::default()) {
-            if let Ok(pretty) = serde_json::to_string(&step.input) {
-                lines.push(Line::from(Span::styled(
-                    format!("      {pretty}"),
-                    theme::inactive(),
-                )));
-            }
+        if !step.input.is_null()
+            && step.input != serde_json::Value::Object(Default::default())
+            && let Ok(pretty) = serde_json::to_string(&step.input)
+        {
+            lines.push(Line::from(Span::styled(
+                format!("      {pretty}"),
+                theme::inactive(),
+            )));
         }
     }
 

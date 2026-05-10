@@ -12,10 +12,10 @@
 //! builder API. We use String::leak() to promote owned strings to 'static.
 //! This is intentional and bounded — capabilities load once per process.
 
-use std::collections::BTreeMap;
 use clap::{Arg, ArgMatches, Command};
 use clix_core::manifest::capability::CapabilityManifest;
 use clix_core::registry::CapabilityRegistry;
+use std::collections::BTreeMap;
 
 /// Internal trie node for building the nested command tree.
 struct TrieNode {
@@ -25,20 +25,35 @@ struct TrieNode {
 
 impl TrieNode {
     fn new() -> Self {
-        Self { children: BTreeMap::new(), capability: None }
+        Self {
+            children: BTreeMap::new(),
+            capability: None,
+        }
     }
 }
 
 /// Static command names that must not be shadowed by dynamic capabilities.
 const STATIC_COMMANDS: &[&str] = &[
-    "init", "status", "version", "run", "capabilities",
-    "workflow", "profile", "receipts", "serve", "pack",
+    "init",
+    "status",
+    "version",
+    "run",
+    "capabilities",
+    "workflow",
+    "profile",
+    "receipts",
+    "serve",
+    "pack",
 ];
 
 /// Insert a capability into the trie by its dot-split segments.
 fn insert(root: &mut BTreeMap<String, TrieNode>, parts: &[&str], cap: CapabilityManifest) {
-    if parts.is_empty() { return; }
-    let node = root.entry(parts[0].to_string()).or_insert_with(TrieNode::new);
+    if parts.is_empty() {
+        return;
+    }
+    let node = root
+        .entry(parts[0].to_string())
+        .or_insert_with(TrieNode::new);
     if parts.len() == 1 {
         node.capability = Some(cap);
     } else {
@@ -53,22 +68,36 @@ fn build_command(name: &'static str, node: &TrieNode) -> Option<Command> {
 
     let mut cmd = if is_leaf {
         let cap = node.capability.as_ref().unwrap();
-        let about: &'static str = cap.description.clone()
-            .unwrap_or_default()
-            .leak();
+        let about: &'static str = cap.description.clone().unwrap_or_default().leak();
         let mut c = Command::new(name).about(about);
 
         // Add --json flag on all leaf commands for machine-readable output
-        c = c.arg(Arg::new("json").long("json").action(clap::ArgAction::SetTrue).help("Output as JSON"));
+        c = c.arg(
+            Arg::new("json")
+                .long("json")
+                .action(clap::ArgAction::SetTrue)
+                .help("Output as JSON"),
+        );
 
-        if let Some(props) = cap.input_schema.get("properties").and_then(|p| p.as_object()) {
-            let required_set: std::collections::HashSet<String> = cap.input_schema
-                .get("required").and_then(|r| r.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        if let Some(props) = cap
+            .input_schema
+            .get("properties")
+            .and_then(|p| p.as_object())
+        {
+            let required_set: std::collections::HashSet<String> = cap
+                .input_schema
+                .get("required")
+                .and_then(|r| r.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
                 .unwrap_or_default();
 
             for (key, schema) in props {
-                let help: &'static str = schema.get("description")
+                let help: &'static str = schema
+                    .get("description")
                     .and_then(|d| d.as_str())
                     .unwrap_or("")
                     .to_string()
@@ -77,13 +106,17 @@ fn build_command(name: &'static str, node: &TrieNode) -> Option<Command> {
                 let upper_s: &'static str = key.to_uppercase().leak();
                 let req = required_set.contains(key);
                 let mut arg = Arg::new(key_s).long(key_s).value_name(upper_s).help(help);
-                if req { arg = arg.required(true); }
+                if req {
+                    arg = arg.required(true);
+                }
                 c = c.arg(arg);
             }
         }
         c
     } else {
-        let about: &'static str = node.capability.as_ref()
+        let about: &'static str = node
+            .capability
+            .as_ref()
             .and_then(|c| c.description.clone())
             .unwrap_or_else(|| format!("'{name}' capabilities"))
             .leak();
@@ -116,8 +149,12 @@ pub fn augment_with_capabilities(registry: &CapabilityRegistry, mut root: Comman
 
     for cap in registry.all() {
         let parts: Vec<&str> = cap.name.split('.').collect();
-        if parts.is_empty() { continue; }
-        if STATIC_COMMANDS.contains(&parts[0]) { continue; }
+        if parts.is_empty() {
+            continue;
+        }
+        if STATIC_COMMANDS.contains(&parts[0]) {
+            continue;
+        }
         insert(&mut trie, &parts, (*cap).clone());
     }
 
@@ -133,34 +170,36 @@ pub fn augment_with_capabilities(registry: &CapabilityRegistry, mut root: Comman
 
 /// Walk clap's subcommand match chain and reconstruct the dot-joined capability name.
 /// Returns `(capability_name, leaf_ArgMatches)` or `None` if no dynamic subcommand matched.
-pub fn resolve_capability_name<'a>(matches: &'a ArgMatches) -> Option<(String, &'a ArgMatches)> {
+pub fn resolve_capability_name(matches: &ArgMatches) -> Option<(String, &ArgMatches)> {
     let mut path: Vec<String> = Vec::new();
     let mut current = matches;
 
-    loop {
-        match current.subcommand() {
-            Some((name, sub)) => {
-                if path.is_empty() && STATIC_COMMANDS.contains(&name) {
-                    return None;
-                }
-                path.push(name.to_string());
-                current = sub;
-            }
-            None => break,
+    while let Some((name, sub)) = current.subcommand() {
+        if path.is_empty() && STATIC_COMMANDS.contains(&name) {
+            return None;
         }
+        path.push(name.to_string());
+        current = sub;
     }
 
-    if path.is_empty() { return None; }
+    if path.is_empty() {
+        return None;
+    }
     Some((path.join("."), current))
 }
 
 /// Extract capability inputs from the leaf `ArgMatches` using the capability's inputSchema.
 pub fn extract_inputs(matches: &ArgMatches, cap: &CapabilityManifest) -> serde_json::Value {
     let mut map = serde_json::Map::new();
-    if let Some(props) = cap.input_schema.get("properties").and_then(|p| p.as_object()) {
+    if let Some(props) = cap
+        .input_schema
+        .get("properties")
+        .and_then(|p| p.as_object())
+    {
         for key in props.keys() {
             if let Some(val) = matches.get_one::<String>(key.as_str()) {
-                let json_val = serde_json::from_str(val).unwrap_or(serde_json::Value::String(val.clone()));
+                let json_val =
+                    serde_json::from_str(val).unwrap_or(serde_json::Value::String(val.clone()));
                 map.insert(key.clone(), json_val);
             }
         }
@@ -175,35 +214,56 @@ mod tests {
 
     fn make_cap(name: &str, desc: &str, props: serde_json::Value) -> CapabilityManifest {
         CapabilityManifest {
-            name: name.to_string(), version: 1,
+            name: name.to_string(),
+            version: 1,
             description: Some(desc.to_string()),
-            backend: Backend::Builtin { name: "date".to_string() },
-            risk: RiskLevel::Low, side_effect_class: SideEffectClass::ReadOnly,
-            sandbox_profile: None, isolation: Default::default(), approval_policy: None,
+            backend: Backend::Builtin {
+                name: "date".to_string(),
+            },
+            risk: RiskLevel::Low,
+            side_effect_class: SideEffectClass::ReadOnly,
+            sandbox_profile: None,
+            isolation: Default::default(),
+            approval_policy: None,
             input_schema: serde_json::json!({"type":"object","properties": props}),
-            validators: vec![], credentials: vec![], argv_pattern: None,
+            validators: vec![],
+            credentials: vec![],
+            argv_pattern: None,
         }
     }
 
     #[test]
     fn test_augment_creates_nested_subcommands() {
         let reg = CapabilityRegistry::from_vec(vec![
-            make_cap("gcloud.aiplatform.models.list", "List models",
-                serde_json::json!({"project":{"type":"string","description":"GCP project"}})),
+            make_cap(
+                "gcloud.aiplatform.models.list",
+                "List models",
+                serde_json::json!({"project":{"type":"string","description":"GCP project"}}),
+            ),
             make_cap("system.date", "Get date", serde_json::json!({})),
         ]);
         let root = Command::new("clix");
         let cmd = augment_with_capabilities(&reg, root);
 
-        assert!(cmd.find_subcommand("gcloud").is_some(), "gcloud should be a dynamic subcommand");
-        assert!(cmd.find_subcommand("system").is_some(), "system should be a dynamic subcommand");
+        assert!(
+            cmd.find_subcommand("gcloud").is_some(),
+            "gcloud should be a dynamic subcommand"
+        );
+        assert!(
+            cmd.find_subcommand("system").is_some(),
+            "system should be a dynamic subcommand"
+        );
     }
 
     #[test]
     fn test_static_commands_not_shadowed() {
         let reg = CapabilityRegistry::from_vec(vec![
             make_cap("run.something", "run something", serde_json::json!({})),
-            make_cap("gcloud.list-projects", "List projects", serde_json::json!({})),
+            make_cap(
+                "gcloud.list-projects",
+                "List projects",
+                serde_json::json!({}),
+            ),
         ]);
         let root = Command::new("clix");
         let cmd = augment_with_capabilities(&reg, root);
@@ -214,19 +274,31 @@ mod tests {
 
     #[test]
     fn test_resolve_capability_name() {
-        let reg = CapabilityRegistry::from_vec(vec![
-            make_cap("gcloud.aiplatform.models.list", "List models",
-                serde_json::json!({"project":{"type":"string","description":"GCP project"}})),
-        ]);
+        let reg = CapabilityRegistry::from_vec(vec![make_cap(
+            "gcloud.aiplatform.models.list",
+            "List models",
+            serde_json::json!({"project":{"type":"string","description":"GCP project"}}),
+        )]);
         let root = Command::new("clix");
         let cmd = augment_with_capabilities(&reg, root);
 
-        let matches = cmd.try_get_matches_from(
-            ["clix", "gcloud", "aiplatform", "models", "list", "--project", "my-project"]
-        ).unwrap();
+        let matches = cmd
+            .try_get_matches_from([
+                "clix",
+                "gcloud",
+                "aiplatform",
+                "models",
+                "list",
+                "--project",
+                "my-project",
+            ])
+            .unwrap();
         let (name, leaf) = resolve_capability_name(&matches).unwrap();
         assert_eq!(name, "gcloud.aiplatform.models.list");
-        assert_eq!(leaf.get_one::<String>("project").map(|s| s.as_str()), Some("my-project"));
+        assert_eq!(
+            leaf.get_one::<String>("project").map(|s| s.as_str()),
+            Some("my-project")
+        );
     }
 
     #[test]

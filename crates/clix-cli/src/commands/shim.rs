@@ -1,6 +1,6 @@
+use crate::output::print_json;
 use anyhow::Result;
 use clix_core::state::home_dir;
-use crate::output::print_json;
 
 pub fn list(json: bool) -> Result<()> {
     let home = home_dir();
@@ -20,13 +20,11 @@ pub fn list(json: bool) -> Result<()> {
         .collect();
     if json {
         print_json(&serde_json::json!({"shims": shims, "bin_dir": bin_dir}));
+    } else if shims.is_empty() {
+        println!("no shims installed");
     } else {
-        if shims.is_empty() {
-            println!("no shims installed");
-        } else {
-            for s in &shims {
-                println!("{}", bin_dir.join(s).display());
-            }
+        for s in &shims {
+            println!("{}", bin_dir.join(s).display());
         }
     }
     Ok(())

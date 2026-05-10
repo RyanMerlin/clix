@@ -1,3 +1,7 @@
+use clix_core::execution::worker_protocol::{
+    WorkerEvent, WorkerHandshake, WorkerReady, WorkerRequest,
+};
+use clix_core::sandbox::jail::{JailConfig, env_keys, verify_binary_hash};
 /// clix-worker: the jailed subprocess worker.
 ///
 /// Lifecycle:
@@ -10,11 +14,9 @@
 /// `WorkerEvent::Error` and continue looping. It only exits when the socket closes or on a
 /// fatal unrecoverable condition.
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
 use std::os::unix::io::FromRawFd;
+use std::os::unix::net::UnixStream;
 use std::process::Stdio;
-use clix_core::sandbox::jail::{JailConfig, verify_binary_hash, env_keys};
-use clix_core::execution::worker_protocol::{WorkerHandshake, WorkerReady, WorkerRequest, WorkerEvent};
 
 fn main() {
     // Load the jail config from env vars
@@ -68,7 +70,10 @@ fn worker_loop(socket: UnixStream, config: &JailConfig) -> std::io::Result<()> {
     let handshake: WorkerHandshake = match serde_json::from_str(&handshake_line) {
         Ok(h) => h,
         Err(e) => {
-            let ready = WorkerReady { ok: false, error: Some(format!("bad handshake: {e}")) };
+            let ready = WorkerReady {
+                ok: false,
+                error: Some(format!("bad handshake: {e}")),
+            };
             let _ = write_json(&mut writer, &ready);
             return Ok(());
         }
@@ -76,24 +81,34 @@ fn worker_loop(socket: UnixStream, config: &JailConfig) -> std::io::Result<()> {
 
     // Verify binary integrity using the in-jail path (/bin/<name>), since we are now
     // inside the mount namespace where the host path no longer exists.
-    let bin_name = config.pinned_binary.file_name()
+    let bin_name = config
+        .pinned_binary
+        .file_name()
         .map(|n| std::path::PathBuf::from("/bin").join(n))
         .unwrap_or_else(|| config.pinned_binary.clone());
     if let Err(e) = verify_binary_hash(&bin_name, &handshake.binary_sha256) {
-        let ready = WorkerReady { ok: false, error: Some(e.to_string()) };
+        let ready = WorkerReady {
+            ok: false,
+            error: Some(e.to_string()),
+        };
         let _ = write_json(&mut writer, &ready);
         return Ok(());
     }
 
     // Confirm ready
-    let ready = WorkerReady { ok: true, error: None };
+    let ready = WorkerReady {
+        ok: true,
+        error: None,
+    };
     write_json(&mut writer, &ready)?;
 
     // Main dispatch loop
     for line in lines {
         let line = match line {
             Ok(l) => l,
-            Err(e) if e.kind() == ErrorKind::UnexpectedEof || e.kind() == ErrorKind::BrokenPipe => break,
+            Err(e) if e.kind() == ErrorKind::UnexpectedEof || e.kind() == ErrorKind::BrokenPipe => {
+                break;
+            }
             Err(e) => return Err(e),
         };
         let request: WorkerRequest = match serde_json::from_str(&line) {
@@ -139,7 +154,11 @@ fn execute_request(request: &WorkerRequest, config: &JailConfig) -> WorkerEvent 
     // The jail has a tmpfs root so host paths (e.g. /mnt/...) don't exist inside.
     let effective_cwd = {
         let p = std::path::Path::new(&request.cwd);
-        if p.exists() { p.to_path_buf() } else { std::path::PathBuf::from("/home/clix") }
+        if p.exists() {
+            p.to_path_buf()
+        } else {
+            std::path::PathBuf::from("/home/clix")
+        }
     };
 
     // Build a clean environment: only what the gateway provided (ephemeral creds + minimal vars)
@@ -174,7 +193,7 @@ fn execute_request(request: &WorkerRequest, config: &JailConfig) -> WorkerEvent 
 }
 
 fn write_json<T: serde::Serialize>(writer: &mut impl Write, value: &T) -> std::io::Result<()> {
-    let line = serde_json::to_string(value).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let line = serde_json::to_string(value).map_err(std::io::Error::other)?;
     writer.write_all(line.as_bytes())?;
     writer.write_all(b"\n")?;
     writer.flush()

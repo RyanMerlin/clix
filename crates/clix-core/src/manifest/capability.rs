@@ -2,12 +2,16 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 /// Deserialize sandboxProfile tolerating both string (legacy) and struct (current) forms.
 /// A string value is treated as a named preset and ignored — the structured policy is what matters.
-fn deser_sandbox_profile<'de, D: Deserializer<'de>>(d: D) -> Result<Option<SandboxProfile>, D::Error> {
+fn deser_sandbox_profile<'de, D: Deserializer<'de>>(
+    d: D,
+) -> Result<Option<SandboxProfile>, D::Error> {
     let v = serde_json::Value::deserialize(d)?;
     match v {
         serde_json::Value::Null => Ok(None),
-        serde_json::Value::String(_) => Ok(None),  // legacy named preset — ignore, use defaults
-        obj => serde_json::from_value(obj).map(Some).map_err(serde::de::Error::custom),
+        serde_json::Value::String(_) => Ok(None), // legacy named preset — ignore, use defaults
+        obj => serde_json::from_value(obj)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
     }
 }
 
@@ -40,7 +44,7 @@ pub struct CapabilityManifest {
     /// Optional glob pattern for shim argv matching, e.g. `"git status *"`.
     /// When set, the shim resolves a bare invocation (`git status`) to this capability
     /// without needing the full `clix run` prefix.
-    #[serde(default)]
+    #[serde(default, alias = "argv_pattern")]
     pub argv_pattern: Option<String>,
 }
 
@@ -62,7 +66,7 @@ pub enum IsolationTier {
 impl serde::Serialize for IsolationTier {
     fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
         s.serialize_str(match self {
-            IsolationTier::None       => "none",
+            IsolationTier::None => "none",
             IsolationTier::WarmWorker => "warm_worker",
             IsolationTier::Firecracker => "firecracker",
         })
@@ -73,15 +77,15 @@ impl<'de> serde::Deserialize<'de> for IsolationTier {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
         let s = String::deserialize(d)?;
         match s.as_str() {
-            "none"        => Ok(IsolationTier::None),
+            "none" => Ok(IsolationTier::None),
             "warm_worker" => Ok(IsolationTier::WarmWorker),
             "firecracker" => Err(serde::de::Error::custom(
                 "isolation: firecracker is not yet implemented. \
-                 Use warm_worker instead. Firecracker support is tracked in docs/.dev/design/TODO.md."
+                 Use warm_worker instead. Firecracker support is tracked in docs/.dev/design/TODO.md.",
             )),
-            other => Err(serde::de::Error::custom(
-                format!("unknown isolation tier '{other}'; valid values: none, warm_worker")
-            )),
+            other => Err(serde::de::Error::custom(format!(
+                "unknown isolation tier '{other}'; valid values: none, warm_worker"
+            ))),
         }
     }
 }
@@ -147,13 +151,23 @@ pub struct CgroupLimits {
 
 impl Default for CgroupLimits {
     fn default() -> Self {
-        CgroupLimits { memory_mib: default_memory_mib(), max_pids: default_max_pids(), cpu_weight: default_cpu_weight() }
+        CgroupLimits {
+            memory_mib: default_memory_mib(),
+            max_pids: default_max_pids(),
+            cpu_weight: default_cpu_weight(),
+        }
     }
 }
 
-fn default_memory_mib() -> u64 { 512 }
-fn default_max_pids() -> u64 { 64 }
-fn default_cpu_weight() -> u64 { 100 }
+fn default_memory_mib() -> u64 {
+    512
+}
+fn default_max_pids() -> u64 {
+    64
+}
+fn default_cpu_weight() -> u64 {
+    100
+}
 
 fn default_schema() -> serde_json::Value {
     serde_json::json!({"type": "object", "properties": {}})
@@ -250,7 +264,9 @@ pub struct InfisicalRef {
     pub infisical_profile: Option<String>,
 }
 
-fn default_secret_path() -> String { "/".to_string() }
+fn default_secret_path() -> String {
+    "/".to_string()
+}
 
 #[cfg(test)]
 mod tests {
@@ -288,11 +304,17 @@ mod tests {
     #[test]
     fn firecracker_tier_rejected_at_parse() {
         // firecracker is not implemented; the parser must reject it with a clear error
-        let err = serde_json::from_value::<IsolationTier>(serde_json::json!("firecracker"))
-            .unwrap_err();
+        let err =
+            serde_json::from_value::<IsolationTier>(serde_json::json!("firecracker")).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("not yet implemented"), "expected clear error, got: {msg}");
-        assert!(msg.contains("warm_worker"), "error should suggest warm_worker: {msg}");
+        assert!(
+            msg.contains("not yet implemented"),
+            "expected clear error, got: {msg}"
+        );
+        assert!(
+            msg.contains("warm_worker"),
+            "error should suggest warm_worker: {msg}"
+        );
     }
 
     #[test]

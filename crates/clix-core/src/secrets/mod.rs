@@ -4,14 +4,14 @@ pub use redact::{SecretRedactor, preview};
 #[cfg(target_os = "linux")]
 pub mod keyring;
 
-use std::collections::HashMap;
-use std::time::{Duration, Instant};
-use std::sync::OnceLock;
-use std::sync::Mutex;
 use crate::error::{ClixError, Result};
 use crate::manifest::capability::CredentialSource;
-use crate::manifest::profile::{ProfileSecretBinding, ProfileFolderBinding};
+use crate::manifest::profile::{ProfileFolderBinding, ProfileSecretBinding};
 use crate::state::{InfisicalConfig, InfisicalProfiles};
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 // ─── token cache ─────────────────────────────────────────────────────────────
 // Keyed on (site_url, client_id) so multiple accounts don't share a slot.
@@ -31,11 +31,16 @@ fn token_cache() -> &'static Mutex<HashMap<TokenKey, CachedToken>> {
 
 fn get_infisical_token_cached(cfg: &InfisicalConfig) -> Result<String> {
     if cfg.client_id.as_ref().map(|s| s.is_empty()).unwrap_or(true)
-        || cfg.client_secret.as_ref().map(|s| s.is_empty()).unwrap_or(true)
+        || cfg
+            .client_secret
+            .as_ref()
+            .map(|s| s.is_empty())
+            .unwrap_or(true)
     {
         return Err(ClixError::CredentialResolution(
             "Infisical profile is not configured (missing client_id or client_secret). \
-             Run `clix infisical add` to set up a profile.".to_string(),
+             Run `clix infisical add` to set up a profile."
+                .to_string(),
         ));
     }
     let key: TokenKey = (
@@ -44,20 +49,23 @@ fn get_infisical_token_cached(cfg: &InfisicalConfig) -> Result<String> {
     );
     {
         let cache = token_cache().lock().unwrap();
-        if let Some(ct) = cache.get(&key) {
-            if ct.expires_at > Instant::now() {
-                return Ok(ct.token.clone());
-            }
+        if let Some(ct) = cache.get(&key)
+            && ct.expires_at > Instant::now()
+        {
+            return Ok(ct.token.clone());
         }
     }
     // stale or missing — re-login
     let (token, ttl) = get_infisical_token_with_ttl(cfg)?;
     {
         let mut cache = token_cache().lock().unwrap();
-        cache.insert(key, CachedToken {
-            token: token.clone(),
-            expires_at: Instant::now() + Duration::from_secs(ttl.saturating_sub(60)),
-        });
+        cache.insert(
+            key,
+            CachedToken {
+                token: token.clone(),
+                expires_at: Instant::now() + Duration::from_secs(ttl.saturating_sub(60)),
+            },
+        );
     }
     Ok(token)
 }
@@ -86,21 +94,26 @@ pub fn test_connectivity(cfg: &InfisicalConfig) -> ConnectivityReport {
             root_folder_count: 0,
             latency_ms: 0,
             token_expires_in: None,
-            error: Some("Profile not configured — add universal auth credentials or a service token".to_string()),
+            error: Some(
+                "Profile not configured — add universal auth credentials or a service token"
+                    .to_string(),
+            ),
         };
     }
 
     let token = match get_infisical_token(cfg) {
         Ok(t) => t,
-        Err(e) => return ConnectivityReport {
-            auth_ok: false,
-            site_reachable: false,
-            workspace_reachable: false,
-            root_folder_count: 0,
-            latency_ms: start.elapsed().as_millis() as u64,
-            token_expires_in: None,
-            error: Some(e.to_string()),
-        },
+        Err(e) => {
+            return ConnectivityReport {
+                auth_ok: false,
+                site_reachable: false,
+                workspace_reachable: false,
+                root_folder_count: 0,
+                latency_ms: start.elapsed().as_millis() as u64,
+                token_expires_in: None,
+                error: Some(e.to_string()),
+            };
+        }
     };
 
     // For service tokens there's no exchange response, so TTL is unknown.
@@ -109,9 +122,14 @@ pub fn test_connectivity(cfg: &InfisicalConfig) -> ConnectivityReport {
     } else {
         // Re-use whatever TTL was just cached by get_infisical_token → get_infisical_token_with_ttl.
         token_cache().lock().ok().and_then(|cache| {
-            let key = (cfg.site_url.clone(), cfg.client_id.clone().unwrap_or_default());
+            let key = (
+                cfg.site_url.clone(),
+                cfg.client_id.clone().unwrap_or_default(),
+            );
             cache.get(&key).map(|ct| {
-                ct.expires_at.saturating_duration_since(Instant::now()).as_secs()
+                ct.expires_at
+                    .saturating_duration_since(Instant::now())
+                    .as_secs()
             })
         })
     };
@@ -148,7 +166,8 @@ fn list_infisical_folders_with_token(
     let url = format!(
         "{}/api/v1/folders?workspaceId={}&environment={}&secretPath={}",
         site_url.trim_end_matches('/'),
-        project_id, environment,
+        project_id,
+        environment,
         urlencoding::encode(secret_path),
     );
     let client = reqwest::blocking::Client::builder()
@@ -156,17 +175,28 @@ fn list_infisical_folders_with_token(
         .connect_timeout(Duration::from_secs(5))
         .build()
         .map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
-    let resp = client.get(&url).bearer_auth(token).send()
+    let resp = client
+        .get(&url)
+        .bearer_auth(token)
+        .send()
         .map_err(|e| ClixError::CredentialResolution(format!("Infisical list folders: {e}")))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
-        return Err(ClixError::CredentialResolution(format!("Infisical {status}: {body}")));
+        return Err(ClixError::CredentialResolution(format!(
+            "Infisical {status}: {body}"
+        )));
     }
-    let body: serde_json::Value = resp.json()
+    let body: serde_json::Value = resp
+        .json()
         .map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
-    Ok(body["folders"].as_array()
-        .map(|arr| arr.iter().filter_map(|f| f["name"].as_str().map(str::to_string)).collect())
+    Ok(body["folders"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|f| f["name"].as_str().map(str::to_string))
+                .collect()
+        })
         .unwrap_or_default())
 }
 
@@ -182,7 +212,8 @@ pub fn resolve_credentials(
     folder_bindings: &[ProfileFolderBinding],
 ) -> Result<HashMap<String, String>> {
     // Seed from capability-declared credentials
-    let mut effective: HashMap<String, CredentialSource> = creds.iter()
+    let mut effective: HashMap<String, CredentialSource> = creds
+        .iter()
         .map(|c| (inject_as_of(c).to_string(), c.clone()))
         .collect();
 
@@ -191,16 +222,18 @@ pub fn resolve_credentials(
         let prefix = fb.inject_prefix.as_deref().unwrap_or("");
         for secret_name in &fb.snapshot {
             let inject_as = format!("{}{}", prefix, secret_name);
-            effective.entry(inject_as.clone()).or_insert_with(|| CredentialSource::Infisical {
-                inject_as,
-                secret_ref: crate::manifest::capability::InfisicalRef {
-                    secret_name: secret_name.clone(),
-                    project_id: Some(fb.project_id.clone()),
-                    environment: fb.environment.clone(),
-                    secret_path: fb.secret_path.clone(),
-                    infisical_profile: fb.infisical_profile.clone(),
-                },
-            });
+            effective
+                .entry(inject_as.clone())
+                .or_insert_with(|| CredentialSource::Infisical {
+                    inject_as,
+                    secret_ref: crate::manifest::capability::InfisicalRef {
+                        secret_name: secret_name.clone(),
+                        project_id: Some(fb.project_id.clone()),
+                        environment: fb.environment.clone(),
+                        secret_path: fb.secret_path.clone(),
+                        infisical_profile: fb.infisical_profile.clone(),
+                    },
+                });
         }
     }
 
@@ -267,7 +300,8 @@ pub fn list_infisical_secrets(
     let url = format!(
         "{}/api/v3/secrets/raw?workspaceId={}&environment={}&secretPath={}&recursive=false",
         cfg.site_url.trim_end_matches('/'),
-        project_id, environment,
+        project_id,
+        environment,
         urlencoding::encode(secret_path),
     );
     let client = reqwest::blocking::Client::builder()
@@ -275,16 +309,28 @@ pub fn list_infisical_secrets(
         .connect_timeout(Duration::from_secs(5))
         .build()
         .map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
-    let resp = client.get(&url).bearer_auth(&token).send()
+    let resp = client
+        .get(&url)
+        .bearer_auth(&token)
+        .send()
         .map_err(|e| ClixError::CredentialResolution(format!("Infisical list secrets: {e}")))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
-        return Err(ClixError::CredentialResolution(format!("Infisical {status}: {body}")));
+        return Err(ClixError::CredentialResolution(format!(
+            "Infisical {status}: {body}"
+        )));
     }
-    let body: serde_json::Value = resp.json().map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
-    let names = body["secrets"].as_array()
-        .map(|arr| arr.iter().filter_map(|s| s["secretKey"].as_str().map(|n| n.to_string())).collect())
+    let body: serde_json::Value = resp
+        .json()
+        .map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
+    let names = body["secrets"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|s| s["secretKey"].as_str().map(|n| n.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
     Ok(names)
 }
@@ -310,7 +356,8 @@ pub fn list_infisical_folders(
     let url = format!(
         "{}/api/v1/folders?workspaceId={}&environment={}&secretPath={}",
         cfg.site_url.trim_end_matches('/'),
-        project_id, environment,
+        project_id,
+        environment,
         urlencoding::encode(secret_path),
     );
     let client = reqwest::blocking::Client::builder()
@@ -318,16 +365,28 @@ pub fn list_infisical_folders(
         .connect_timeout(Duration::from_secs(5))
         .build()
         .map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
-    let resp = client.get(&url).bearer_auth(&token).send()
+    let resp = client
+        .get(&url)
+        .bearer_auth(&token)
+        .send()
         .map_err(|e| ClixError::CredentialResolution(format!("Infisical list folders: {e}")))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
-        return Err(ClixError::CredentialResolution(format!("Infisical {status}: {body}")));
+        return Err(ClixError::CredentialResolution(format!(
+            "Infisical {status}: {body}"
+        )));
     }
-    let body: serde_json::Value = resp.json().map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
-    let names = body["folders"].as_array()
-        .map(|arr| arr.iter().filter_map(|f| f["name"].as_str().map(|n| n.to_string())).collect())
+    let body: serde_json::Value = resp
+        .json()
+        .map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
+    let names = body["folders"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|f| f["name"].as_str().map(|n| n.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
     Ok(names)
 }
@@ -395,7 +454,9 @@ pub fn upsert_infisical_secret(
     if resp.status().as_u16() != 404 {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
-        return Err(ClixError::CredentialResolution(format!("Infisical {status}: {body}")));
+        return Err(ClixError::CredentialResolution(format!(
+            "Infisical {status}: {body}"
+        )));
     }
 
     let resp = attempt(reqwest::Method::POST)?;
@@ -405,10 +466,15 @@ pub fn upsert_infisical_secret(
 
     let status = resp.status();
     let body = resp.text().unwrap_or_default();
-    Err(ClixError::CredentialResolution(format!("Infisical {status}: {body}")))
+    Err(ClixError::CredentialResolution(format!(
+        "Infisical {status}: {body}"
+    )))
 }
 
-fn fetch_infisical_secret(cfg: &InfisicalConfig, secret_ref: &crate::manifest::capability::InfisicalRef) -> Result<String> {
+fn fetch_infisical_secret(
+    cfg: &InfisicalConfig,
+    secret_ref: &crate::manifest::capability::InfisicalRef,
+) -> Result<String> {
     if !cfg.is_configured() {
         return Err(ClixError::CredentialResolution(
             "Infisical profile is not configured".to_string(),
@@ -419,7 +485,9 @@ fn fetch_infisical_secret(cfg: &InfisicalConfig, secret_ref: &crate::manifest::c
     let url = format!(
         "{}/api/v3/secrets/raw/{}?workspaceId={}&environment={}&secretPath={}",
         cfg.site_url.trim_end_matches('/'),
-        secret_ref.secret_name, project_id, secret_ref.environment,
+        secret_ref.secret_name,
+        project_id,
+        secret_ref.environment,
         urlencoding::encode(&secret_ref.secret_path),
     );
     let client = reqwest::blocking::Client::builder()
@@ -427,15 +495,24 @@ fn fetch_infisical_secret(cfg: &InfisicalConfig, secret_ref: &crate::manifest::c
         .connect_timeout(Duration::from_secs(5))
         .build()
         .map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
-    let resp = client.get(&url).bearer_auth(&token).send()
+    let resp = client
+        .get(&url)
+        .bearer_auth(&token)
+        .send()
         .map_err(|e| ClixError::CredentialResolution(format!("Infisical HTTP: {e}")))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
-        return Err(ClixError::CredentialResolution(format!("Infisical {status}: {body}")));
+        return Err(ClixError::CredentialResolution(format!(
+            "Infisical {status}: {body}"
+        )));
     }
-    let body: serde_json::Value = resp.json().map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
-    body["secret"]["secretValue"].as_str().map(|s| s.to_string())
+    let body: serde_json::Value = resp
+        .json()
+        .map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
+    body["secret"]["secretValue"]
+        .as_str()
+        .map(|s| s.to_string())
         .ok_or_else(|| ClixError::CredentialResolution("secretValue missing".to_string()))
 }
 
@@ -452,22 +529,36 @@ fn get_infisical_token(cfg: &InfisicalConfig) -> Result<String> {
 }
 
 fn get_infisical_token_with_ttl(cfg: &InfisicalConfig) -> Result<(String, u64)> {
-    let client_id = cfg.client_id.clone()
+    let client_id = cfg
+        .client_id
+        .clone()
         .or_else(|| std::env::var("INFISICAL_UNIVERSAL_AUTH_CLIENT_ID").ok())
         .unwrap_or_default();
-    let client_secret = cfg.client_secret.clone()
+    let client_secret = cfg
+        .client_secret
+        .clone()
         .or_else(|| std::env::var("INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET").ok())
         .unwrap_or_default();
-    let url = format!("{}/api/v1/auth/universal-auth/login", cfg.site_url.trim_end_matches('/'));
+    let url = format!(
+        "{}/api/v1/auth/universal-auth/login",
+        cfg.site_url.trim_end_matches('/')
+    );
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(10))
         .connect_timeout(Duration::from_secs(5))
         .build()
         .map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
-    let resp = client.post(&url).json(&serde_json::json!({"clientId": client_id, "clientSecret": client_secret}))
-        .send().map_err(|e| ClixError::CredentialResolution(format!("Infisical auth: {e}")))?;
-    let body: serde_json::Value = resp.json().map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
-    let token = body["accessToken"].as_str().map(|s| s.to_string())
+    let resp = client
+        .post(&url)
+        .json(&serde_json::json!({"clientId": client_id, "clientSecret": client_secret}))
+        .send()
+        .map_err(|e| ClixError::CredentialResolution(format!("Infisical auth: {e}")))?;
+    let body: serde_json::Value = resp
+        .json()
+        .map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
+    let token = body["accessToken"]
+        .as_str()
+        .map(|s| s.to_string())
         .ok_or_else(|| ClixError::CredentialResolution("accessToken missing".to_string()))?;
     let ttl = body["expiresIn"].as_u64().unwrap_or(7200);
     Ok((token, ttl))
@@ -479,24 +570,42 @@ mod tests {
     use crate::manifest::capability::CredentialSource;
     use std::collections::BTreeMap;
 
-    fn empty_profiles() -> BTreeMap<String, InfisicalConfig> { BTreeMap::new() }
+    fn empty_profiles() -> BTreeMap<String, InfisicalConfig> {
+        BTreeMap::new()
+    }
 
     #[test]
     fn test_resolve_env() {
-        std::env::set_var("CLIX_TEST_SECRET_VAR", "env-value-123");
-        let creds = vec![CredentialSource::Env { env_var: "CLIX_TEST_SECRET_VAR".to_string(), inject_as: "TARGET".to_string() }];
+        unsafe {
+            std::env::set_var("CLIX_TEST_SECRET_VAR", "env-value-123");
+        }
+        let creds = vec![CredentialSource::Env {
+            env_var: "CLIX_TEST_SECRET_VAR".to_string(),
+            inject_as: "TARGET".to_string(),
+        }];
         let profiles = empty_profiles();
-        let resolver = InfisicalProfiles { profiles: &profiles, active: None };
+        let resolver = InfisicalProfiles {
+            profiles: &profiles,
+            active: None,
+        };
         let resolved = resolve_credentials(&creds, &resolver, &[], &[]).unwrap();
         assert_eq!(resolved.get("TARGET").unwrap(), "env-value-123");
-        std::env::remove_var("CLIX_TEST_SECRET_VAR");
+        unsafe {
+            std::env::remove_var("CLIX_TEST_SECRET_VAR");
+        }
     }
 
     #[test]
     fn test_resolve_literal() {
-        let creds = vec![CredentialSource::Literal { value: "lit-val".to_string(), inject_as: "INJECTED".to_string() }];
+        let creds = vec![CredentialSource::Literal {
+            value: "lit-val".to_string(),
+            inject_as: "INJECTED".to_string(),
+        }];
         let profiles = empty_profiles();
-        let resolver = InfisicalProfiles { profiles: &profiles, active: None };
+        let resolver = InfisicalProfiles {
+            profiles: &profiles,
+            active: None,
+        };
         let resolved = resolve_credentials(&creds, &resolver, &[], &[]).unwrap();
         assert_eq!(resolved.get("INJECTED").unwrap(), "lit-val");
     }
@@ -504,13 +613,22 @@ mod tests {
     #[test]
     fn test_profile_binding_overrides_capability() {
         use crate::manifest::profile::ProfileSecretBinding;
-        let creds = vec![CredentialSource::Literal { value: "cap-default".to_string(), inject_as: "MY_TOKEN".to_string() }];
+        let creds = vec![CredentialSource::Literal {
+            value: "cap-default".to_string(),
+            inject_as: "MY_TOKEN".to_string(),
+        }];
         let bindings = vec![ProfileSecretBinding {
             inject_as: "MY_TOKEN".to_string(),
-            source: CredentialSource::Literal { value: "profile-override".to_string(), inject_as: "MY_TOKEN".to_string() },
+            source: CredentialSource::Literal {
+                value: "profile-override".to_string(),
+                inject_as: "MY_TOKEN".to_string(),
+            },
         }];
         let profiles = empty_profiles();
-        let resolver = InfisicalProfiles { profiles: &profiles, active: None };
+        let resolver = InfisicalProfiles {
+            profiles: &profiles,
+            active: None,
+        };
         let resolved = resolve_credentials(&creds, &resolver, &bindings, &[]).unwrap();
         assert_eq!(resolved.get("MY_TOKEN").unwrap(), "profile-override");
     }
@@ -518,24 +636,36 @@ mod tests {
     #[test]
     fn env_credential_missing_var_is_error() {
         let var_name = "CLIX_TEST_VAR_DEFINITELY_NOT_SET_12345";
-        std::env::remove_var(var_name);
+        unsafe {
+            std::env::remove_var(var_name);
+        }
         let creds = vec![CredentialSource::Env {
             env_var: var_name.to_string(),
             inject_as: "TARGET_VAR".to_string(),
         }];
         let profiles = empty_profiles();
-        let resolver = InfisicalProfiles { profiles: &profiles, active: None };
+        let resolver = InfisicalProfiles {
+            profiles: &profiles,
+            active: None,
+        };
         let err = resolve_credentials(&creds, &resolver, &[], &[]).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains(var_name), "error should name the missing var: {msg}");
-        assert!(msg.contains("TARGET_VAR"), "error should name the inject_as key: {msg}");
+        assert!(
+            msg.contains(var_name),
+            "error should name the missing var: {msg}"
+        );
+        assert!(
+            msg.contains("TARGET_VAR"),
+            "error should name the inject_as key: {msg}"
+        );
     }
 
     #[test]
     fn is_configured_service_token_only() {
         let cfg = InfisicalConfig {
             site_url: "https://app.infisical.com".into(),
-            client_id: None, client_secret: None,
+            client_id: None,
+            client_secret: None,
             service_token: Some("st.abc123".into()),
             default_project_id: None,
             default_environment: "dev".into(),
@@ -560,7 +690,9 @@ mod tests {
     fn is_configured_empty_returns_false() {
         let cfg = InfisicalConfig {
             site_url: "https://app.infisical.com".into(),
-            client_id: None, client_secret: None, service_token: None,
+            client_id: None,
+            client_secret: None,
+            service_token: None,
             default_project_id: None,
             default_environment: "dev".into(),
         };
@@ -571,7 +703,9 @@ mod tests {
     fn list_secrets_unconfigured_returns_err_immediately() {
         let cfg = InfisicalConfig {
             site_url: "https://app.infisical.com".into(),
-            client_id: None, client_secret: None, service_token: None,
+            client_id: None,
+            client_secret: None,
+            service_token: None,
             default_project_id: None,
             default_environment: "dev".into(),
         };
@@ -583,7 +717,8 @@ mod tests {
     fn list_secrets_empty_project_id_returns_err_immediately() {
         let cfg = InfisicalConfig {
             site_url: "https://app.infisical.com".into(),
-            client_id: None, client_secret: None,
+            client_id: None,
+            client_secret: None,
             service_token: Some("st.fake".into()),
             default_project_id: None,
             default_environment: "dev".into(),
@@ -596,7 +731,9 @@ mod tests {
     fn test_connectivity_unconfigured_fast_fails() {
         let cfg = InfisicalConfig {
             site_url: "https://app.infisical.com".into(),
-            client_id: None, client_secret: None, service_token: None,
+            client_id: None,
+            client_secret: None,
+            service_token: None,
             default_project_id: None,
             default_environment: "dev".into(),
         };
@@ -611,15 +748,22 @@ mod tests {
     #[test]
     fn env_credential_set_var_resolves() {
         let var_name = "CLIX_TEST_VAR_PRESENT_12345";
-        std::env::set_var(var_name, "test-value");
+        unsafe {
+            std::env::set_var(var_name, "test-value");
+        }
         let creds = vec![CredentialSource::Env {
             env_var: var_name.to_string(),
             inject_as: "TARGET_VAR".to_string(),
         }];
         let profiles = empty_profiles();
-        let resolver = InfisicalProfiles { profiles: &profiles, active: None };
+        let resolver = InfisicalProfiles {
+            profiles: &profiles,
+            active: None,
+        };
         let resolved = resolve_credentials(&creds, &resolver, &[], &[]).unwrap();
         assert_eq!(resolved.get("TARGET_VAR").unwrap(), "test-value");
-        std::env::remove_var(var_name);
+        unsafe {
+            std::env::remove_var(var_name);
+        }
     }
 }

@@ -1,7 +1,7 @@
-use anyhow::{bail, Result};
-use clix_core::state::{home_dir, ClixState};
-use clix_core::storage::git as git_sync;
 use crate::cli::SyncCmd;
+use anyhow::{Result, bail};
+use clix_core::state::{ClixState, home_dir};
+use clix_core::storage::git as git_sync;
 
 pub fn run_sync(cmd: SyncCmd) -> Result<()> {
     match cmd {
@@ -33,8 +33,9 @@ fn cmd_init(remote: &str, branch: &str) -> Result<()> {
 
 fn cmd_push() -> Result<()> {
     let state = ClixState::load(home_dir())?;
-    let remote = state.config.git_remote.as_deref()
-        .ok_or_else(|| anyhow::anyhow!("No git remote configured — run `clix sync init <url>` first"))?;
+    let remote = state.config.git_remote.as_deref().ok_or_else(|| {
+        anyhow::anyhow!("No git remote configured — run `clix sync init <url>` first")
+    })?;
     let branch = &state.config.git_branch;
     println!("Pushing ~/.clix → {remote} ({branch})…");
     let msg = git_sync::push(&state.home, branch)?;
@@ -44,8 +45,9 @@ fn cmd_push() -> Result<()> {
 
 fn cmd_pull() -> Result<()> {
     let state = ClixState::load(home_dir())?;
-    let remote = state.config.git_remote.as_deref()
-        .ok_or_else(|| anyhow::anyhow!("No git remote configured — run `clix sync init <url>` first"))?;
+    let remote = state.config.git_remote.as_deref().ok_or_else(|| {
+        anyhow::anyhow!("No git remote configured — run `clix sync init <url>` first")
+    })?;
     let branch = &state.config.git_branch;
     println!("Pulling {remote} ({branch}) → ~/.clix…");
     let out = git_sync::pull(&state.home, branch)?;

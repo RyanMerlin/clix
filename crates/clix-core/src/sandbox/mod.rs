@@ -11,7 +11,10 @@ pub mod jail;
 pub mod seccomp;
 
 pub fn apply_sandbox(allowed_executables: &[impl AsRef<str>]) -> crate::error::Result<()> {
-    let paths: Vec<String> = allowed_executables.iter().map(|s| s.as_ref().to_string()).collect();
+    let paths: Vec<String> = allowed_executables
+        .iter()
+        .map(|s| s.as_ref().to_string())
+        .collect();
     #[cfg(target_os = "linux")]
     return linux::apply_sandbox(&paths);
     #[cfg(target_os = "macos")]
@@ -33,7 +36,12 @@ pub fn sandbox_enforced() -> bool {
 mod tests {
     use super::*;
     #[test]
-    fn test_sandbox_flag() { let _ = sandbox_enforced(); }
+    fn test_sandbox_flag() {
+        let _ = sandbox_enforced();
+    }
     #[test]
-    fn test_empty_allowlist_noop() { let empty: Vec<String> = vec![]; apply_sandbox(&empty).unwrap(); }
+    fn test_empty_allowlist_noop() {
+        let empty: Vec<String> = vec![];
+        apply_sandbox(&empty).unwrap();
+    }
 }

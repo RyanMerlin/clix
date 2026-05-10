@@ -4,15 +4,15 @@
 //! all required columns are present. Future schema versions should
 //! add assertions here.
 
+use clix_core::receipts::ReceiptStore;
 use std::path::Path;
 use tempfile::tempdir;
-use clix_core::receipts::ReceiptStore;
 
 /// Schema initializes on a fresh in-memory DB without errors.
 #[test]
 fn test_schema_init_in_memory() {
-    let store = ReceiptStore::open(Path::new(":memory:"))
-        .expect("in-memory store should initialize");
+    let store =
+        ReceiptStore::open(Path::new(":memory:")).expect("in-memory store should initialize");
     // If we reach here, the schema SQL executed without error.
     let _ = store;
 }
@@ -52,9 +52,9 @@ fn test_empty_store_list() {
 /// Columns introduced in the extended schema (isolation_tier, binary_sha256, etc.) are present.
 #[test]
 fn test_extended_columns_present() {
-    use uuid::Uuid;
     use chrono::Utc;
     use clix_core::receipts::{Receipt, ReceiptKind, ReceiptStatus};
+    use uuid::Uuid;
 
     let store = ReceiptStore::open(Path::new(":memory:")).unwrap();
     let r = Receipt {
@@ -75,7 +75,9 @@ fn test_extended_columns_present() {
         token_mint_id: Some("mint-123".to_string()),
         jail_config_digest: Some("cafebabe".to_string()),
     };
-    store.write(&r).expect("write receipt with extended columns");
+    store
+        .write(&r)
+        .expect("write receipt with extended columns");
 
     let list = store.list(1, None).unwrap();
     assert_eq!(list.len(), 1);

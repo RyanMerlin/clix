@@ -2,13 +2,13 @@ pub mod dispatch;
 pub mod methods;
 pub mod metrics;
 pub mod transport;
-pub use dispatch::{dispatch, ServeState};
+pub use dispatch::{ServeState, dispatch};
 
 use anyhow::Result;
 use clix_core::execution::worker_registry::WorkerRegistry;
 use clix_core::loader::{build_registry, build_workflow_registry, load_policy};
 use clix_core::receipts::ReceiptStore;
-use clix_core::state::{home_dir, ClixState};
+use clix_core::state::{ClixState, home_dir};
 use std::sync::{Arc, Mutex};
 
 pub fn build_serve_state() -> Result<Arc<ServeState>> {
@@ -84,7 +84,9 @@ fn init_worker_registry(allow_unsandboxed: bool) -> Result<Option<Arc<WorkerRegi
     #[cfg(not(target_os = "linux"))]
     {
         let _ = allow_unsandboxed;
-        eprintln!("[clix-serve] WARNING: clix-worker not found — running in policy-only mode on this platform");
+        eprintln!(
+            "[clix-serve] WARNING: clix-worker not found — running in policy-only mode on this platform"
+        );
         Ok(None)
     }
 }
@@ -92,7 +94,6 @@ fn init_worker_registry(allow_unsandboxed: bool) -> Result<Option<Arc<WorkerRegi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn missing_worker_fails_without_flag() {

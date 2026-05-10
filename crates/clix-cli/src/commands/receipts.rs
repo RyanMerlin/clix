@@ -1,17 +1,24 @@
+use crate::output::print_json;
 use anyhow::Result;
 use clix_core::receipts::ReceiptStore;
-use clix_core::state::{home_dir, ClixState};
-use crate::output::print_json;
+use clix_core::state::{ClixState, home_dir};
 use std::io::Write;
 
 pub fn list(limit: usize, status: Option<&str>, json: bool) -> Result<()> {
     let state = ClixState::load(home_dir())?;
     let store = ReceiptStore::open(&state.receipts_db)?;
     let receipts = store.list(limit, status)?;
-    if json { print_json(&receipts); }
-    else {
+    if json {
+        print_json(&receipts);
+    } else {
         for r in &receipts {
-            println!("{} {} {} {}", r.id, r.created_at.format("%Y-%m-%dT%H:%M:%SZ"), r.status, r.capability);
+            println!(
+                "{} {} {} {}",
+                r.id,
+                r.created_at.format("%Y-%m-%dT%H:%M:%SZ"),
+                r.status,
+                r.capability
+            );
         }
     }
     Ok(())
@@ -34,7 +41,12 @@ pub fn show(id: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn export(status: Option<String>, since: Option<String>, format: String, output: Option<String>) -> Result<()> {
+pub fn export(
+    status: Option<String>,
+    since: Option<String>,
+    format: String,
+    output: Option<String>,
+) -> Result<()> {
     let state = ClixState::load(home_dir())?;
     let store = ReceiptStore::open(&state.receipts_db)?;
     let since_dt = if let Some(ref s) = since {

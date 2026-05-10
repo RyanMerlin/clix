@@ -4,18 +4,25 @@ use crossterm::event::KeyCode;
 #[derive(Debug, Clone, Default)]
 pub struct FieldInput {
     pub value: String,
-    pub cursor: usize,  // byte offset
+    pub cursor: usize, // byte offset
     pub masked: bool,
 }
 
 impl FieldInput {
     pub fn new(initial: &str) -> Self {
         let len = initial.len();
-        Self { value: initial.to_string(), cursor: len, masked: false }
+        Self {
+            value: initial.to_string(),
+            cursor: len,
+            masked: false,
+        }
     }
 
     pub fn masked() -> Self {
-        Self { masked: true, ..Self::default() }
+        Self {
+            masked: true,
+            ..Self::default()
+        }
     }
 
     /// Returns (before_display, after_display) split at cursor.
@@ -76,21 +83,26 @@ impl FieldInput {
     fn prev_boundary(&self) -> usize {
         let mut pos = self.cursor;
         loop {
-            if pos == 0 { return 0; }
+            if pos == 0 {
+                return 0;
+            }
             pos -= 1;
-            if self.value.is_char_boundary(pos) { return pos; }
+            if self.value.is_char_boundary(pos) {
+                return pos;
+            }
         }
     }
 
     fn next_boundary(&self) -> usize {
         let mut pos = self.cursor + 1;
         while pos <= self.value.len() {
-            if self.value.is_char_boundary(pos) { return pos; }
+            if self.value.is_char_boundary(pos) {
+                return pos;
+            }
             pos += 1;
         }
         self.value.len()
     }
-
 }
 
 /// A cycling select field (← / → or Space to cycle through options).

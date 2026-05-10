@@ -23,7 +23,7 @@ pub use clix_core::manifest::capability::{
     Backend, CapabilityManifest, IsolationTier, RiskLevel, SideEffectClass,
 };
 pub use clix_core::policy::{PolicyAction, PolicyBundle, PolicyRule};
-pub use clix_core::registry::{CapabilityRegistry, WorkflowRegistry};
 pub use clix_core::receipts::ReceiptStore;
+pub use clix_core::registry::{CapabilityRegistry, WorkflowRegistry};
 pub use clix_core::state::ClixState;
 pub use clix_serve::dispatch::ServeState;

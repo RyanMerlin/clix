@@ -1,27 +1,27 @@
-use crossterm::event::KeyCode;
-use ratatui::{prelude::*, widgets::*};
-use clix_core::manifest::capability::{CredentialSource, RiskLevel, SideEffectClass};
-use clix_core::manifest::profile::{ProfileManifest, ProfileSecretBinding, ProfileFolderBinding};
-use clix_core::registry::CapabilityRegistry;
-use clix_core::state::InfisicalConfig;
 use crate::tui::theme;
 use crate::tui::widgets::checklist::{Checklist, ChecklistItem};
 use crate::tui::widgets::form::FieldInput;
 use crate::tui::widgets::secrets_tree::{SecretsTree, SecretsTreeAction, TreeMode};
+use clix_core::manifest::capability::{CredentialSource, RiskLevel, SideEffectClass};
+use clix_core::manifest::profile::{ProfileFolderBinding, ProfileManifest, ProfileSecretBinding};
+use clix_core::registry::CapabilityRegistry;
+use clix_core::state::InfisicalConfig;
+use crossterm::event::KeyCode;
+use ratatui::{prelude::*, widgets::*};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProfileWizardStep {
-    Identity,      // step 0: name + description
-    Capabilities,  // step 1: capability checklist
-    Secrets,       // step 2: bind credentials (skipped if no creds needed)
-    Confirm,       // step 3: summary
+    Identity,     // step 0: name + description
+    Capabilities, // step 1: capability checklist
+    Secrets,      // step 2: bind credentials (skipped if no creds needed)
+    Confirm,      // step 3: summary
 }
 
 /// One row in the Secrets step.
 #[derive(Debug, Clone)]
 pub struct BindingRow {
     pub inject_as: String,
-    pub used_by: Vec<String>,          // capability names that need this
+    pub used_by: Vec<String>, // capability names that need this
     pub binding: Option<CredentialSource>,
 }
 
@@ -30,7 +30,11 @@ impl BindingRow {
         match &self.binding {
             None => "○ unbound".to_string(),
             Some(CredentialSource::Infisical { secret_ref, .. }) => {
-                format!("● Infisical {}/{}", secret_ref.secret_path.trim_end_matches('/'), secret_ref.secret_name)
+                format!(
+                    "● Infisical {}/{}",
+                    secret_ref.secret_path.trim_end_matches('/'),
+                    secret_ref.secret_name
+                )
             }
             Some(CredentialSource::Env { env_var, .. }) => format!("● env ${}", env_var),
             Some(CredentialSource::Literal { .. }) => "● literal ••••".to_string(),
@@ -73,39 +77,49 @@ pub enum ProfileWizardAction {
         folder_bindings: Vec<ProfileFolderBinding>,
     },
     /// Tree picker needs a folder loaded — caller dispatches the work jobs.
-    TreeNeedsLoad { project_id: String, environment: String, path: String, folders_job: u64, names_job: u64 },
+    TreeNeedsLoad {
+        project_id: String,
+        environment: String,
+        path: String,
+        folders_job: u64,
+        names_job: u64,
+    },
 }
 
 impl ProfileWizard {
     pub fn new(registry: &CapabilityRegistry) -> Self {
-        let items: Vec<ChecklistItem> = registry.namespaces().iter().flat_map(|ns| {
-            registry.by_namespace(&ns.key).into_iter().map(|cap| {
-                let risk_str = match cap.risk {
-                    RiskLevel::Low => "low",
-                    RiskLevel::Medium => "med",
-                    RiskLevel::High => "high",
-                    RiskLevel::Critical => "crit",
-                };
-                let se_str = match cap.side_effect_class {
-                    SideEffectClass::None => "—",
-                    SideEffectClass::ReadOnly => "read",
-                    SideEffectClass::Additive => "add",
-                    SideEffectClass::Mutating => "mutate",
-                    SideEffectClass::Destructive => "destr",
-                };
-                let tag = format!("{:<4} {}", risk_str, se_str);
-                let tag_color = theme::risk_color(risk_str);
-                let pack = cap.name.split('.').next().unwrap_or("?").to_string();
-                ChecklistItem::new(
-                    &cap.name,
-                    &cap.name,
-                    cap.description.as_deref().unwrap_or(""),
-                    &tag,
-                    tag_color,
-                    &pack,
-                )
+        let items: Vec<ChecklistItem> = registry
+            .namespaces()
+            .iter()
+            .flat_map(|ns| {
+                registry.by_namespace(&ns.key).into_iter().map(|cap| {
+                    let risk_str = match cap.risk {
+                        RiskLevel::Low => "low",
+                        RiskLevel::Medium => "med",
+                        RiskLevel::High => "high",
+                        RiskLevel::Critical => "crit",
+                    };
+                    let se_str = match cap.side_effect_class {
+                        SideEffectClass::None => "—",
+                        SideEffectClass::ReadOnly => "read",
+                        SideEffectClass::Additive => "add",
+                        SideEffectClass::Mutating => "mutate",
+                        SideEffectClass::Destructive => "destr",
+                    };
+                    let tag = format!("{:<4} {}", risk_str, se_str);
+                    let tag_color = theme::risk_color(risk_str);
+                    let pack = cap.name.split('.').next().unwrap_or("?").to_string();
+                    ChecklistItem::new(
+                        &cap.name,
+                        &cap.name,
+                        cap.description.as_deref().unwrap_or(""),
+                        &tag,
+                        tag_color,
+                        &pack,
+                    )
+                })
             })
-        }).collect();
+            .collect();
 
         Self {
             step: ProfileWizardStep::Identity,
@@ -155,7 +169,12 @@ impl ProfileWizard {
         !self.name.value.is_empty()
     }
 
-    pub fn deliver_tree_folders(&mut self, job_id: u64, folders: Vec<String>, error: Option<String>) -> bool {
+    pub fn deliver_tree_folders(
+        &mut self,
+        job_id: u64,
+        folders: Vec<String>,
+        error: Option<String>,
+    ) -> bool {
         if let Some((_, ref mut tree)) = self.tree_picker {
             tree.deliver_folders(job_id, folders, error)
         } else {
@@ -163,7 +182,12 @@ impl ProfileWizard {
         }
     }
 
-    pub fn deliver_tree_names(&mut self, job_id: u64, names: Vec<String>, error: Option<String>) -> bool {
+    pub fn deliver_tree_names(
+        &mut self,
+        job_id: u64,
+        names: Vec<String>,
+        error: Option<String>,
+    ) -> bool {
         if let Some((_, ref mut tree)) = self.tree_picker {
             tree.deliver_names(job_id, names, error)
         } else {
@@ -171,24 +195,42 @@ impl ProfileWizard {
         }
     }
 
-    pub fn handle_key(&mut self, code: KeyCode, registry: Option<&CapabilityRegistry>, infisical_cfg: Option<&InfisicalConfig>) -> ProfileWizardAction {
+    pub fn handle_key(
+        &mut self,
+        code: KeyCode,
+        registry: Option<&CapabilityRegistry>,
+        infisical_cfg: Option<&InfisicalConfig>,
+    ) -> ProfileWizardAction {
         // Tree picker sub-overlay
         if let Some((row_idx, ref mut tree)) = self.tree_picker {
             let action = tree.handle_key(code, infisical_cfg);
             match action {
-                SecretsTreeAction::Cancelled => { self.tree_picker = None; }
+                SecretsTreeAction::Cancelled => {
+                    self.tree_picker = None;
+                }
                 SecretsTreeAction::NeedsLoad(path) => {
                     let project_id = tree.project_id.clone();
                     let environment = tree.environment.clone();
                     let (fid, nid) = tree.request_load(&path);
                     return ProfileWizardAction::TreeNeedsLoad {
-                        project_id, environment, path, folders_job: fid, names_job: nid,
+                        project_id,
+                        environment,
+                        path,
+                        folders_job: fid,
+                        names_job: nid,
                     };
                 }
                 SecretsTreeAction::Selected(iref) => {
-                    let inject_as = self.binding_rows.get(row_idx).map(|r| r.inject_as.clone()).unwrap_or_default();
+                    let inject_as = self
+                        .binding_rows
+                        .get(row_idx)
+                        .map(|r| r.inject_as.clone())
+                        .unwrap_or_default();
                     if let Some(row) = self.binding_rows.get_mut(row_idx) {
-                        row.binding = Some(CredentialSource::Infisical { secret_ref: iref, inject_as });
+                        row.binding = Some(CredentialSource::Infisical {
+                            secret_ref: iref,
+                            inject_as,
+                        });
                     }
                     self.tree_picker = None;
                 }
@@ -207,7 +249,13 @@ impl ProfileWizard {
                     }
                     self.tree_picker = None;
                 }
-                SecretsTreeAction::SelectedFolder { project_id, environment, secret_path, inject_prefix, snapshot } => {
+                SecretsTreeAction::SelectedFolder {
+                    project_id,
+                    environment,
+                    secret_path,
+                    inject_prefix,
+                    snapshot,
+                } => {
                     self.folder_bindings.push(ProfileFolderBinding {
                         project_id,
                         environment,
@@ -227,20 +275,24 @@ impl ProfileWizard {
         // Env-var input sub-mode
         if let Some((row_idx, ref mut fi)) = self.env_input {
             match code {
-                KeyCode::Esc => { self.env_input = None; }
+                KeyCode::Esc => {
+                    self.env_input = None;
+                }
                 KeyCode::Enter => {
                     let val = fi.value.trim().to_string();
-                    if !val.is_empty() {
-                        if let Some(row) = self.binding_rows.get_mut(row_idx) {
-                            row.binding = Some(CredentialSource::Env {
-                                env_var: val.clone(),
-                                inject_as: row.inject_as.clone(),
-                            });
-                        }
+                    if !val.is_empty()
+                        && let Some(row) = self.binding_rows.get_mut(row_idx)
+                    {
+                        row.binding = Some(CredentialSource::Env {
+                            env_var: val.clone(),
+                            inject_as: row.inject_as.clone(),
+                        });
                     }
                     self.env_input = None;
                 }
-                _ => { fi.handle_key(code); }
+                _ => {
+                    fi.handle_key(code);
+                }
             }
             return ProfileWizardAction::None;
         }
@@ -248,7 +300,9 @@ impl ProfileWizard {
         // Literal input sub-mode
         if let Some((row_idx, ref mut fi)) = self.literal_input {
             match code {
-                KeyCode::Esc => { self.literal_input = None; }
+                KeyCode::Esc => {
+                    self.literal_input = None;
+                }
                 KeyCode::Enter => {
                     let val = fi.value.clone();
                     if let Some(row) = self.binding_rows.get_mut(row_idx) {
@@ -259,7 +313,9 @@ impl ProfileWizard {
                     }
                     self.literal_input = None;
                 }
-                _ => { fi.handle_key(code); }
+                _ => {
+                    fi.handle_key(code);
+                }
             }
             return ProfileWizardAction::None;
         }
@@ -292,36 +348,58 @@ impl ProfileWizard {
             }
             _ => {
                 self.error = None;
-                if self.active_field == 0 { self.name.handle_key(code); } else { self.description.handle_key(code); }
+                if self.active_field == 0 {
+                    self.name.handle_key(code);
+                } else {
+                    self.description.handle_key(code);
+                }
             }
         }
         ProfileWizardAction::None
     }
 
-    fn handle_capabilities(&mut self, code: KeyCode, registry: Option<&CapabilityRegistry>) -> ProfileWizardAction {
+    fn handle_capabilities(
+        &mut self,
+        code: KeyCode,
+        registry: Option<&CapabilityRegistry>,
+    ) -> ProfileWizardAction {
         match code {
             KeyCode::Esc => self.step = ProfileWizardStep::Identity,
             KeyCode::Enter => {
                 // Build binding rows from selected caps, then advance
-                if let Some(reg) = registry { self.build_binding_rows(reg); }
+                if let Some(reg) = registry {
+                    self.build_binding_rows(reg);
+                }
                 if self.binding_rows.is_empty() {
                     self.step = ProfileWizardStep::Confirm;
                 } else {
                     self.step = ProfileWizardStep::Secrets;
                 }
             }
-            _ => { self.checklist.handle_key(code); }
+            _ => {
+                self.checklist.handle_key(code);
+            }
         }
         ProfileWizardAction::None
     }
 
-    fn handle_secrets(&mut self, code: KeyCode, infisical_cfg: Option<&InfisicalConfig>) -> ProfileWizardAction {
+    fn handle_secrets(
+        &mut self,
+        code: KeyCode,
+        infisical_cfg: Option<&InfisicalConfig>,
+    ) -> ProfileWizardAction {
         match code {
             KeyCode::Esc => self.step = ProfileWizardStep::Capabilities,
             KeyCode::Tab | KeyCode::Enter => self.step = ProfileWizardStep::Confirm,
-            KeyCode::Up => { if self.secrets_cursor > 0 { self.secrets_cursor -= 1; } }
+            KeyCode::Up => {
+                if self.secrets_cursor > 0 {
+                    self.secrets_cursor -= 1;
+                }
+            }
             KeyCode::Down => {
-                if self.secrets_cursor + 1 < self.binding_rows.len() { self.secrets_cursor += 1; }
+                if self.secrets_cursor + 1 < self.binding_rows.len() {
+                    self.secrets_cursor += 1;
+                }
             }
             KeyCode::Char('p') | KeyCode::Char('i') => {
                 // Open Infisical tree picker in Bind mode
@@ -345,11 +423,15 @@ impl ProfileWizard {
                         let row_idx = self.secrets_cursor;
                         self.tree_picker = Some((row_idx, tree));
                         return ProfileWizardAction::TreeNeedsLoad {
-                            project_id: proj, environment: env,
-                            path: "/".to_string(), folders_job: fid, names_job: nid,
+                            project_id: proj,
+                            environment: env,
+                            path: "/".to_string(),
+                            folders_job: fid,
+                            names_job: nid,
                         };
                     } else {
-                        self.error = Some("Infisical not configured — press e to configure it first".into());
+                        self.error =
+                            Some("Infisical not configured — press e to configure it first".into());
                     }
                 }
             }
@@ -382,11 +464,15 @@ impl ProfileWizard {
                 }
             }
             KeyCode::Enter | KeyCode::Char('w') => {
-                let secret_bindings: Vec<ProfileSecretBinding> = self.binding_rows.iter()
-                    .filter_map(|r| r.binding.as_ref().map(|src| ProfileSecretBinding {
-                        inject_as: r.inject_as.clone(),
-                        source: src.clone(),
-                    }))
+                let secret_bindings: Vec<ProfileSecretBinding> = self
+                    .binding_rows
+                    .iter()
+                    .filter_map(|r| {
+                        r.binding.as_ref().map(|src| ProfileSecretBinding {
+                            inject_as: r.inject_as.clone(),
+                            source: src.clone(),
+                        })
+                    })
                     .collect();
                 return ProfileWizardAction::Submit {
                     name: self.name.value.trim().to_string(),
@@ -415,7 +501,13 @@ impl ProfileWizard {
             ProfileWizardStep::Identity => 0,
             ProfileWizardStep::Capabilities => 1,
             ProfileWizardStep::Secrets => 2,
-            ProfileWizardStep::Confirm => if self.binding_rows.is_empty() { 2 } else { 3 },
+            ProfileWizardStep::Confirm => {
+                if self.binding_rows.is_empty() {
+                    2
+                } else {
+                    3
+                }
+            }
         };
         let title = format!(" New Profile · {}", step_dots(step_n, total_steps));
         let block = Block::default()
@@ -438,29 +530,60 @@ impl ProfileWizard {
         }
         // Env input sub-overlay
         if let Some((row_idx, ref fi)) = self.env_input {
-            render_inline_input(f, fi, &format!("Env var for {}", self.binding_rows.get(row_idx).map(|r| r.inject_as.as_str()).unwrap_or("?")), area);
+            render_inline_input(
+                f,
+                fi,
+                &format!(
+                    "Env var for {}",
+                    self.binding_rows
+                        .get(row_idx)
+                        .map(|r| r.inject_as.as_str())
+                        .unwrap_or("?")
+                ),
+                area,
+            );
         }
         // Literal input sub-overlay
         if let Some((row_idx, ref fi)) = self.literal_input {
-            render_inline_input(f, fi, &format!("Literal value for {}", self.binding_rows.get(row_idx).map(|r| r.inject_as.as_str()).unwrap_or("?")), area);
+            render_inline_input(
+                f,
+                fi,
+                &format!(
+                    "Literal value for {}",
+                    self.binding_rows
+                        .get(row_idx)
+                        .map(|r| r.inject_as.as_str())
+                        .unwrap_or("?")
+                ),
+                area,
+            );
         }
     }
 
     fn render_identity(&self, f: &mut Frame, area: Rect) {
         let chunks = Layout::vertical([
-                Constraint::Length(3),
-                Constraint::Length(3),
-                Constraint::Length(1),
-                Constraint::Min(1),
-            ])
-            .margin(1)
-            .split(area);
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ])
+        .margin(1)
+        .split(area);
 
         render_text_field(f, &self.name, "Name *", self.active_field == 0, chunks[0]);
-        render_text_field(f, &self.description, "Description", self.active_field == 1, chunks[1]);
+        render_text_field(
+            f,
+            &self.description,
+            "Description",
+            self.active_field == 1,
+            chunks[1],
+        );
 
         if let Some(err) = &self.error {
-            f.render_widget(Paragraph::new(Span::styled(err.as_str(), theme::danger())), chunks[2]);
+            f.render_widget(
+                Paragraph::new(Span::styled(err.as_str(), theme::danger())),
+                chunks[2],
+            );
         }
         f.render_widget(
             Paragraph::new("tab: next field   enter: continue   esc: cancel").style(theme::muted()),
@@ -470,21 +593,29 @@ impl ProfileWizard {
 
     fn render_capabilities(&self, f: &mut Frame, area: Rect) {
         if self.checklist.items.is_empty() {
-            f.render_widget(Paragraph::new(vec![
-                Line::from(""),
-                Line::from(Span::styled("  No capabilities loaded.", theme::muted())),
-                Line::from(""),
-                Line::from(Span::styled("  Install a pack first, then create your profile.", theme::dim())),
-                Line::from(""),
-                Line::from("  enter: continue   esc: back"),
-            ]), area);
+            f.render_widget(
+                Paragraph::new(vec![
+                    Line::from(""),
+                    Line::from(Span::styled("  No capabilities loaded.", theme::muted())),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "  Install a pack first, then create your profile.",
+                        theme::dim(),
+                    )),
+                    Line::from(""),
+                    Line::from("  enter: continue   esc: back"),
+                ]),
+                area,
+            );
             return;
         }
 
-        let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)])
-            .split(area);
+        let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
 
-        let title = format!("Capabilities ({} selected)", self.checklist.selected_count());
+        let title = format!(
+            "Capabilities ({} selected)",
+            self.checklist.selected_count()
+        );
         self.checklist.render(f, chunks[0], &title, true);
         f.render_widget(
             Paragraph::new("enter: continue   esc: back").style(theme::muted()),
@@ -498,19 +629,38 @@ impl ProfileWizard {
             .split(area);
 
         // Binding rows list
-        let items: Vec<ListItem> = self.binding_rows.iter().enumerate().map(|(i, row)| {
-            let is_cursor = i == self.secrets_cursor;
-            let name_style = if is_cursor { theme::selected() } else { theme::normal() };
-            let used = row.used_by.iter().take(2).cloned().collect::<Vec<_>>().join(", ");
-            let binding_display = row.display();
-            let binding_style = if row.binding.is_some() { theme::ok() } else { theme::muted() };
+        let items: Vec<ListItem> = self
+            .binding_rows
+            .iter()
+            .enumerate()
+            .map(|(i, row)| {
+                let is_cursor = i == self.secrets_cursor;
+                let name_style = if is_cursor {
+                    theme::selected()
+                } else {
+                    theme::normal()
+                };
+                let used = row
+                    .used_by
+                    .iter()
+                    .take(2)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let binding_display = row.display();
+                let binding_style = if row.binding.is_some() {
+                    theme::ok()
+                } else {
+                    theme::muted()
+                };
 
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("  {:<24}", row.inject_as), name_style),
-                Span::styled(format!("{:<30}  ", used), theme::dim()),
-                Span::styled(binding_display, binding_style),
-            ]))
-        }).collect();
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("  {:<24}", row.inject_as), name_style),
+                    Span::styled(format!("{:<30}  ", used), theme::dim()),
+                    Span::styled(binding_display, binding_style),
+                ]))
+            })
+            .collect();
 
         let header = if self.binding_rows.is_empty() {
             "No credentials required by selected capabilities"
@@ -519,10 +669,12 @@ impl ProfileWizard {
         };
 
         let list = List::new(items)
-            .block(Block::default()
-                .borders(Borders::ALL)
-                .title(header)
-                .border_style(theme::border_normal()))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(header)
+                    .border_style(theme::border_normal()),
+            )
             .highlight_style(theme::selected());
         let mut state = ListState::default();
         state.select(Some(self.secrets_cursor));
@@ -541,7 +693,11 @@ impl ProfileWizard {
 
     fn render_confirm(&self, f: &mut Frame, area: Rect) {
         let cap_ids = self.checklist.selected_ids();
-        let bound_count = self.binding_rows.iter().filter(|r| r.binding.is_some()).count();
+        let bound_count = self
+            .binding_rows
+            .iter()
+            .filter(|r| r.binding.is_some())
+            .count();
         let mut lines = vec![
             Line::from(""),
             Line::from(vec![
@@ -561,10 +717,16 @@ impl ProfileWizard {
             Span::styled(format!("  {} selected", cap_ids.len()), theme::accent()),
         ]));
         for id in cap_ids.iter().take(6) {
-            lines.push(Line::from(Span::styled(format!("    • {}", id), theme::dim())));
+            lines.push(Line::from(Span::styled(
+                format!("    • {}", id),
+                theme::dim(),
+            )));
         }
         if cap_ids.len() > 6 {
-            lines.push(Line::from(Span::styled(format!("    … and {} more", cap_ids.len() - 6), theme::muted())));
+            lines.push(Line::from(Span::styled(
+                format!("    … and {} more", cap_ids.len() - 6),
+                theme::muted(),
+            )));
         }
 
         if !self.binding_rows.is_empty() {
@@ -573,7 +735,11 @@ impl ProfileWizard {
                 Span::styled("  Secrets     ", theme::muted()),
                 Span::styled(
                     format!("  {}/{} bound", bound_count, self.binding_rows.len()),
-                    if bound_count == self.binding_rows.len() { theme::ok() } else { theme::warn() },
+                    if bound_count == self.binding_rows.len() {
+                        theme::ok()
+                    } else {
+                        theme::warn()
+                    },
                 ),
             ]));
             for row in self.binding_rows.iter().take(4) {
@@ -600,7 +766,10 @@ impl ProfileWizard {
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 fn step_dots(current: usize, total: usize) -> String {
-    (0..total).map(|i| if i == current { "●" } else { "○" }).collect::<Vec<_>>().join("")
+    (0..total)
+        .map(|i| if i == current { "●" } else { "○" })
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 fn inject_as_of(c: &CredentialSource) -> &str {
@@ -636,24 +805,54 @@ fn render_inline_input(f: &mut Frame, fi: &FieldInput, label: &str, area: Rect) 
     let inner = block.inner(dialog);
     f.render_widget(block, dialog);
     let (before_disp, after_disp) = fi.split_display_at_cursor();
-    let cursor_ch: String = after_disp.chars().next().map(|c| c.to_string()).unwrap_or_else(|| " ".to_string());
-    let after_cursor: String = if after_disp.is_empty() { String::new() } else { after_disp.chars().skip(1).collect() };
+    let cursor_ch: String = after_disp
+        .chars()
+        .next()
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| " ".to_string());
+    let after_cursor: String = if after_disp.is_empty() {
+        String::new()
+    } else {
+        after_disp.chars().skip(1).collect()
+    };
     let line = Line::from(vec![
         Span::raw(before_disp),
-        Span::styled(cursor_ch, Style::default().bg(theme::ACCENT_BRIGHT).fg(Color::Black)),
+        Span::styled(
+            cursor_ch,
+            Style::default().bg(theme::ACCENT_BRIGHT).fg(Color::Black),
+        ),
         Span::raw(after_cursor),
     ]);
-    let chunks = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(0)])
-        .split(inner);
+    let chunks = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .split(inner);
     f.render_widget(Paragraph::new(line), chunks[0]);
-    f.render_widget(Paragraph::new("enter: confirm   esc: cancel").style(theme::muted()), chunks[1]);
+    f.render_widget(
+        Paragraph::new("enter: confirm   esc: cancel").style(theme::muted()),
+        chunks[1],
+    );
 }
 
-pub fn render_text_field(f: &mut Frame, field: &FieldInput, label: &str, focused: bool, area: Rect) {
-    let border_style = if focused { theme::border_focused() } else { theme::border_normal() };
+pub fn render_text_field(
+    f: &mut Frame,
+    field: &FieldInput,
+    label: &str,
+    focused: bool,
+    area: Rect,
+) {
+    let border_style = if focused {
+        theme::border_focused()
+    } else {
+        theme::border_normal()
+    };
     let (before_disp, after_disp) = field.split_display_at_cursor();
     // For cursor char: take the first char of after_disp (1 or 3 bytes for •)
-    let cursor_char: String = after_disp.chars().next()
+    let cursor_char: String = after_disp
+        .chars()
+        .next()
         .map(|c| c.to_string())
         .unwrap_or_else(|| " ".to_string());
     let after_cursor: String = if after_disp.is_empty() {
@@ -665,15 +864,22 @@ pub fn render_text_field(f: &mut Frame, field: &FieldInput, label: &str, focused
     let content = if focused {
         Line::from(vec![
             Span::raw(before_disp),
-            Span::styled(cursor_char, Style::default().bg(theme::ACCENT_BRIGHT).fg(Color::Black)),
+            Span::styled(
+                cursor_char,
+                Style::default().bg(theme::ACCENT_BRIGHT).fg(Color::Black),
+            ),
             Span::raw(after_cursor),
         ])
     } else {
         Line::from(Span::styled(before_disp + &after_disp, theme::dim()))
     };
 
-    let para = Paragraph::new(content)
-        .block(Block::default().borders(Borders::ALL).title(label).border_style(border_style));
+    let para = Paragraph::new(content).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(label)
+            .border_style(border_style),
+    );
     f.render_widget(para, area);
 }
 
@@ -693,7 +899,13 @@ pub enum SecretsEditAction {
     None,
     Cancel,
     Save(Vec<ProfileSecretBinding>),
-    TreeNeedsLoad { project_id: String, environment: String, path: String, folders_job: u64, names_job: u64 },
+    TreeNeedsLoad {
+        project_id: String,
+        environment: String,
+        path: String,
+        folders_job: u64,
+        names_job: u64,
+    },
 }
 
 impl SecretsEditState {
@@ -703,11 +915,14 @@ impl SecretsEditState {
         let mut by_inject: HashMap<String, BindingRow> = HashMap::new();
         // Pre-populate existing bindings from the profile
         for binding in &profile.secret_bindings {
-            by_inject.insert(binding.inject_as.clone(), BindingRow {
-                inject_as: binding.inject_as.clone(),
-                used_by: vec![],
-                binding: Some(binding.source.clone()),
-            });
+            by_inject.insert(
+                binding.inject_as.clone(),
+                BindingRow {
+                    inject_as: binding.inject_as.clone(),
+                    used_by: vec![],
+                    binding: Some(binding.source.clone()),
+                },
+            );
         }
         // Scan capabilities to populate used_by and add missing rows
         for cap_name in &profile.capabilities {
@@ -738,7 +953,12 @@ impl SecretsEditState {
         }
     }
 
-    pub fn deliver_tree_folders(&mut self, job_id: u64, folders: Vec<String>, error: Option<String>) {
+    pub fn deliver_tree_folders(
+        &mut self,
+        job_id: u64,
+        folders: Vec<String>,
+        error: Option<String>,
+    ) {
         if let Some((_, ref mut tree)) = self.tree_picker {
             tree.deliver_folders(job_id, folders, error);
         }
@@ -750,33 +970,57 @@ impl SecretsEditState {
         }
     }
 
-    pub fn handle_key(&mut self, code: KeyCode, infisical_cfg: Option<&InfisicalConfig>) -> SecretsEditAction {
+    pub fn handle_key(
+        &mut self,
+        code: KeyCode,
+        infisical_cfg: Option<&InfisicalConfig>,
+    ) -> SecretsEditAction {
         // Tree picker sub-overlay (takes priority)
         if let Some((row_idx, ref mut tree)) = self.tree_picker {
             let action = tree.handle_key(code, infisical_cfg);
             match action {
-                SecretsTreeAction::Cancelled => { self.tree_picker = None; }
+                SecretsTreeAction::Cancelled => {
+                    self.tree_picker = None;
+                }
                 SecretsTreeAction::NeedsLoad(path) => {
                     let project_id = tree.project_id.clone();
                     let environment = tree.environment.clone();
                     let (fid, nid) = tree.request_load(&path);
                     return SecretsEditAction::TreeNeedsLoad {
-                        project_id, environment, path, folders_job: fid, names_job: nid,
+                        project_id,
+                        environment,
+                        path,
+                        folders_job: fid,
+                        names_job: nid,
                     };
                 }
                 SecretsTreeAction::Selected(iref) => {
-                    let inject_as = self.binding_rows.get(row_idx).map(|r| r.inject_as.clone()).unwrap_or_default();
+                    let inject_as = self
+                        .binding_rows
+                        .get(row_idx)
+                        .map(|r| r.inject_as.clone())
+                        .unwrap_or_default();
                     if let Some(row) = self.binding_rows.get_mut(row_idx) {
-                        row.binding = Some(CredentialSource::Infisical { secret_ref: iref, inject_as });
+                        row.binding = Some(CredentialSource::Infisical {
+                            secret_ref: iref,
+                            inject_as,
+                        });
                     }
                     self.tree_picker = None;
                 }
                 SecretsTreeAction::SelectedMany(refs) => {
                     // single-slot binding: only the first selected secret is applied; the rest are discarded
                     if let Some(iref) = refs.into_iter().next() {
-                        let inject_as = self.binding_rows.get(row_idx).map(|r| r.inject_as.clone()).unwrap_or_default();
+                        let inject_as = self
+                            .binding_rows
+                            .get(row_idx)
+                            .map(|r| r.inject_as.clone())
+                            .unwrap_or_default();
                         if let Some(row) = self.binding_rows.get_mut(row_idx) {
-                            row.binding = Some(CredentialSource::Infisical { secret_ref: iref, inject_as });
+                            row.binding = Some(CredentialSource::Infisical {
+                                secret_ref: iref,
+                                inject_as,
+                            });
                         }
                     }
                     self.tree_picker = None;
@@ -791,32 +1035,46 @@ impl SecretsEditState {
         // Env input
         if let Some((row_idx, ref mut fi)) = self.env_input {
             match code {
-                KeyCode::Esc => { self.env_input = None; }
+                KeyCode::Esc => {
+                    self.env_input = None;
+                }
                 KeyCode::Enter => {
                     let val = fi.value.trim().to_string();
-                    if !val.is_empty() {
-                        if let Some(row) = self.binding_rows.get_mut(row_idx) {
-                            row.binding = Some(CredentialSource::Env { env_var: val, inject_as: row.inject_as.clone() });
-                        }
+                    if !val.is_empty()
+                        && let Some(row) = self.binding_rows.get_mut(row_idx)
+                    {
+                        row.binding = Some(CredentialSource::Env {
+                            env_var: val,
+                            inject_as: row.inject_as.clone(),
+                        });
                     }
                     self.env_input = None;
                 }
-                _ => { fi.handle_key(code); }
+                _ => {
+                    fi.handle_key(code);
+                }
             }
             return SecretsEditAction::None;
         }
         // Literal input
         if let Some((row_idx, ref mut fi)) = self.literal_input {
             match code {
-                KeyCode::Esc => { self.literal_input = None; }
+                KeyCode::Esc => {
+                    self.literal_input = None;
+                }
                 KeyCode::Enter => {
                     let val = fi.value.clone();
                     if let Some(row) = self.binding_rows.get_mut(row_idx) {
-                        row.binding = Some(CredentialSource::Literal { value: val, inject_as: row.inject_as.clone() });
+                        row.binding = Some(CredentialSource::Literal {
+                            value: val,
+                            inject_as: row.inject_as.clone(),
+                        });
                     }
                     self.literal_input = None;
                 }
-                _ => { fi.handle_key(code); }
+                _ => {
+                    fi.handle_key(code);
+                }
             }
             return SecretsEditAction::None;
         }
@@ -824,17 +1082,27 @@ impl SecretsEditState {
         match code {
             KeyCode::Esc => return SecretsEditAction::Cancel,
             KeyCode::Enter => {
-                let bindings = self.binding_rows.iter()
-                    .filter_map(|r| r.binding.as_ref().map(|src| ProfileSecretBinding {
-                        inject_as: r.inject_as.clone(),
-                        source: src.clone(),
-                    }))
+                let bindings = self
+                    .binding_rows
+                    .iter()
+                    .filter_map(|r| {
+                        r.binding.as_ref().map(|src| ProfileSecretBinding {
+                            inject_as: r.inject_as.clone(),
+                            source: src.clone(),
+                        })
+                    })
                     .collect();
                 return SecretsEditAction::Save(bindings);
             }
-            KeyCode::Up => { if self.cursor > 0 { self.cursor -= 1; } }
+            KeyCode::Up => {
+                if self.cursor > 0 {
+                    self.cursor -= 1;
+                }
+            }
             KeyCode::Down => {
-                if self.cursor + 1 < self.binding_rows.len() { self.cursor += 1; }
+                if self.cursor + 1 < self.binding_rows.len() {
+                    self.cursor += 1;
+                }
             }
             KeyCode::Char('p') | KeyCode::Char('i') => {
                 if let Some(row) = self.binding_rows.get(self.cursor) {
@@ -857,8 +1125,11 @@ impl SecretsEditState {
                         let row_idx = self.cursor;
                         self.tree_picker = Some((row_idx, tree));
                         return SecretsEditAction::TreeNeedsLoad {
-                            project_id: proj, environment: env,
-                            path: "/".to_string(), folders_job: fid, names_job: nid,
+                            project_id: proj,
+                            environment: env,
+                            path: "/".to_string(),
+                            folders_job: fid,
+                            names_job: nid,
                         };
                     } else {
                         let mut t = SecretsTree::new(&project_id, &environment, TreeMode::Bind);
@@ -867,10 +1138,16 @@ impl SecretsEditState {
                     }
                 }
             }
-            KeyCode::Char('e') => { self.env_input = Some((self.cursor, FieldInput::default())); }
-            KeyCode::Char('l') => { self.literal_input = Some((self.cursor, FieldInput::default())); }
+            KeyCode::Char('e') => {
+                self.env_input = Some((self.cursor, FieldInput::default()));
+            }
+            KeyCode::Char('l') => {
+                self.literal_input = Some((self.cursor, FieldInput::default()));
+            }
             KeyCode::Char('d') => {
-                if let Some(row) = self.binding_rows.get_mut(self.cursor) { row.binding = None; }
+                if let Some(row) = self.binding_rows.get_mut(self.cursor) {
+                    row.binding = None;
+                }
             }
             _ => {}
         }
@@ -893,20 +1170,43 @@ impl SecretsEditState {
         let inner = block.inner(dialog);
         f.render_widget(block, dialog);
 
-        let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)])
-            .split(inner);
+        let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(inner);
 
         // Binding rows
-        let items: Vec<ListItem> = self.binding_rows.iter().enumerate().map(|(i, row)| {
-            let is_cursor = i == self.cursor;
-            let name_style = if is_cursor { theme::selected() } else { theme::normal() };
-            let binding_style = if row.binding.is_some() { theme::ok() } else { theme::muted() };
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("  {:<24}", row.inject_as), name_style),
-                Span::styled(format!("{:<28}  ", row.used_by.iter().take(2).cloned().collect::<Vec<_>>().join(", ")), theme::dim()),
-                Span::styled(row.display(), binding_style),
-            ]))
-        }).collect();
+        let items: Vec<ListItem> = self
+            .binding_rows
+            .iter()
+            .enumerate()
+            .map(|(i, row)| {
+                let is_cursor = i == self.cursor;
+                let name_style = if is_cursor {
+                    theme::selected()
+                } else {
+                    theme::normal()
+                };
+                let binding_style = if row.binding.is_some() {
+                    theme::ok()
+                } else {
+                    theme::muted()
+                };
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("  {:<24}", row.inject_as), name_style),
+                    Span::styled(
+                        format!(
+                            "{:<28}  ",
+                            row.used_by
+                                .iter()
+                                .take(2)
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                        theme::dim(),
+                    ),
+                    Span::styled(row.display(), binding_style),
+                ]))
+            })
+            .collect();
 
         let header = if self.binding_rows.is_empty() {
             "No credentials required by this profile's capabilities"
@@ -914,14 +1214,22 @@ impl SecretsEditState {
             "Credential bindings"
         };
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(header).border_style(theme::border_normal()))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(header)
+                    .border_style(theme::border_normal()),
+            )
             .highlight_style(theme::selected());
         let mut state = ListState::default();
         state.select(Some(self.cursor));
         f.render_stateful_widget(list, chunks[0], &mut state);
 
         f.render_widget(
-            Paragraph::new("↑↓:move  i/p:Infisical  e:env-var  l:literal  d:clear  ctrl-s:save  esc:cancel").style(theme::muted()),
+            Paragraph::new(
+                "↑↓:move  i/p:Infisical  e:env-var  l:literal  d:clear  ctrl-s:save  esc:cancel",
+            )
+            .style(theme::muted()),
             chunks[1],
         );
 
@@ -929,10 +1237,32 @@ impl SecretsEditState {
             tree.render(f, area);
         }
         if let Some((row_idx, ref fi)) = self.env_input {
-            render_inline_input(f, fi, &format!("Env var for {}", self.binding_rows.get(row_idx).map(|r| r.inject_as.as_str()).unwrap_or("?")), area);
+            render_inline_input(
+                f,
+                fi,
+                &format!(
+                    "Env var for {}",
+                    self.binding_rows
+                        .get(row_idx)
+                        .map(|r| r.inject_as.as_str())
+                        .unwrap_or("?")
+                ),
+                area,
+            );
         }
         if let Some((row_idx, ref fi)) = self.literal_input {
-            render_inline_input(f, fi, &format!("Literal value for {}", self.binding_rows.get(row_idx).map(|r| r.inject_as.as_str()).unwrap_or("?")), area);
+            render_inline_input(
+                f,
+                fi,
+                &format!(
+                    "Literal value for {}",
+                    self.binding_rows
+                        .get(row_idx)
+                        .map(|r| r.inject_as.as_str())
+                        .unwrap_or("?")
+                ),
+                area,
+            );
         }
     }
 }

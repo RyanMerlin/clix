@@ -1,19 +1,22 @@
-use ratatui::{prelude::*, widgets::*};
 use crate::tui::app::{App, Focus};
 use crate::tui::theme;
+use ratatui::{prelude::*, widgets::*};
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let pending = app.pending_approval_ids.len();
     let (main_area, banner_area) = if pending > 0 {
-        let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(0)])
-            .split(area);
+        let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(area);
         (chunks[1], Some(chunks[0]))
     } else {
         (area, None)
     };
 
     if let Some(banner) = banner_area {
-        let first_id = app.pending_approval_ids.first().map(|s| s.as_str()).unwrap_or("");
+        let first_id = app
+            .pending_approval_ids
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or("");
         let short_id = &first_id[..first_id.len().min(8)];
         let msg = format!(
             " ⚠ {pending} pending approval{} — run `clix approve {short_id}` or press A on Receipts screen ",
@@ -44,30 +47,36 @@ fn render_activity(f: &mut Frame, app: &App, area: Rect) {
         // Onboarding state
         render_onboarding(f, app, inner);
     } else {
-        let rows: Vec<Row> = app.receipts_preview.iter().map(|r| {
-            let (icon, icon_style) = match r.outcome.as_str() {
-                "allowed" => ("✓", theme::ok()),
-                "denied"  => ("✗", theme::danger()),
-                _         => ("⚠", theme::warn()),
-            };
-            Row::new(vec![
-                Cell::from(Span::styled(icon, icon_style)),
-                Cell::from(Span::styled(r.time.clone(), theme::muted())),
-                Cell::from(Span::styled(r.capability.clone(), theme::normal())),
-                Cell::from(Span::styled(r.profile.clone(), theme::dim())),
-                Cell::from(Span::styled(r.latency.clone(), theme::muted())),
-            ])
-        }).collect();
+        let rows: Vec<Row> = app
+            .receipts_preview
+            .iter()
+            .map(|r| {
+                let (icon, icon_style) = match r.outcome.as_str() {
+                    "allowed" => ("✓", theme::ok()),
+                    "denied" => ("✗", theme::danger()),
+                    _ => ("⚠", theme::warn()),
+                };
+                Row::new(vec![
+                    Cell::from(Span::styled(icon, icon_style)),
+                    Cell::from(Span::styled(r.time.clone(), theme::muted())),
+                    Cell::from(Span::styled(r.capability.clone(), theme::normal())),
+                    Cell::from(Span::styled(r.profile.clone(), theme::dim())),
+                    Cell::from(Span::styled(r.latency.clone(), theme::muted())),
+                ])
+            })
+            .collect();
 
-        let table = Table::new(rows, [
-            Constraint::Length(2),
-            Constraint::Length(6),
-            Constraint::Min(22),
-            Constraint::Length(12),
-            Constraint::Length(8),
-        ])
-        .header(Row::new(["", "time", "capability", "profile", "ms"])
-            .style(theme::muted()))
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Length(2),
+                Constraint::Length(6),
+                Constraint::Min(22),
+                Constraint::Length(12),
+                Constraint::Length(8),
+            ],
+        )
+        .header(Row::new(["", "time", "capability", "profile", "ms"]).style(theme::muted()))
         .column_spacing(1);
 
         f.render_widget(table, inner);
@@ -77,18 +86,24 @@ fn render_activity(f: &mut Frame, app: &App, area: Rect) {
 fn render_onboarding(f: &mut Frame, app: &App, area: Rect) {
     let has_packs = !app.packs.is_empty();
     let has_profiles = !app.profiles.is_empty();
-    let has_caps = app.registry.namespaces().len() > 0;
+    let has_caps = !app.registry.namespaces().is_empty();
 
     let mut lines = vec![
-        Line::from(Span::styled("  Welcome to clix", Style::default().fg(theme::ACCENT_BRIGHT).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            "  Welcome to clix",
+            Style::default()
+                .fg(theme::ACCENT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
+        )),
         Line::from(""),
-        Line::from(Span::styled("  The agent gateway is ready. Get started:", theme::dim())),
+        Line::from(Span::styled(
+            "  The agent gateway is ready. Get started:",
+            theme::dim(),
+        )),
         Line::from(""),
     ];
 
-    let step_style = |done: bool| -> Style {
-        if done { theme::ok() } else { theme::muted() }
-    };
+    let step_style = |done: bool| -> Style { if done { theme::ok() } else { theme::muted() } };
     let check = |done: bool| -> &'static str { if done { "✓" } else { "○" } };
 
     lines.push(Line::from(vec![
@@ -104,7 +119,10 @@ fn render_onboarding(f: &mut Frame, app: &App, area: Rect) {
         Span::raw("Capabilities will be auto-discovered"),
     ]));
     lines.push(Line::from(vec![
-        Span::styled(format!("  {}  ", check(has_profiles)), step_style(has_profiles)),
+        Span::styled(
+            format!("  {}  ", check(has_profiles)),
+            step_style(has_profiles),
+        ),
         Span::raw("Press "),
         Span::styled("1", theme::accent()),
         Span::raw(" → "),
@@ -113,7 +131,10 @@ fn render_onboarding(f: &mut Frame, app: &App, area: Rect) {
     ]));
     let has_infisical = app.infisical_cfg.is_some();
     lines.push(Line::from(vec![
-        Span::styled(format!("  {}  ", check(has_infisical)), step_style(has_infisical)),
+        Span::styled(
+            format!("  {}  ", check(has_infisical)),
+            step_style(has_infisical),
+        ),
         Span::raw("Press "),
         Span::styled("c", theme::accent()),
         Span::raw(" to configure Infisical secrets"),
@@ -170,12 +191,19 @@ fn render_health(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("  active       ", theme::muted()),
             dot(!app.active_profiles.is_empty()),
             Span::styled(
-                format!("  {}", if app.active_profiles.is_empty() {
-                    "none".to_string()
+                format!(
+                    "  {}",
+                    if app.active_profiles.is_empty() {
+                        "none".to_string()
+                    } else {
+                        app.active_profiles.join(", ")
+                    }
+                ),
+                if app.active_profiles.is_empty() {
+                    theme::warn()
                 } else {
-                    app.active_profiles.join(", ")
-                }),
-                if app.active_profiles.is_empty() { theme::warn() } else { theme::ok() }
+                    theme::ok()
+                },
             ),
         ]),
         Line::from(""),
@@ -188,19 +216,25 @@ fn render_health(f: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled("  clix home    ", theme::muted()),
             Span::styled(
-                clix_core::state::home_dir()
-                    .to_string_lossy()
-                    .to_string(),
-                theme::dim()
+                clix_core::state::home_dir().to_string_lossy().to_string(),
+                theme::dim(),
             ),
         ]),
     ];
 
     let mut hints: Vec<&str> = vec![];
-    if app.packs.is_empty()         { hints.push("install a pack to load capabilities"); }
-    if cap_count == 0               { hints.push("no capabilities loaded yet"); }
-    if app.profiles.is_empty()      { hints.push("create a profile to run commands"); }
-    if app.active_profiles.is_empty() { hints.push("activate a profile: sidebar 1 → enter"); }
+    if app.packs.is_empty() {
+        hints.push("install a pack to load capabilities");
+    }
+    if cap_count == 0 {
+        hints.push("no capabilities loaded yet");
+    }
+    if app.profiles.is_empty() {
+        hints.push("create a profile to run commands");
+    }
+    if app.active_profiles.is_empty() {
+        hints.push("activate a profile: sidebar 1 → enter");
+    }
     if !hints.is_empty() {
         lines.push(Line::from(""));
         for h in hints {

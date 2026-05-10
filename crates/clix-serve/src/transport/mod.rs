@@ -1,4 +1,4 @@
 pub mod http;
-pub mod stdio;
 #[cfg(unix)]
 pub mod socket;
+pub mod stdio;

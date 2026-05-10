@@ -162,13 +162,13 @@ pub async fn tools_call(serve: &Arc<ServeState>, params: &serde_json::Value) -> 
 
 pub fn resources_list(serve: &Arc<ServeState>) -> MethodResult {
     let mut resources = vec![];
-    if serve.state.packs_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&serve.state.packs_dir) {
-            for entry in entries.flatten() {
-                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    resources.push(serde_json::json!({"uri":format!("clix://packs/{name}"),"name":name,"mimeType":"application/json"}));
-                }
+    if serve.state.packs_dir.exists()
+        && let Ok(entries) = std::fs::read_dir(&serve.state.packs_dir)
+    {
+        for entry in entries.flatten() {
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                let name = entry.file_name().to_string_lossy().to_string();
+                resources.push(serde_json::json!({"uri":format!("clix://packs/{name}"),"name":name,"mimeType":"application/json"}));
             }
         }
     }

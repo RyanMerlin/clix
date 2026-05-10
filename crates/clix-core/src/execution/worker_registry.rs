@@ -1,3 +1,7 @@
+use super::worker_protocol::{WorkerEvent, WorkerHandshake, WorkerReady, WorkerRequest};
+use crate::error::{ClixError, Result};
+use crate::manifest::capability::{IsolationTier, SandboxProfile};
+use crate::sandbox::jail::{JailConfig, discover_lib_deps, resolve_and_hash_binary};
 /// Warm worker pool: manages long-lived jailed worker processes, keyed by (profile, binary_path).
 ///
 /// Each entry is a `WorkerHandle` — a live child process with a connected unix socket for
@@ -10,10 +14,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use crate::error::{ClixError, Result};
-use crate::manifest::capability::{IsolationTier, SandboxProfile};
-use super::worker_protocol::{WorkerRequest, WorkerEvent, WorkerHandshake, WorkerReady};
-use crate::sandbox::jail::{JailConfig, resolve_and_hash_binary, discover_lib_deps};
 
 /// Unique key for a worker slot.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -68,7 +68,11 @@ impl WorkerRegistry {
     }
 
     /// Create a registry with an explicit broker socket path (useful for testing).
-    pub fn new_with_broker(worker_binary: PathBuf, idle_ttl_secs: u64, broker_socket: Option<PathBuf>) -> Arc<Self> {
+    pub fn new_with_broker(
+        worker_binary: PathBuf,
+        idle_ttl_secs: u64,
+        broker_socket: Option<PathBuf>,
+    ) -> Arc<Self> {
         Arc::new(WorkerRegistry {
             workers: Mutex::new(HashMap::new()),
             worker_binary,
@@ -81,7 +85,10 @@ impl WorkerRegistry {
     pub fn locate_worker_binary() -> PathBuf {
         // First try alongside the current executable
         if let Ok(exe) = std::env::current_exe() {
-            let candidate = exe.parent().map(|d| d.join("clix-worker")).unwrap_or_default();
+            let candidate = exe
+                .parent()
+                .map(|d| d.join("clix-worker"))
+                .unwrap_or_default();
             if candidate.exists() {
                 return candidate;
             }
@@ -105,7 +112,9 @@ impl WorkerRegistry {
         credentials_declared: bool,
     ) -> Result<WorkerEvent> {
         if matches!(tier, IsolationTier::None) {
-            return Err(ClixError::Worker("dispatch called with tier=none; use builtin handler".to_string()));
+            return Err(ClixError::Worker(
+                "dispatch called with tier=none; use builtin handler".to_string(),
+            ));
         }
 
         #[cfg(not(target_os = "linux"))]
@@ -119,7 +128,7 @@ impl WorkerRegistry {
         {
             if matches!(tier, IsolationTier::Firecracker) {
                 return Err(ClixError::Isolation(
-                    "Firecracker tier is not yet implemented; use warm_worker".to_string()
+                    "Firecracker tier is not yet implemented; use warm_worker".to_string(),
                 ));
             }
 
@@ -135,7 +144,8 @@ impl WorkerRegistry {
             let mut request = request;
             if let Some(broker_path) = &self.broker_socket {
                 let cli = super::broker_client::cli_name_from_command(binary_command);
-                let broker_env = super::broker_client::mint_credentials(broker_path, cli, credentials_declared)?;
+                let broker_env =
+                    super::broker_client::mint_credentials(broker_path, cli, credentials_declared)?;
                 for (k, v) in broker_env {
                     request.env.insert(k, v);
                 }
@@ -155,9 +165,7 @@ impl WorkerRegistry {
     pub fn reap_idle(&self) {
         let mut workers = self.workers.lock().unwrap();
         let ttl = self.idle_ttl;
-        workers.retain(|_, handle| {
-            handle.last_used.elapsed() < ttl
-        });
+        workers.retain(|_, handle| handle.last_used.elapsed() < ttl);
     }
 
     /// Shut down all workers gracefully.
@@ -174,12 +182,20 @@ impl WorkerRegistry {
 
 impl WorkerRegistry {
     #[cfg(target_os = "linux")]
-    fn ensure_worker(&self, key: &WorkerKey, sandbox_profile: Option<&SandboxProfile>) -> Result<()> {
+    fn ensure_worker(
+        &self,
+        key: &WorkerKey,
+        sandbox_profile: Option<&SandboxProfile>,
+    ) -> Result<()> {
         let mut workers = self.workers.lock().unwrap();
         // Check if existing worker is still alive
         if let Some(handle) = workers.get_mut(key) {
             // Try a quick health check by attempting a zero-byte peek on the socket
-            let alive = handle.child.try_wait().map(|s| s.is_none()).unwrap_or(false);
+            let alive = handle
+                .child
+                .try_wait()
+                .map(|s| s.is_none())
+                .unwrap_or(false);
             if alive {
                 return Ok(());
             }
@@ -194,9 +210,13 @@ impl WorkerRegistry {
     }
 
     #[cfg(target_os = "linux")]
-    fn spawn_worker(&self, key: &WorkerKey, sandbox_profile: Option<&SandboxProfile>) -> Result<WorkerHandle> {
-        use std::os::unix::net::UnixStream;
+    fn spawn_worker(
+        &self,
+        key: &WorkerKey,
+        sandbox_profile: Option<&SandboxProfile>,
+    ) -> Result<WorkerHandle> {
         use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
 
         // Resolve and hash the binary
         let (binary_path, binary_sha256) = resolve_and_hash_binary(&key.binary)?;
@@ -228,15 +248,18 @@ impl WorkerRegistry {
         };
 
         // Create a socketpair: gateway holds sock_a, worker gets sock_b fd
-        let (sock_a, sock_b) = UnixStream::pair()
-            .map_err(|e| ClixError::Worker(format!("socketpair: {e}")))?;
+        let (sock_a, sock_b) =
+            UnixStream::pair().map_err(|e| ClixError::Worker(format!("socketpair: {e}")))?;
 
         use std::os::unix::io::IntoRawFd;
         let worker_fd = sock_b.into_raw_fd();
 
         // Build environment for the worker
         let mut env_vars = jail_config.to_env();
-        env_vars.push((crate::sandbox::jail::env_keys::WORKER_SOCKET_FD.to_string(), worker_fd.to_string()));
+        env_vars.push((
+            crate::sandbox::jail::env_keys::WORKER_SOCKET_FD.to_string(),
+            worker_fd.to_string(),
+        ));
 
         // Spawn the worker binary.
         // IMPORTANT: UnixStream::pair() creates sockets with SOCK_CLOEXEC, meaning the
@@ -259,8 +282,12 @@ impl WorkerRegistry {
                 Ok(())
             });
         }
-        let child = cmd.spawn()
-            .map_err(|e| ClixError::Worker(format!("spawn worker {}: {e}", self.worker_binary.display())))?;
+        let child = cmd.spawn().map_err(|e| {
+            ClixError::Worker(format!(
+                "spawn worker {}: {e}",
+                self.worker_binary.display()
+            ))
+        })?;
 
         // Close our copy of the worker-side fd (gateway side no longer needs it)
         unsafe { libc::close(worker_fd) };
@@ -270,21 +297,26 @@ impl WorkerRegistry {
             pinned_binary: binary_path.to_string_lossy().to_string(),
             binary_sha256: binary_sha256.clone(),
         };
-        let mut sock_a_writer = sock_a.try_clone()
+        let mut sock_a_writer = sock_a
+            .try_clone()
             .map_err(|e| ClixError::Worker(format!("clone socket: {e}")))?;
-        let sock_a_reader = sock_a.try_clone()
+        let sock_a_reader = sock_a
+            .try_clone()
             .map_err(|e| ClixError::Worker(format!("clone socket for read: {e}")))?;
 
         let msg = serde_json::to_string(&handshake)? + "\n";
-        sock_a_writer.write_all(msg.as_bytes())
+        sock_a_writer
+            .write_all(msg.as_bytes())
             .map_err(|e| ClixError::Worker(format!("write handshake: {e}")))?;
 
         // Read WorkerReady (with timeout)
-        sock_a_writer.set_read_timeout(Some(Duration::from_secs(30)))
+        sock_a_writer
+            .set_read_timeout(Some(Duration::from_secs(30)))
             .map_err(|e| ClixError::Worker(format!("set timeout: {e}")))?;
         let mut reader = BufReader::new(sock_a_reader);
         let mut line = String::new();
-        reader.read_line(&mut line)
+        reader
+            .read_line(&mut line)
             .map_err(|e| ClixError::Worker(format!("read ready: {e}")))?;
         let ready: WorkerReady = serde_json::from_str(line.trim())
             .map_err(|e| ClixError::Worker(format!("parse ready: {e}")))?;
@@ -309,16 +341,21 @@ impl WorkerRegistry {
         use std::io::{BufRead, BufReader, Write};
 
         let mut workers = self.workers.lock().unwrap();
-        let handle = workers.get_mut(key)
+        let handle = workers
+            .get_mut(key)
             .ok_or_else(|| ClixError::Worker("worker not found after ensure".to_string()))?;
 
         // Send the request
         let msg = serde_json::to_string(&request)? + "\n";
-        handle.socket.write_all(msg.as_bytes())
+        handle
+            .socket
+            .write_all(msg.as_bytes())
             .map_err(|e| ClixError::Worker(format!("write request: {e}")))?;
 
         // Read response events until Exit or Error
-        let sock_clone = handle.socket.try_clone()
+        let sock_clone = handle
+            .socket
+            .try_clone()
             .map_err(|e| ClixError::Worker(format!("clone socket: {e}")))?;
         handle.last_used = Instant::now();
         drop(workers); // release lock while waiting for response
@@ -326,10 +363,13 @@ impl WorkerRegistry {
         let mut reader = BufReader::new(sock_clone);
         loop {
             let mut line = String::new();
-            reader.read_line(&mut line)
+            reader
+                .read_line(&mut line)
                 .map_err(|e| ClixError::Worker(format!("read event: {e}")))?;
             if line.is_empty() {
-                return Err(ClixError::Worker("worker closed connection unexpectedly".to_string()));
+                return Err(ClixError::Worker(
+                    "worker closed connection unexpectedly".to_string(),
+                ));
             }
             let event: WorkerEvent = serde_json::from_str(line.trim())
                 .map_err(|e| ClixError::Worker(format!("parse event: {e}")))?;
@@ -352,8 +392,16 @@ mod tests {
 
     #[test]
     fn test_worker_key_eq() {
-        let a = WorkerKey { profile: "readonly".to_string(), binary: "/usr/bin/gcloud".to_string(), tier: IsolationTier::WarmWorker };
-        let b = WorkerKey { profile: "readonly".to_string(), binary: "/usr/bin/gcloud".to_string(), tier: IsolationTier::WarmWorker };
+        let a = WorkerKey {
+            profile: "readonly".to_string(),
+            binary: "/usr/bin/gcloud".to_string(),
+            tier: IsolationTier::WarmWorker,
+        };
+        let b = WorkerKey {
+            profile: "readonly".to_string(),
+            binary: "/usr/bin/gcloud".to_string(),
+            tier: IsolationTier::WarmWorker,
+        };
         assert_eq!(a, b);
     }
 

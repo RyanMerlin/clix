@@ -1,6 +1,10 @@
+use crate::dispatch::{ServeState, dispatch};
+use axum::{
+    Json, Router,
+    extract::State,
+    routing::{get, post},
+};
 use std::sync::Arc;
-use axum::{extract::State, routing::{post, get}, Json, Router};
-use crate::dispatch::{dispatch, ServeState};
 
 pub async fn serve_http(serve: Arc<ServeState>, addr: &str) -> anyhow::Result<()> {
     if std::env::var("CLIX_HTTP_EXPERIMENTAL").is_err() {
@@ -11,7 +15,9 @@ pub async fn serve_http(serve: Arc<ServeState>, addr: &str) -> anyhow::Result<()
         );
     }
     eprintln!("[clix-serve] WARNING: HTTP transport is experimental — no auth, no TLS");
-    eprintln!("[clix-serve] Do not expose this to untrusted networks (CLIX_HTTP_EXPERIMENTAL=1 acknowledged)");
+    eprintln!(
+        "[clix-serve] Do not expose this to untrusted networks (CLIX_HTTP_EXPERIMENTAL=1 acknowledged)"
+    );
     let app = Router::new()
         .route("/", post(handle_rpc))
         .route("/metrics", get(metrics_handler))
@@ -22,13 +28,19 @@ pub async fn serve_http(serve: Arc<ServeState>, addr: &str) -> anyhow::Result<()
     Ok(())
 }
 
-async fn handle_rpc(State(serve): State<Arc<ServeState>>, Json(req): Json<serde_json::Value>) -> Json<serde_json::Value> {
+async fn handle_rpc(
+    State(serve): State<Arc<ServeState>>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
     Json(dispatch(serve, req).await)
 }
 
 async fn metrics_handler() -> impl axum::response::IntoResponse {
     (
-        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
         crate::metrics::render(),
     )
 }

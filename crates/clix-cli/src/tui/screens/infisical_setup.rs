@@ -1,10 +1,10 @@
-use crossterm::event::KeyCode;
-use ratatui::{prelude::*, widgets::*};
-use clix_core::state::InfisicalConfig;
+use super::wizards::profile::render_text_field;
 use crate::tui::theme;
 use crate::tui::widgets::form::FieldInput;
 use crate::tui::work::JobId;
-use super::wizards::profile::render_text_field;
+use clix_core::state::InfisicalConfig;
+use crossterm::event::KeyCode;
+use ratatui::{prelude::*, widgets::*};
 
 pub enum SubmitState {
     Idle,
@@ -33,7 +33,7 @@ pub enum InfisicalSetupAction {
         site_url: String,
         client_id: String,
         client_secret: String,
-        service_token: String,   // empty = keep existing
+        service_token: String, // empty = keep existing
         project_id: String,
         environment: String,
     },
@@ -41,27 +41,41 @@ pub enum InfisicalSetupAction {
 
 impl InfisicalSetupState {
     pub fn new(existing: Option<&InfisicalConfig>) -> Self {
-        let (site_url, project_id, environment) = existing.map(|c| (
-            c.site_url.clone(),
-            c.default_project_id.clone().unwrap_or_default(),
-            c.default_environment.clone(),
-        )).unwrap_or_else(|| (
-            "https://app.infisical.com".to_string(),
-            String::new(),
-            "dev".to_string(),
-        ));
+        let (site_url, project_id, environment) = existing
+            .map(|c| {
+                (
+                    c.site_url.clone(),
+                    c.default_project_id.clone().unwrap_or_default(),
+                    c.default_environment.clone(),
+                )
+            })
+            .unwrap_or_else(|| {
+                (
+                    "https://app.infisical.com".to_string(),
+                    String::new(),
+                    "dev".to_string(),
+                )
+            });
 
         let client_id = existing
             .and_then(|c| c.client_id.as_ref())
             .map(|v| FieldInput::new(v))
-            .unwrap_or_else(FieldInput::default);
+            .unwrap_or_default();
         let client_secret = if existing.and_then(|c| c.client_secret.as_ref()).is_some() {
-            FieldInput { value: "(already set)".to_string(), cursor: 14, masked: true }
+            FieldInput {
+                value: "(already set)".to_string(),
+                cursor: 14,
+                masked: true,
+            }
         } else {
             FieldInput::masked()
         };
         let service_token = if existing.and_then(|c| c.service_token.as_ref()).is_some() {
-            FieldInput { value: "(already set)".to_string(), cursor: 14, masked: true }
+            FieldInput {
+                value: "(already set)".to_string(),
+                cursor: 14,
+                masked: true,
+            }
         } else {
             FieldInput::masked()
         };
@@ -92,14 +106,18 @@ impl InfisicalSetupState {
         let client_id = self.client_id.value.trim();
         let client_secret = self.client_secret.value.trim();
         let service_token = self.service_token.value.trim();
-        let universal_auth_set = !client_id.is_empty() && client_id != "(already set)"
-            && !client_secret.is_empty() && client_secret != "(already set)";
+        let universal_auth_set = !client_id.is_empty()
+            && client_id != "(already set)"
+            && !client_secret.is_empty()
+            && client_secret != "(already set)";
         let service_token_set = !service_token.is_empty() && service_token != "(already set)";
         if !universal_auth_set && !service_token_set {
             return Err("Provide universal auth client_id/client_secret".to_string());
         }
         if service_token_set && !service_token.starts_with("st.") {
-            return Err("Service token should start with 'st.' — check your Infisical project".to_string());
+            return Err(
+                "Service token should start with 'st.' — check your Infisical project".to_string(),
+            );
         }
         if self.environment.value.trim().is_empty() {
             return Err("Environment is required".to_string());
@@ -137,7 +155,10 @@ impl InfisicalSetupState {
                 self.active_field = (self.active_field + 1) % self.field_count();
             }
             KeyCode::BackTab => {
-                self.active_field = self.active_field.checked_sub(1).unwrap_or(self.field_count().saturating_sub(1));
+                self.active_field = self
+                    .active_field
+                    .checked_sub(1)
+                    .unwrap_or(self.field_count().saturating_sub(1));
             }
             KeyCode::Enter => {
                 if let Err(msg) = self.validate() {
@@ -216,29 +237,73 @@ impl InfisicalSetupState {
         constraints.push(Constraint::Min(0));
         let chunks = Layout::vertical(constraints).split(area);
 
-        let fa = if focused { self.active_field } else { usize::MAX };
+        let fa = if focused {
+            self.active_field
+        } else {
+            usize::MAX
+        };
         render_text_field(f, &self.site_url, "Site URL", fa == 0, chunks[0]);
-        render_text_field(f, &self.client_id, "Universal Auth Client ID", fa == 1, chunks[1]);
-        render_text_field(f, &self.client_secret, "Universal Auth Client Secret", fa == 2, chunks[2]);
+        render_text_field(
+            f,
+            &self.client_id,
+            "Universal Auth Client ID",
+            fa == 1,
+            chunks[1],
+        );
+        render_text_field(
+            f,
+            &self.client_secret,
+            "Universal Auth Client Secret",
+            fa == 2,
+            chunks[2],
+        );
         let mut idx = 3;
         if self.show_advanced {
-            render_text_field(f, &self.service_token, "Service Token (advanced fallback)", fa == 3, chunks[idx]);
+            render_text_field(
+                f,
+                &self.service_token,
+                "Service Token (advanced fallback)",
+                fa == 3,
+                chunks[idx],
+            );
             idx += 1;
         }
-        render_text_field(f, &self.project_id, "Project ID (optional — scopes tree browser)", fa == idx, chunks[idx]);
+        render_text_field(
+            f,
+            &self.project_id,
+            "Project ID (optional — scopes tree browser)",
+            fa == idx,
+            chunks[idx],
+        );
         idx += 1;
-        render_text_field(f, &self.environment, "Default Environment", fa == idx, chunks[idx]);
+        render_text_field(
+            f,
+            &self.environment,
+            "Default Environment",
+            fa == idx,
+            chunks[idx],
+        );
 
         if let Some(ref msg) = self.status {
-            let style = if self.status_is_error { theme::danger() } else { theme::ok() };
-            f.render_widget(Paragraph::new(Span::styled(msg.clone(), style)), chunks[idx + 1]);
+            let style = if self.status_is_error {
+                theme::danger()
+            } else {
+                theme::ok()
+            };
+            f.render_widget(
+                Paragraph::new(Span::styled(msg.clone(), style)),
+                chunks[idx + 1],
+            );
         } else {
             let hint = if focused {
                 "tab:next  v:advanced  enter:save  esc:cancel"
             } else {
                 "tab:focus form  esc:cancel"
             };
-            f.render_widget(Paragraph::new(Span::styled(hint, theme::muted())), chunks[idx + 1]);
+            f.render_widget(
+                Paragraph::new(Span::styled(hint, theme::muted())),
+                chunks[idx + 1],
+            );
         }
     }
 
@@ -271,17 +336,53 @@ impl InfisicalSetupState {
         constraints.push(Constraint::Min(0));
         let chunks = Layout::vertical(constraints).split(inner);
 
-        render_text_field(f, &self.site_url, "Site URL", self.active_field == 0, chunks[0]);
-        render_text_field(f, &self.client_id, "Universal Auth Client ID", self.active_field == 1, chunks[1]);
-        render_text_field(f, &self.client_secret, "Universal Auth Client Secret", self.active_field == 2, chunks[2]);
+        render_text_field(
+            f,
+            &self.site_url,
+            "Site URL",
+            self.active_field == 0,
+            chunks[0],
+        );
+        render_text_field(
+            f,
+            &self.client_id,
+            "Universal Auth Client ID",
+            self.active_field == 1,
+            chunks[1],
+        );
+        render_text_field(
+            f,
+            &self.client_secret,
+            "Universal Auth Client Secret",
+            self.active_field == 2,
+            chunks[2],
+        );
         let mut idx = 3;
         if self.show_advanced {
-            render_text_field(f, &self.service_token, "Service Token (advanced fallback)", self.active_field == 3, chunks[idx]);
+            render_text_field(
+                f,
+                &self.service_token,
+                "Service Token (advanced fallback)",
+                self.active_field == 3,
+                chunks[idx],
+            );
             idx += 1;
         }
-        render_text_field(f, &self.project_id, "Project ID (optional)", self.active_field == idx, chunks[idx]);
+        render_text_field(
+            f,
+            &self.project_id,
+            "Project ID (optional)",
+            self.active_field == idx,
+            chunks[idx],
+        );
         idx += 1;
-        render_text_field(f, &self.environment, "Default Environment", self.active_field == idx, chunks[idx]);
+        render_text_field(
+            f,
+            &self.environment,
+            "Default Environment",
+            self.active_field == idx,
+            chunks[idx],
+        );
 
         match &self.submit_state {
             SubmitState::Saving { .. } => {
@@ -298,7 +399,7 @@ impl InfisicalSetupState {
                     chunks[idx + 1],
                 );
             }
-            SubmitState::Err(ref msg) => {
+            SubmitState::Err(msg) => {
                 f.render_widget(
                     Paragraph::new(Span::styled(
                         format!("✗ {msg} — edit and retry, or esc to cancel"),
@@ -309,8 +410,15 @@ impl InfisicalSetupState {
             }
             SubmitState::Idle => {
                 if let Some(ref msg) = self.status {
-                    let style = if self.status_is_error { theme::danger() } else { theme::ok() };
-                    f.render_widget(Paragraph::new(Span::styled(msg.clone(), style)), chunks[idx + 1]);
+                    let style = if self.status_is_error {
+                        theme::danger()
+                    } else {
+                        theme::ok()
+                    };
+                    f.render_widget(
+                        Paragraph::new(Span::styled(msg.clone(), style)),
+                        chunks[idx + 1],
+                    );
                 } else {
                     f.render_widget(
                         Paragraph::new(Span::styled(

@@ -1,14 +1,14 @@
+use crate::output::print_json;
 use anyhow::Result;
-use std::path::Path;
 use clix_core::manifest::pack::PackManifest;
-use clix_core::packs::{
-    bundle_pack_signed, diff_pack, discover_pack, install_pack_verified,
-    onboard_cli, publish_pack, scaffold_pack, validate_pack,
-};
 use clix_core::packs::scaffold::Preset;
 use clix_core::packs::signing;
-use clix_core::state::{home_dir, ClixState};
-use crate::output::print_json;
+use clix_core::packs::{
+    bundle_pack_signed, diff_pack, discover_pack, install_pack_verified, onboard_cli, publish_pack,
+    scaffold_pack, validate_pack,
+};
+use clix_core::state::{ClixState, home_dir};
+use std::path::Path;
 
 pub fn list(json: bool, available: bool) -> Result<()> {
     let state = ClixState::load(home_dir())?;
@@ -16,9 +16,14 @@ pub fn list(json: bool, available: bool) -> Result<()> {
     if available {
         // List available packs (in source but not installed)
         let packs_src = [
-            std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("packs"))),
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.join("packs"))),
             Some(std::path::PathBuf::from("packs")),
-        ].into_iter().flatten().find(|p| p.exists());
+        ]
+        .into_iter()
+        .flatten()
+        .find(|p| p.exists());
 
         if let Some(src) = packs_src {
             let mut packs = vec![];
@@ -40,16 +45,24 @@ pub fn list(json: bool, available: bool) -> Result<()> {
                 }
             }
             packs.sort_by(|a, b| a.name.cmp(&b.name));
-            if json { print_json(&packs); }
-            else {
+            if json {
+                print_json(&packs);
+            } else {
                 for p in &packs {
-                    println!("{:<30} v{}  {}", p.name, p.version, p.description.as_deref().unwrap_or(""));
+                    println!(
+                        "{:<30} v{}  {}",
+                        p.name,
+                        p.version,
+                        p.description.as_deref().unwrap_or("")
+                    );
                 }
             }
         }
     } else {
         // List installed packs
-        if !state.packs_dir.exists() { return Ok(()); }
+        if !state.packs_dir.exists() {
+            return Ok(());
+        }
         let mut packs = vec![];
         for entry in std::fs::read_dir(&state.packs_dir)? {
             let entry = entry?;
@@ -64,10 +77,16 @@ pub fn list(json: bool, available: bool) -> Result<()> {
             }
         }
         packs.sort_by(|a, b| a.name.cmp(&b.name));
-        if json { print_json(&packs); }
-        else {
+        if json {
+            print_json(&packs);
+        } else {
             for p in &packs {
-                println!("{:<30} v{}  {}", p.name, p.version, p.description.as_deref().unwrap_or(""));
+                println!(
+                    "{:<30} v{}  {}",
+                    p.name,
+                    p.version,
+                    p.description.as_deref().unwrap_or("")
+                );
             }
         }
     }
@@ -79,8 +98,9 @@ pub fn show(name: &str, json: bool) -> Result<()> {
     let pack_dir = state.packs_dir.join(name);
     anyhow::ensure!(pack_dir.exists(), "pack not found: {name}");
     let report = discover_pack(&pack_dir)?;
-    if json { print_json(&report); }
-    else {
+    if json {
+        print_json(&report);
+    } else {
         println!("name:         {}", report.pack.name);
         println!("version:      {}", report.pack.version);
         println!("capabilities: {}", report.capabilities.len());
@@ -92,11 +112,22 @@ pub fn show(name: &str, json: bool) -> Result<()> {
 
 pub fn discover(path: &str, json: bool) -> Result<()> {
     let report = discover_pack(Path::new(path))?;
-    if json { print_json(&report); }
-    else {
+    if json {
+        print_json(&report);
+    } else {
         println!("pack:         {}", report.pack.name);
-        println!("capabilities: {}", report.capabilities.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(", "));
-        for w in &report.warnings { eprintln!("warn: {w}"); }
+        println!(
+            "capabilities: {}",
+            report
+                .capabilities
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        for w in &report.warnings {
+            eprintln!("warn: {w}");
+        }
     }
     Ok(())
 }
@@ -107,7 +138,9 @@ pub fn validate(path: &str) -> Result<()> {
         println!("ok");
         Ok(())
     } else {
-        for e in &errors { eprintln!("error: [{}] {}", e.path, e.message); }
+        for e in &errors {
+            eprintln!("error: [{}] {}", e.path, e.message);
+        }
         anyhow::bail!("{} validation error(s)", errors.len())
     }
 }
@@ -115,14 +148,26 @@ pub fn validate(path: &str) -> Result<()> {
 pub fn diff(installed_name: &str, new_path: &str, json: bool) -> Result<()> {
     let state = ClixState::load(home_dir())?;
     let installed = state.packs_dir.join(installed_name);
-    anyhow::ensure!(installed.exists(), "installed pack not found: {installed_name}");
+    anyhow::ensure!(
+        installed.exists(),
+        "installed pack not found: {installed_name}"
+    );
     let report = diff_pack(&installed, Path::new(new_path))?;
-    if json { print_json(&report); }
-    else {
-        if let Some((old, new)) = report.version_change { println!("version: {old} → {new}"); }
-        if !report.capabilities_added.is_empty()   { println!("+ capabilities: {}", report.capabilities_added.join(", ")); }
-        if !report.capabilities_removed.is_empty() { println!("- capabilities: {}", report.capabilities_removed.join(", ")); }
-        if !report.capabilities_changed.is_empty() { println!("~ capabilities: {}", report.capabilities_changed.join(", ")); }
+    if json {
+        print_json(&report);
+    } else {
+        if let Some((old, new)) = report.version_change {
+            println!("version: {old} → {new}");
+        }
+        if !report.capabilities_added.is_empty() {
+            println!("+ capabilities: {}", report.capabilities_added.join(", "));
+        }
+        if !report.capabilities_removed.is_empty() {
+            println!("- capabilities: {}", report.capabilities_removed.join(", "));
+        }
+        if !report.capabilities_changed.is_empty() {
+            println!("~ capabilities: {}", report.capabilities_changed.join(", "));
+        }
     }
     Ok(())
 }
@@ -143,7 +188,8 @@ pub fn install(path: &str, verify_sig: bool) -> Result<()> {
 pub fn bundle(path: &str, sign: bool, key: Option<&str>) -> Result<()> {
     let state = ClixState::load(home_dir())?;
     let signing_key = if sign || key.is_some() {
-        let k = key.map(std::path::PathBuf::from)
+        let k = key
+            .map(std::path::PathBuf::from)
             .unwrap_or_else(|| signing::default_signing_key_path(&state.home));
         if !k.exists() {
             anyhow::bail!(
@@ -170,14 +216,21 @@ pub fn publish(path: &str) -> Result<()> {
         println!("note: signing with {}", key_path.display());
         Some(key_path)
     } else {
-        println!("note: no signing key found at {} — pack will not be signed", key_path.display());
+        println!(
+            "note: no signing key found at {} — pack will not be signed",
+            key_path.display()
+        );
         None
     };
     // Re-bundle with signing if key exists, otherwise use what's already there
     let zip_path = Path::new(path);
     if signing_key.is_some() && zip_path.is_dir() {
         // Bundle + sign in one step
-        bundle_pack_signed(zip_path, &state.bundles_dir.join("published"), signing_key.as_deref())?;
+        bundle_pack_signed(
+            zip_path,
+            &state.bundles_dir.join("published"),
+            signing_key.as_deref(),
+        )?;
         println!("published (signed)");
         return Ok(());
     }
@@ -209,7 +262,7 @@ pub fn trust(pubkey_path: &str) -> Result<()> {
 }
 
 pub fn verify(pack_path: &str) -> Result<()> {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let state = ClixState::load(home_dir())?;
     let zip_path = Path::new(pack_path);
 
@@ -220,13 +273,14 @@ pub fn verify(pack_path: &str) -> Result<()> {
     }
 
     let sig_hex = std::fs::read_to_string(&sig_path)?;
-    let sig_bytes = hex::decode(sig_hex.trim())
-        .map_err(|e| anyhow::anyhow!("decode signature: {e}"))?;
+    let sig_bytes =
+        hex::decode(sig_hex.trim()).map_err(|e| anyhow::anyhow!("decode signature: {e}"))?;
     if sig_bytes.len() != 64 {
         println!("✗ signature has wrong length");
         return Ok(());
     }
-    let sig_arr: [u8; 64] = sig_bytes.try_into()
+    let sig_arr: [u8; 64] = sig_bytes
+        .try_into()
         .map_err(|_| anyhow::anyhow!("signature must be 64 bytes"))?;
 
     let data = std::fs::read(zip_path)?;
@@ -251,13 +305,22 @@ pub fn scaffold(name: &str, preset_str: &str, command: Option<&str>) -> Result<(
 
 pub fn onboard(name: &str, command: &str, json: bool) -> Result<()> {
     let report = onboard_cli(name, command, Path::new("."))?;
-    if json { print_json(&report); }
-    else {
+    if json {
+        print_json(&report);
+    } else {
         println!("cli:       {}", report.cli);
-        println!("preset:    {} (confidence {:.0}%)", report.suggested_preset, report.confidence * 100.0);
+        println!(
+            "preset:    {} (confidence {:.0}%)",
+            report.suggested_preset,
+            report.confidence * 100.0
+        );
         println!("subcommands: {}", report.inferred_subcommands.join(", "));
-        if let Some(p) = &report.scaffold_path { println!("scaffold:  {}", p.display()); }
-        for w in &report.warnings { eprintln!("warn: {w}"); }
+        if let Some(p) = &report.scaffold_path {
+            println!("scaffold:  {}", p.display());
+        }
+        for w in &report.warnings {
+            eprintln!("warn: {w}");
+        }
     }
     Ok(())
 }

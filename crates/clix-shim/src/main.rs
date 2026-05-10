@@ -30,21 +30,27 @@ fn main() {
         .unwrap_or("unknown")
         .to_string();
 
-    let socket_path = std::env::var("CLIX_GATEWAY_SOCKET")
-        .unwrap_or_else(|_| DEFAULT_SOCKET.to_string());
+    let socket_path =
+        std::env::var("CLIX_GATEWAY_SOCKET").unwrap_or_else(|_| DEFAULT_SOCKET.to_string());
 
     let mut stream = match connect_with_timeout(&socket_path) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("[clix-shim] ERROR: cannot connect to clix gateway at {socket_path}: {e}");
             eprintln!("[clix-shim] Start the gateway with `clix serve --socket {socket_path}`.");
-            eprintln!("[clix-shim] Direct invocation of `{command}` is not permitted through this shim.");
+            eprintln!(
+                "[clix-shim] Direct invocation of `{command}` is not permitted through this shim."
+            );
             std::process::exit(127);
         }
     };
 
     // argv[1..] are the arguments to the command
-    let args: Vec<&str> = if argv.len() > 1 { argv[1..].iter().map(String::as_str).collect() } else { vec![] };
+    let args: Vec<&str> = if argv.len() > 1 {
+        argv[1..].iter().map(String::as_str).collect()
+    } else {
+        vec![]
+    };
 
     // Use `shim/call` — the gateway resolves argv to a capability via argv_pattern.
     let request = serde_json::json!({
@@ -99,13 +105,24 @@ fn main() {
 
     // Print stdout
     let stdout = result["stdout"].as_str().unwrap_or("");
-    if !stdout.is_empty() { print!("{stdout}"); }
+    if !stdout.is_empty() {
+        print!("{stdout}");
+    }
 
     // Print stderr
     let stderr = result["stderr"].as_str().unwrap_or("");
-    if !stderr.is_empty() { eprint!("{stderr}"); }
+    if !stderr.is_empty() {
+        eprint!("{stderr}");
+    }
 
-    let exit_code = result["exit_code"].as_i64().unwrap_or(if result["ok"].as_bool().unwrap_or(true) { 0 } else { 1 }) as i32;
+    let exit_code =
+        result["exit_code"]
+            .as_i64()
+            .unwrap_or(if result["ok"].as_bool().unwrap_or(true) {
+                0
+            } else {
+                1
+            }) as i32;
     std::process::exit(exit_code);
 }
 

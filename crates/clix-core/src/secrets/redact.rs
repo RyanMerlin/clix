@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::HashMap;
 
 /// Obfuscated preview of a secret value for display purposes.
@@ -30,12 +31,14 @@ pub struct SecretRedactor {
 impl SecretRedactor {
     pub fn new(resolved: HashMap<String, String>) -> Self {
         let mut secrets: Vec<String> = resolved.into_values().filter(|v| !v.is_empty()).collect();
-        secrets.sort_by(|a, b| b.len().cmp(&a.len()));
+        secrets.sort_by_key(|secret| Reverse(secret.len()));
         SecretRedactor { secrets }
     }
     pub fn redact(&self, text: &str) -> String {
         let mut result = text.to_string();
-        for secret in &self.secrets { result = result.replace(secret.as_str(), "[REDACTED]"); }
+        for secret in &self.secrets {
+            result = result.replace(secret.as_str(), "[REDACTED]");
+        }
         result
     }
 }
@@ -59,7 +62,10 @@ mod tests {
 
     #[test]
     fn test_longest_match_first() {
-        let secrets = HashMap::from([("A".to_string(), "abc".to_string()), ("B".to_string(), "abcdef".to_string())]);
+        let secrets = HashMap::from([
+            ("A".to_string(), "abc".to_string()),
+            ("B".to_string(), "abcdef".to_string()),
+        ]);
         let r = SecretRedactor::new(secrets);
         assert_eq!(r.redact("value: abcdef"), "value: [REDACTED]");
     }

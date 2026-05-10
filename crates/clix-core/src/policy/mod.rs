@@ -1,9 +1,11 @@
 pub mod evaluate;
-pub use evaluate::{evaluate_policy, Decision, ExecutionContext};
-use serde::{Deserialize, Serialize};
 use crate::manifest::capability::SideEffectClass;
+pub use evaluate::{Decision, ExecutionContext, evaluate_policy};
+use serde::{Deserialize, Serialize};
 
-fn default_deny() -> PolicyAction { PolicyAction::Deny }
+fn default_deny() -> PolicyAction {
+    PolicyAction::Deny
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,7 +20,10 @@ pub struct PolicyBundle {
 
 impl Default for PolicyBundle {
     fn default() -> Self {
-        PolicyBundle { rules: vec![], default_action: PolicyAction::Deny }
+        PolicyBundle {
+            rules: vec![],
+            default_action: PolicyAction::Deny,
+        }
     }
 }
 
@@ -26,7 +31,10 @@ impl PolicyBundle {
     /// Construct a bundle that allows all unmatched capabilities (the pre-M4 default).
     /// Intended for use in tests and explicit opt-in configs — not the shipped default.
     pub fn allow_all() -> Self {
-        PolicyBundle { rules: vec![], default_action: PolicyAction::Allow }
+        PolicyBundle {
+            rules: vec![],
+            default_action: PolicyAction::Allow,
+        }
     }
 }
 

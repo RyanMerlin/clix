@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
-use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use crate::storage::{StorageRef, default_storage};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 pub fn home_dir() -> PathBuf {
     if let Ok(v) = std::env::var("CLIX_HOME") {
@@ -48,16 +48,16 @@ impl ClixState {
 
     pub fn from_home_with_storage(home: PathBuf, storage: StorageRef) -> Self {
         ClixState {
-            config_path:      home.join("config.yaml"),
-            policy_path:      home.join("policy.yaml"),
-            packs_dir:        home.join("packs"),
-            profiles_dir:     home.join("profiles"),
+            config_path: home.join("config.yaml"),
+            policy_path: home.join("policy.yaml"),
+            packs_dir: home.join("packs"),
+            profiles_dir: home.join("profiles"),
             capabilities_dir: home.join("capabilities"),
-            workflows_dir:    home.join("workflows"),
-            receipts_db:      home.join("receipts.db"),
-            bundles_dir:      home.join("bundles"),
-            cache_dir:        home.join("cache"),
-            config:           ClixConfig::default(),
+            workflows_dir: home.join("workflows"),
+            receipts_db: home.join("receipts.db"),
+            bundles_dir: home.join("bundles"),
+            cache_dir: home.join("cache"),
+            config: ClixConfig::default(),
             storage,
             home,
         }
@@ -115,7 +115,9 @@ impl ClixState {
 fn migrate_infisical_config(config: &mut ClixConfig) {
     if config.infisical_profiles.is_empty() {
         if let Some(legacy) = config.infisical.take() {
-            config.infisical_profiles.insert("default".to_string(), legacy);
+            config
+                .infisical_profiles
+                .insert("default".to_string(), legacy);
             if config.active_infisical.is_none() {
                 config.active_infisical = Some("default".to_string());
             }
@@ -194,9 +196,15 @@ impl Default for ClixConfig {
     }
 }
 
-fn default_schema_version() -> u32 { 1 }
-fn default_env() -> String { "default".to_string() }
-fn default_git_branch() -> String { "main".to_string() }
+fn default_schema_version() -> u32 {
+    1
+}
+fn default_env() -> String {
+    "default".to_string()
+}
+fn default_git_branch() -> String {
+    "main".to_string()
+}
 
 // ─── infisical profiles ───────────────────────────────────────────────────────
 
@@ -223,9 +231,20 @@ pub struct InfisicalConfig {
 impl InfisicalConfig {
     /// Returns true if enough credentials are present to attempt an API call.
     pub fn is_configured(&self) -> bool {
-        self.service_token.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false)
-            || (self.client_id.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
-                && self.client_secret.as_ref().map(|s| !s.is_empty()).unwrap_or(false))
+        self.service_token
+            .as_ref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+            || (self
+                .client_id
+                .as_ref()
+                .map(|s| !s.is_empty())
+                .unwrap_or(false)
+                && self
+                    .client_secret
+                    .as_ref()
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false))
     }
 }
 
@@ -271,14 +290,18 @@ impl InfisicalConfig {
         #[cfg(target_os = "linux")]
         {
             let mut effective = self.clone();
-            if let Some((client_id, client_secret)) = crate::secrets::keyring::load_credentials(profile_name) {
+            if let Some((client_id, client_secret)) =
+                crate::secrets::keyring::load_credentials(profile_name)
+            {
                 effective.client_id = Some(client_id);
                 effective.client_secret = Some(client_secret);
-            } else if profile_name == "default" && effective.client_id.is_none() {
-                if let Some((client_id, client_secret)) = crate::secrets::keyring::load_legacy_credentials() {
-                    effective.client_id = Some(client_id);
-                    effective.client_secret = Some(client_secret);
-                }
+            } else if profile_name == "default"
+                && effective.client_id.is_none()
+                && let Some((client_id, client_secret)) =
+                    crate::secrets::keyring::load_legacy_credentials()
+            {
+                effective.client_id = Some(client_id);
+                effective.client_secret = Some(client_secret);
             }
             if let Some(token) = crate::secrets::keyring::load_service_token(profile_name) {
                 effective.service_token = Some(token);
@@ -330,7 +353,10 @@ mod tests {
     #[test]
     fn test_paths_from_home() {
         let state = ClixState::from_home(PathBuf::from("/tmp/test-clix"));
-        assert_eq!(state.config_path, PathBuf::from("/tmp/test-clix/config.yaml"));
+        assert_eq!(
+            state.config_path,
+            PathBuf::from("/tmp/test-clix/config.yaml")
+        );
     }
 
     #[test]
@@ -357,7 +383,10 @@ mod tests {
         };
         migrate_infisical_config(&mut config);
         assert!(config.infisical.is_none(), "legacy field should be cleared");
-        assert!(config.infisical_profiles.contains_key("default"), "promoted to 'default' profile");
+        assert!(
+            config.infisical_profiles.contains_key("default"),
+            "promoted to 'default' profile"
+        );
         assert_eq!(config.active_infisical.as_deref(), Some("default"));
         let profile = &config.infisical_profiles["default"];
         assert_eq!(profile.site_url, "https://example.com");
@@ -367,21 +396,42 @@ mod tests {
     #[test]
     fn test_infisical_profiles_resolve() {
         let mut profiles = BTreeMap::new();
-        profiles.insert("work".to_string(), InfisicalConfig {
-            site_url: "https://work.infisical.com".to_string(),
-            client_id: None, client_secret: None, service_token: None,
-            default_project_id: None,
-            default_environment: "prod".to_string(),
-        });
-        profiles.insert("personal".to_string(), InfisicalConfig {
-            site_url: "https://app.infisical.com".to_string(),
-            client_id: None, client_secret: None, service_token: None,
-            default_project_id: None,
-            default_environment: "dev".to_string(),
-        });
-        let resolver = InfisicalProfiles { profiles: &profiles, active: Some("work") };
-        assert_eq!(resolver.active_profile().map(|p| p.default_environment), Some("prod".to_string()));
-        assert_eq!(resolver.resolve(Some("personal")).map(|p| p.default_environment), Some("dev".to_string()));
+        profiles.insert(
+            "work".to_string(),
+            InfisicalConfig {
+                site_url: "https://work.infisical.com".to_string(),
+                client_id: None,
+                client_secret: None,
+                service_token: None,
+                default_project_id: None,
+                default_environment: "prod".to_string(),
+            },
+        );
+        profiles.insert(
+            "personal".to_string(),
+            InfisicalConfig {
+                site_url: "https://app.infisical.com".to_string(),
+                client_id: None,
+                client_secret: None,
+                service_token: None,
+                default_project_id: None,
+                default_environment: "dev".to_string(),
+            },
+        );
+        let resolver = InfisicalProfiles {
+            profiles: &profiles,
+            active: Some("work"),
+        };
+        assert_eq!(
+            resolver.active_profile().map(|p| p.default_environment),
+            Some("prod".to_string())
+        );
+        assert_eq!(
+            resolver
+                .resolve(Some("personal"))
+                .map(|p| p.default_environment),
+            Some("dev".to_string())
+        );
         assert!(resolver.resolve(Some("nonexistent")).is_none());
     }
 }

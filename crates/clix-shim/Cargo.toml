@@ -1,7 +1,7 @@
 [package]
 name    = "clix-shim"
-version = "0.4.1"
-edition = "2021"
+version = "0.5.0"
+edition = "2024"
 
 # The shim binary is renamed at install time to match the CLI tool name (e.g. "gcloud").
 # It is tiny on purpose — no async, minimal deps.

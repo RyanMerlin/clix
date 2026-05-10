@@ -1,11 +1,11 @@
-use ratatui::{prelude::*, widgets::*};
-use chrono::Utc;
 use crate::tui::app::{App, Focus};
 use crate::tui::theme;
+use chrono::Utc;
+use ratatui::{prelude::*, widgets::*};
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
-    let chunks = Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
-        .split(area);
+    let chunks =
+        Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)]).split(area);
 
     render_list(f, app, chunks[0]);
     render_detail(f, app, chunks[1]);
@@ -34,22 +34,33 @@ fn render_list(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let items: Vec<ListItem> = app.profiles.iter().enumerate().map(|(i, p)| {
-        let is_active = app.active_profiles.contains(&p.name);
-        let is_cursor = i == app.profiles_cursor;
-        let (bullet, bullet_style) = if is_active {
-            ("●", theme::ok())
-        } else {
-            ("○", theme::muted())
-        };
+    let items: Vec<ListItem> = app
+        .profiles
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let is_active = app.active_profiles.contains(&p.name);
+            let is_cursor = i == app.profiles_cursor;
+            let (bullet, bullet_style) = if is_active {
+                ("●", theme::ok())
+            } else {
+                ("○", theme::muted())
+            };
 
-        let name_style = if is_cursor { theme::selected() } else if is_active { theme::normal() } else { theme::dim() };
+            let name_style = if is_cursor {
+                theme::selected()
+            } else if is_active {
+                theme::normal()
+            } else {
+                theme::dim()
+            };
 
-        ListItem::new(Line::from(vec![
-            Span::styled(format!(" {} ", bullet), bullet_style),
-            Span::styled(format!("{:<20}", p.name), name_style),
-        ]))
-    }).collect();
+            ListItem::new(Line::from(vec![
+                Span::styled(format!(" {} ", bullet), bullet_style),
+                Span::styled(format!("{:<20}", p.name), name_style),
+            ]))
+        })
+        .collect();
 
     let list = List::new(items)
         .block(block)
@@ -68,8 +79,16 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
 
     if let Some(profile) = app.profiles.get(app.profiles_cursor) {
         let is_active = app.active_profiles.contains(&profile.name);
-        let status_style = if is_active { theme::ok() } else { theme::muted() };
-        let status_str = if is_active { "● active" } else { "○ inactive" };
+        let status_style = if is_active {
+            theme::ok()
+        } else {
+            theme::muted()
+        };
+        let status_str = if is_active {
+            "● active"
+        } else {
+            "○ inactive"
+        };
 
         let mut lines = vec![
             Line::from(""),
@@ -94,13 +113,26 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
         let cap_count = profile.capabilities.len();
         lines.push(Line::from(vec![
             Span::styled("  Capabilities", theme::muted()),
-            Span::styled(format!("  {} granted", cap_count), if cap_count > 0 { theme::normal() } else { theme::inactive() }),
+            Span::styled(
+                format!("  {} granted", cap_count),
+                if cap_count > 0 {
+                    theme::normal()
+                } else {
+                    theme::inactive()
+                },
+            ),
         ]));
         for cap in profile.capabilities.iter().take(10) {
-            lines.push(Line::from(Span::styled(format!("    · {}", cap), theme::dim())));
+            lines.push(Line::from(Span::styled(
+                format!("    · {}", cap),
+                theme::dim(),
+            )));
         }
         if cap_count > 10 {
-            lines.push(Line::from(Span::styled(format!("    … {} more", cap_count - 10), theme::muted())));
+            lines.push(Line::from(Span::styled(
+                format!("    … {} more", cap_count - 10),
+                theme::muted(),
+            )));
         }
         // Secret bindings section
         let sb_count = profile.secret_bindings.len();
@@ -113,8 +145,11 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
             for binding in profile.secret_bindings.iter().take(5) {
                 use clix_core::manifest::capability::CredentialSource;
                 let src_display = match &binding.source {
-                    CredentialSource::Infisical { secret_ref, .. } =>
-                        format!("Infisical {}/{}", secret_ref.secret_path.trim_end_matches('/'), secret_ref.secret_name),
+                    CredentialSource::Infisical { secret_ref, .. } => format!(
+                        "Infisical {}/{}",
+                        secret_ref.secret_path.trim_end_matches('/'),
+                        secret_ref.secret_name
+                    ),
                     CredentialSource::Env { env_var, .. } => format!("env ${}", env_var),
                     CredentialSource::Literal { .. } => "literal ••••".to_string(),
                 };
@@ -124,7 +159,10 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
                 ]));
             }
             if sb_count > 5 {
-                lines.push(Line::from(Span::styled(format!("    … {} more", sb_count - 5), theme::muted())));
+                lines.push(Line::from(Span::styled(
+                    format!("    … {} more", sb_count - 5),
+                    theme::muted(),
+                )));
             }
         }
 
@@ -147,7 +185,10 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
                 };
                 lines.push(Line::from(vec![
                     Span::styled(format!("  📁 {:<24}", binding.secret_path), theme::dim()),
-                    Span::styled(format!("{} secrets", binding.snapshot.len()), theme::muted()),
+                    Span::styled(
+                        format!("{} secrets", binding.snapshot.len()),
+                        theme::muted(),
+                    ),
                     Span::styled(format!("  synced {}", age_str), theme::inactive()),
                 ]));
             }
@@ -156,7 +197,11 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
             Span::styled("  enter", theme::accent()),
-            Span::raw(if is_active { " deactivate" } else { " activate" }),
+            Span::raw(if is_active {
+                " deactivate"
+            } else {
+                " activate"
+            }),
             Span::styled("   s", theme::accent()),
             Span::raw(" edit secrets"),
             Span::styled("   n", theme::accent()),
@@ -180,7 +225,10 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
         let inner = block.inner(area);
         f.render_widget(block, area);
         f.render_widget(
-            Paragraph::new(Span::styled("  Select a profile to see details", theme::inactive())),
+            Paragraph::new(Span::styled(
+                "  Select a profile to see details",
+                theme::inactive(),
+            )),
             inner,
         );
     }

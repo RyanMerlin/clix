@@ -48,7 +48,11 @@ pub enum KeyringResult {
     Unavailable(String),
 }
 
-pub fn store_credentials(profile_name: &str, client_id: &str, client_secret: &str) -> KeyringResult {
+pub fn store_credentials(
+    profile_name: &str,
+    client_id: &str,
+    client_secret: &str,
+) -> KeyringResult {
     let id_key = key_client_id(profile_name);
     let id_entry = match keyring::Entry::new(SERVICE, &id_key) {
         Ok(e) => e,

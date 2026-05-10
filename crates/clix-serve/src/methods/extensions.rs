@@ -82,22 +82,22 @@ pub fn onboard_probe(params: &serde_json::Value) -> MethodResult {
 
 pub fn packs_list(serve: &Arc<ServeState>) -> MethodResult {
     let mut packs = vec![];
-    if serve.state.packs_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&serve.state.packs_dir) {
-            for entry in entries.flatten() {
-                if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                    continue;
-                }
-                let pack_file = entry.path().join("pack.yaml");
-                if pack_file.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&pack_file) {
-                        if let Ok(p) = serde_yaml::from_str::<clix_core::manifest::pack::PackManifest>(
-                            &content,
-                        ) {
-                            packs.push(serde_json::json!({"name":p.name,"version":p.version,"description":p.description}));
-                        }
-                    }
-                }
+    if serve.state.packs_dir.exists()
+        && let Ok(entries) = std::fs::read_dir(&serve.state.packs_dir)
+    {
+        for entry in entries.flatten() {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let pack_file = entry.path().join("pack.yaml");
+            if pack_file.exists()
+                && let Ok(content) = std::fs::read_to_string(&pack_file)
+                && let Ok(p) =
+                    serde_yaml::from_str::<clix_core::manifest::pack::PackManifest>(&content)
+            {
+                packs.push(
+                    serde_json::json!({"name":p.name,"version":p.version,"description":p.description}),
+                );
             }
         }
     }
@@ -174,12 +174,10 @@ pub async fn shim_call(serve: &Arc<ServeState>, params: &serde_json::Value) -> M
         result["exit_code"]
             .as_i64()
             .unwrap_or(if outcome.ok { 0 } else { 1 })
+    } else if outcome.ok {
+        0
     } else {
-        if outcome.ok {
-            0
-        } else {
-            1
-        }
+        1
     };
     let stdout = outcome
         .result

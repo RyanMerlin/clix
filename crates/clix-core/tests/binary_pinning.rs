@@ -1,3 +1,4 @@
+use clix_core::error::ClixError;
 /// Test 3 — Binary pinning and hash verification.
 ///
 /// Verifies that:
@@ -6,7 +7,6 @@
 /// (c) `verify_binary_hash` returns `IntegrityFailure` when the hash is wrong.
 /// (d) Swapping the binary content (simulate a supply-chain tamper) causes a mismatch.
 use clix_core::sandbox::jail::{resolve_and_hash_binary, verify_binary_hash};
-use clix_core::error::ClixError;
 use std::io::Write;
 
 #[test]
@@ -16,7 +16,10 @@ fn test_resolve_and_hash_known_binary() {
     assert!(path.exists(), "binary should exist");
     assert_eq!(hash.len(), 64, "SHA-256 hex should be 64 chars");
     // All hex digits
-    assert!(hash.chars().all(|c| c.is_ascii_hexdigit()), "hash should be hex");
+    assert!(
+        hash.chars().all(|c| c.is_ascii_hexdigit()),
+        "hash should be hex"
+    );
 }
 
 #[test]
@@ -42,7 +45,8 @@ fn test_verify_hash_nonexistent_binary() {
     let err = verify_binary_hash(
         &PathBuf::from("/nonexistent/binary/that/does/not/exist"),
         &"a".repeat(64),
-    ).expect_err("nonexistent binary should fail");
+    )
+    .expect_err("nonexistent binary should fail");
     assert!(
         matches!(err, ClixError::Isolation(_)),
         "expected Isolation error, got: {err}"
@@ -58,16 +62,20 @@ fn test_tampered_binary_detected() {
     tmp.flush().expect("flush");
 
     let path = tmp.path().to_path_buf();
-    let (_, original_hash) = resolve_and_hash_binary(path.to_str().unwrap())
-        .expect("hash original");
+    let (_, original_hash) =
+        resolve_and_hash_binary(path.to_str().unwrap()).expect("hash original");
 
     // Overwrite with different content ("tampered")
-    let mut f = std::fs::OpenOptions::new().write(true).truncate(true).open(&path).expect("open for write");
-    f.write_all(b"#!/bin/sh\necho tampered\n").expect("write tampered");
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(&path)
+        .expect("open for write");
+    f.write_all(b"#!/bin/sh\necho tampered\n")
+        .expect("write tampered");
     drop(f);
 
-    let err = verify_binary_hash(&path, &original_hash)
-        .expect_err("tampered binary should fail");
+    let err = verify_binary_hash(&path, &original_hash).expect_err("tampered binary should fail");
     assert!(
         matches!(err, ClixError::IntegrityFailure(_)),
         "expected IntegrityFailure after tamper, got: {err}"

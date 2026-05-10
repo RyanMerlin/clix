@@ -23,10 +23,16 @@ impl TempHome {
         let dir = tempdir().expect("tempdir");
         let prev = std::env::var("CLIX_HOME").ok();
         // Safety: single-threaded access enforced by ENV_LOCK
-        unsafe { std::env::set_var("CLIX_HOME", dir.path()); }
+        unsafe {
+            std::env::set_var("CLIX_HOME", dir.path());
+        }
         // SAFETY: We use unsafe set_var above. In Rust 2024 / edition 2024,
         // set_var is already deprecated in some lints — this is acceptable in tests.
-        Self { dir, _prev: prev, _guard: guard }
+        Self {
+            dir,
+            _prev: prev,
+            _guard: guard,
+        }
     }
 
     pub fn path(&self) -> &Path {
@@ -38,12 +44,18 @@ impl TempHome {
     }
 }
 
+impl Default for TempHome {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Drop for TempHome {
     fn drop(&mut self) {
         unsafe {
             match &self._prev {
                 Some(v) => std::env::set_var("CLIX_HOME", v),
-                None    => std::env::remove_var("CLIX_HOME"),
+                None => std::env::remove_var("CLIX_HOME"),
             }
         }
     }

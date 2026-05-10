@@ -1,8 +1,8 @@
+use crate::output::print_json;
 use anyhow::Result;
 use clix_core::manifest::loader::load_dir;
 use clix_core::manifest::profile::ProfileManifest;
-use clix_core::state::{home_dir, ClixState};
-use crate::output::print_json;
+use clix_core::state::{ClixState, home_dir};
 
 pub fn list(json: bool) -> Result<()> {
     let state = ClixState::load(home_dir())?;
@@ -12,15 +12,21 @@ pub fn list(json: bool) -> Result<()> {
         for entry in std::fs::read_dir(&state.packs_dir)? {
             let entry = entry?;
             if entry.file_type()?.is_dir() {
-                let mut pp = load_dir::<ProfileManifest>(&entry.path().join("profiles")).unwrap_or_default();
+                let mut pp =
+                    load_dir::<ProfileManifest>(&entry.path().join("profiles")).unwrap_or_default();
                 profiles.append(&mut pp);
             }
         }
     }
-    if json { print_json(&profiles); }
-    else {
+    if json {
+        print_json(&profiles);
+    } else {
         for p in &profiles {
-            let active = if state.config.active_profiles.contains(&p.name) { "*" } else { " " };
+            let active = if state.config.active_profiles.contains(&p.name) {
+                "*"
+            } else {
+                " "
+            };
             println!("{active} {}", p.name);
         }
     }

@@ -3,10 +3,9 @@
 //! Tests the `ReceiptStore::export` API and verifies that receipts written
 //! through the dispatch pipeline can be filtered and exported correctly.
 
-use std::sync::{Arc, Mutex};
 use clix_testkit::capability::builtin;
 use clix_testkit::serve::{call, make_state};
-use clix_testkit::{PolicyAction, PolicyBundle, PolicyRule, ReceiptStore};
+use clix_testkit::{PolicyAction, PolicyBundle, PolicyRule};
 
 // ─── export() filter tests ────────────────────────────────────────────────────
 
@@ -31,10 +30,7 @@ async fn test_export_status_filter() {
         reason: None,
         ..Default::default()
     });
-    let serve = make_state(
-        vec![builtin("sys.date"), builtin("ops.blocked")],
-        policy,
-    );
+    let serve = make_state(vec![builtin("sys.date"), builtin("ops.blocked")], policy);
     let _ = call(&serve, "sys.date").await;
     let _ = call(&serve, "ops.blocked").await;
 
@@ -91,10 +87,7 @@ async fn test_count_by_status() {
         reason: None,
         ..Default::default()
     });
-    let serve = make_state(
-        vec![builtin("sys.date"), builtin("bad.op")],
-        policy,
-    );
+    let serve = make_state(vec![builtin("sys.date"), builtin("bad.op")], policy);
     let _ = call(&serve, "sys.date").await;
     let _ = call(&serve, "bad.op").await;
 

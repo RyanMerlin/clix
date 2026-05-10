@@ -1,17 +1,38 @@
-use clap::{Parser, Subcommand};
 pub use crate::commands::broker::BrokerCmd;
 pub use crate::commands::infisical::InfisicalCmd;
+use clap::{Parser, Subcommand};
 
 /// All static top-level subcommand names. Dynamic capability subcommands must not use these.
 pub const STATIC_COMMANDS: &[&str] = &[
-    "init", "status", "version", "run", "capabilities",
-    "workflow", "profile", "receipts", "serve", "pack", "tui",
-    "doctor", "shim", "mcp", "tools", "secrets", "infisical", "broker",
-    "approve", "reject", "sync",
+    "init",
+    "status",
+    "version",
+    "run",
+    "capabilities",
+    "workflow",
+    "profile",
+    "receipts",
+    "serve",
+    "pack",
+    "tui",
+    "doctor",
+    "shim",
+    "mcp",
+    "tools",
+    "secrets",
+    "infisical",
+    "broker",
+    "approve",
+    "reject",
+    "sync",
 ];
 
 #[derive(Parser)]
-#[command(name = "clix", version, about = "Policy-first CLI control plane for agentic tool use")]
+#[command(
+    name = "clix",
+    version,
+    about = "Policy-first CLI control plane for agentic tool use"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -56,7 +77,10 @@ pub enum Commands {
         cursor: bool,
     },
     /// Show clix status and configuration
-    Status { #[arg(long)] json: bool },
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
     /// Print version information
     Version,
     /// Run a capability
@@ -64,9 +88,11 @@ pub enum Commands {
         capability: String,
         #[arg(long = "input", short = 'i', value_name = "KEY=VALUE")]
         input: Vec<String>,
-        #[arg(long)] json: bool,
+        #[arg(long)]
+        json: bool,
         /// Evaluate policy and show what would happen without actually executing
-        #[arg(long)] dry_run: bool,
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Manage capabilities
     #[command(subcommand)]
@@ -82,9 +108,11 @@ pub enum Commands {
     Receipts(ReceiptsCmd),
     /// Start the JSON-RPC server
     Serve {
-        #[arg(long)] socket: Option<String>,
+        #[arg(long)]
+        socket: Option<String>,
         /// HTTP transport (experimental, no auth/TLS — requires CLIX_HTTP_EXPERIMENTAL=1)
-        #[arg(long)] http: Option<String>,
+        #[arg(long)]
+        http: Option<String>,
     },
     /// Manage packs
     #[command(subcommand)]
@@ -92,7 +120,10 @@ pub enum Commands {
     /// Launch interactive TUI
     Tui,
     /// Gateway health check for agents
-    Doctor { #[arg(long)] json: bool },
+    Doctor {
+        #[arg(long)]
+        json: bool,
+    },
     /// Export capability definitions in AI SDK formats for Claude, Gemini, or OpenAI
     #[command(subcommand)]
     Tools(ToolsCmd),
@@ -117,52 +148,89 @@ pub enum Commands {
     /// Approve a pending capability execution
     Approve {
         receipt_id: String,
-        #[arg(long, default_value = "operator")] approver: String,
-        #[arg(long)] comment: Option<String>,
+        #[arg(long, default_value = "operator")]
+        approver: String,
+        #[arg(long)]
+        comment: Option<String>,
     },
     /// Reject a pending capability execution
     Reject {
         receipt_id: String,
-        #[arg(long, default_value = "operator")] approver: String,
-        #[arg(long)] reason: Option<String>,
+        #[arg(long, default_value = "operator")]
+        approver: String,
+        #[arg(long)]
+        reason: Option<String>,
     },
 }
 
 #[derive(Subcommand)]
 pub enum CapabilitiesCmd {
-    List { #[arg(long)] json: bool },
-    Show { name: String, #[arg(long)] json: bool },
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    Show {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Search capabilities by name or description
-    Search { query: String, #[arg(long)] json: bool },
+    Search {
+        query: String,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
 pub enum WorkflowCmd {
-    List { #[arg(long)] json: bool },
+    List {
+        #[arg(long)]
+        json: bool,
+    },
     Run {
         name: String,
         #[arg(long = "input", short = 'i', value_name = "KEY=VALUE")]
         input: Vec<String>,
-        #[arg(long)] json: bool,
+        #[arg(long)]
+        json: bool,
     },
 }
 
 #[derive(Subcommand)]
 pub enum ProfileCmd {
-    List { #[arg(long)] json: bool },
-    Show { name: String, #[arg(long)] json: bool },
-    Activate { name: String },
-    Deactivate { name: String },
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    Show {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    Activate {
+        name: String,
+    },
+    Deactivate {
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
 pub enum ReceiptsCmd {
     List {
-        #[arg(long, default_value = "50")] limit: usize,
-        #[arg(long)] status: Option<String>,
-        #[arg(long)] json: bool,
+        #[arg(long, default_value = "50")]
+        limit: usize,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
-    Show { id: String, #[arg(long)] json: bool },
+    Show {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
     Tail,
     /// Export receipts as JSONL or JSON array
     Export {
@@ -200,7 +268,10 @@ pub enum ToolsCmd {
 #[derive(Subcommand)]
 pub enum ShimCmd {
     /// List installed shims
-    List { #[arg(long)] json: bool },
+    List {
+        #[arg(long)]
+        json: bool,
+    },
     /// Remove a shim
     Uninstall { command: String },
 }
@@ -236,43 +307,74 @@ pub enum McpCmd {
 #[derive(Subcommand)]
 pub enum PackCmd {
     List {
-        #[arg(long)] json: bool,
-        #[arg(long)] available: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        available: bool,
     },
-    Show { name: String, #[arg(long)] json: bool },
-    Discover { path: String, #[arg(long)] json: bool },
-    Validate { path: String },
-    Diff { installed: String, new_path: String, #[arg(long)] json: bool },
+    Show {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    Discover {
+        path: String,
+        #[arg(long)]
+        json: bool,
+    },
+    Validate {
+        path: String,
+    },
+    Diff {
+        installed: String,
+        new_path: String,
+        #[arg(long)]
+        json: bool,
+    },
     Install {
         path: String,
         /// Require a valid Ed25519 signature before installing
-        #[arg(long)] verify_sig: bool,
+        #[arg(long)]
+        verify_sig: bool,
     },
     Bundle {
         path: String,
         /// Sign the bundle with the default key (~/.clix/pack-signing.pem)
-        #[arg(long)] sign: bool,
+        #[arg(long)]
+        sign: bool,
         /// Override the signing key path
-        #[arg(long)] key: Option<String>,
+        #[arg(long)]
+        key: Option<String>,
     },
-    Publish { path: String },
+    Publish {
+        path: String,
+    },
     Scaffold {
         name: String,
-        #[arg(long, default_value = "read-only")] preset: String,
-        #[arg(long)] command: Option<String>,
+        #[arg(long, default_value = "read-only")]
+        preset: String,
+        #[arg(long)]
+        command: Option<String>,
     },
     Onboard {
         name: String,
-        #[arg(long)] command: String,
-        #[arg(long)] json: bool,
+        #[arg(long)]
+        command: String,
+        #[arg(long)]
+        json: bool,
     },
     /// Generate an Ed25519 signing key pair
     Keygen {
         /// Overwrite existing keys
-        #[arg(long)] force: bool,
+        #[arg(long)]
+        force: bool,
     },
     /// Add a public key to the trusted-pack-keys directory
-    Trust { pubkey_path: String },
+    Trust {
+        pubkey_path: String,
+    },
     /// Verify the signature of a pack archive without installing
-    Verify { pack_path: String },
+    Verify {
+        pack_path: String,
+    },
 }

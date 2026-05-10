@@ -1,5 +1,5 @@
-use std::path::Path;
 use crate::error::{ClixError, Result};
+use std::path::Path;
 use tracing::warn;
 
 pub fn load_manifest<T>(path: &Path) -> Result<T>
@@ -26,7 +26,9 @@ where
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.is_dir() { continue; }
+        if path.is_dir() {
+            continue;
+        }
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         if matches!(ext, "yaml" | "yml" | "json") {
             match load_manifest::<T>(&path) {

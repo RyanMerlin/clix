@@ -57,15 +57,15 @@ fn global_profile_wins_over_pack_profile() {
         by_name.insert(p.name.clone(), p);
     }
     // Load pack profiles
-    if state.packs_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&state.packs_dir) {
-            for entry in entries.filter_map(|e| e.ok()) {
-                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                    for p in load_dir::<ProfileManifest>(&entry.path().join("profiles"))
-                        .unwrap_or_default()
-                    {
-                        by_name.entry(p.name.clone()).or_insert(p);
-                    }
+    if state.packs_dir.exists()
+        && let Ok(entries) = std::fs::read_dir(&state.packs_dir)
+    {
+        for entry in entries.filter_map(|e| e.ok()) {
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                for p in
+                    load_dir::<ProfileManifest>(&entry.path().join("profiles")).unwrap_or_default()
+                {
+                    by_name.entry(p.name.clone()).or_insert(p);
                 }
             }
         }

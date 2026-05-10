@@ -1,3 +1,9 @@
+#[cfg(not(target_os = "linux"))]
+use super::subprocess::run_subprocess;
+use crate::error::{ClixError, Result};
+use crate::execution::worker_protocol::{WorkerEvent, WorkerRequest};
+use crate::execution::worker_registry::WorkerRegistry;
+use crate::manifest::capability::{IsolationTier, SandboxProfile};
 /// IsolatedBackend: routes capability subprocess invocations through the warm worker pool.
 ///
 /// This replaces the direct `Command::new` in `subprocess.rs` for all non-builtin capabilities.
@@ -5,12 +11,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use crate::error::{ClixError, Result};
-use crate::manifest::capability::{IsolationTier, SandboxProfile};
-use crate::execution::worker_registry::WorkerRegistry;
-use crate::execution::worker_protocol::{WorkerRequest, WorkerEvent};
-#[cfg(not(target_os = "linux"))]
-use super::subprocess::run_subprocess;
 #[cfg(not(target_os = "linux"))]
 use tracing::warn;
 use uuid::Uuid;
@@ -31,6 +31,7 @@ pub struct IsolatedDispatch {
 /// - If the worker binary is not available or Linux is not the OS, falls back to a direct
 ///   subprocess spawn **and logs a loud warning** (the caller can opt to reject via policy).
 /// - If `tier` is `None`, this should not be called — callers should use `builtin_handler`.
+#[allow(clippy::too_many_arguments)]
 pub fn run_isolated(
     profile: &str,
     command: &str,
@@ -66,6 +67,7 @@ pub fn run_isolated(
 }
 
 #[cfg(target_os = "linux")]
+#[allow(clippy::too_many_arguments, clippy::ptr_arg)]
 fn run_via_worker(
     profile: &str,
     command: &str,
@@ -88,10 +90,22 @@ fn run_via_worker(
         streaming: false,
     };
 
-    let event = registry.dispatch(profile, command, &IsolationTier::WarmWorker, sandbox_profile, request, credentials_declared)?;
+    let event = registry.dispatch(
+        profile,
+        command,
+        &IsolationTier::WarmWorker,
+        sandbox_profile,
+        request,
+        credentials_declared,
+    )?;
 
     match event {
-        WorkerEvent::Exit { exit_code, stdout, stderr, .. } => Ok(IsolatedDispatch {
+        WorkerEvent::Exit {
+            exit_code,
+            stdout,
+            stderr,
+            ..
+        } => Ok(IsolatedDispatch {
             exit_code,
             stdout,
             stderr,
@@ -100,7 +114,9 @@ fn run_via_worker(
             token_mint_id: Some(Uuid::new_v4()),
         }),
         WorkerEvent::Error { message, .. } => Err(ClixError::Worker(message)),
-        _ => Err(ClixError::Worker("unexpected event from worker".to_string())),
+        _ => Err(ClixError::Worker(
+            "unexpected event from worker".to_string(),
+        )),
     }
 }
 

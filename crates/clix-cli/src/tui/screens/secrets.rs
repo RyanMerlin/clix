@@ -1,15 +1,15 @@
-use ratatui::{prelude::*, widgets::*};
-use clix_core::secrets::preview;
 use crate::tui::app::App;
 use crate::tui::theme;
+use clix_core::secrets::preview;
+use ratatui::{prelude::*, widgets::*};
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::vertical([
-            Constraint::Length(9),  // config card
-            Constraint::Length(7),  // connectivity card
-            Constraint::Min(5),     // bindings card
-        ])
-        .split(area);
+        Constraint::Length(9), // config card
+        Constraint::Length(7), // connectivity card
+        Constraint::Min(5),    // bindings card
+    ])
+    .split(area);
 
     render_config_card(f, app, chunks[0]);
     render_connectivity_card(f, app, chunks[1]);
@@ -19,12 +19,17 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
 fn render_config_card(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(Span::styled(" Infisical Configuration ", theme::accent_bold()))
+        .title(Span::styled(
+            " Infisical Configuration ",
+            theme::accent_bold(),
+        ))
         .border_style(theme::border_normal());
 
     let cfg = app.infisical_cfg.as_ref();
     let site_url = cfg.map(|c| c.site_url.as_str()).unwrap_or("(not set)");
-    let project_id = cfg.and_then(|c| c.default_project_id.as_deref()).unwrap_or("");
+    let project_id = cfg
+        .and_then(|c| c.default_project_id.as_deref())
+        .unwrap_or("");
     let environment = cfg.map(|c| c.default_environment.as_str()).unwrap_or("dev");
 
     // Determine auth method and credential source
@@ -64,7 +69,10 @@ fn render_config_card(f: &mut Frame, app: &App, area: Rect) {
         kv_line("environment", environment, None),
         kv_line(auth_label, auth_value, Some(auth_source)),
         Line::from(""),
-        Line::from(Span::styled("  m:accounts  e:edit  t:test connectivity", theme::muted())),
+        Line::from(Span::styled(
+            "  m:accounts  e:edit  t:test connectivity",
+            theme::muted(),
+        )),
     ];
     f.render_widget(Paragraph::new(lines), inner);
 }
@@ -105,7 +113,10 @@ fn render_connectivity_card(f: &mut Frame, app: &App, area: Rect) {
             Line::from(vec![
                 Span::styled("  token TTL       ", theme::muted()),
                 Span::styled(
-                    report.token_expires_in.map(|t| format!("{}s", t)).unwrap_or_else(|| "—".to_string()),
+                    report
+                        .token_expires_in
+                        .map(|t| format!("{}s", t))
+                        .unwrap_or_else(|| "—".to_string()),
                     theme::normal(),
                 ),
             ]),
@@ -119,7 +130,10 @@ fn render_connectivity_card(f: &mut Frame, app: &App, area: Rect) {
             Line::from(""),
             Line::from(Span::styled("  ● unverified", theme::inactive())),
             Line::from(""),
-            Line::from(Span::styled("  press t to test connectivity", theme::muted())),
+            Line::from(Span::styled(
+                "  press t to test connectivity",
+                theme::muted(),
+            )),
         ]
     };
     f.render_widget(Paragraph::new(lines), inner);
@@ -137,7 +151,10 @@ fn render_bindings_card(f: &mut Frame, app: &App, area: Rect) {
     let mut lines = vec![Line::from("")];
 
     if app.profiles.is_empty() {
-        lines.push(Line::from(Span::styled("  No profiles configured.", theme::muted())));
+        lines.push(Line::from(Span::styled(
+            "  No profiles configured.",
+            theme::muted(),
+        )));
     } else {
         for profile in &app.profiles {
             let key_count = profile.secret_bindings.len();

@@ -1,7 +1,7 @@
-use anyhow::{anyhow, Result};
-use std::path::{Path, PathBuf};
-use clix_core::state::{ClixConfig, ClixState, home_dir};
+use anyhow::{Result, anyhow};
 use clix_core::packs::seed::seed_builtin_packs;
+use clix_core::state::{ClixConfig, ClixState, home_dir};
+use std::path::{Path, PathBuf};
 
 /// Write a `.mcp.json` at `project_dir` (defaults to cwd) for Claude Code.
 ///
@@ -9,7 +9,8 @@ use clix_core::packs::seed::seed_builtin_packs;
 /// configuration. This writes a minimal entry that starts `clix serve` as a stdio
 /// MCP server when Claude Code opens the project.
 pub fn setup_claude_code(project_dir: Option<&Path>) -> Result<()> {
-    let dir = project_dir.map(|p| p.to_path_buf())
+    let dir = project_dir
+        .map(|p| p.to_path_buf())
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     let mcp_json_path = dir.join(".mcp.json");
@@ -41,7 +42,10 @@ pub fn setup_claude_code(project_dir: Option<&Path>) -> Result<()> {
     if claude_md_path.exists() {
         let existing = std::fs::read_to_string(&claude_md_path)?;
         if existing.contains("<!-- clix-integration -->") {
-            println!("{} already has clix integration block — skipped", claude_md_path.display());
+            println!(
+                "{} already has clix integration block — skipped",
+                claude_md_path.display()
+            );
         } else {
             let updated = format!("{}\n\n{}", existing.trim_end(), clix_block);
             std::fs::write(&claude_md_path, updated)?;
@@ -60,7 +64,8 @@ pub fn setup_claude_code(project_dir: Option<&Path>) -> Result<()> {
 
 /// Write `.cursor/mcp.json` at `project_dir` for Cursor.
 pub fn setup_cursor(project_dir: Option<&Path>) -> Result<()> {
-    let dir = project_dir.map(|p| p.to_path_buf())
+    let dir = project_dir
+        .map(|p| p.to_path_buf())
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     let cursor_dir = dir.join(".cursor");
@@ -116,7 +121,8 @@ Use the `tools/list` MCP method to discover capabilities. Prefer the namespace
 drill-in pattern: call `tools/list` with no params to get namespace stubs, then
 `tools/list` with `{"namespace": "git"}` to get capabilities for that group.
 <!-- end clix-integration -->
-"#.to_string()
+"#
+    .to_string()
 }
 
 pub fn run() -> Result<()> {
@@ -127,7 +133,7 @@ pub fn run() -> Result<()> {
     // Load or create config
     let mut config = if state.config_path.exists() {
         let text = std::fs::read_to_string(&state.config_path)?;
-        serde_yaml::from_str::<ClixConfig>(&text)?   // propagate parse errors, don't swallow
+        serde_yaml::from_str::<ClixConfig>(&text)? // propagate parse errors, don't swallow
     } else {
         let config = ClixConfig::default();
         println!("Created {}", state.config_path.display());
@@ -140,10 +146,15 @@ pub fn run() -> Result<()> {
     // 3. ./packs relative to cwd (development / repo checkout)
     let xdg_packs = dirs::data_local_dir().map(|d| d.join("clix").join("packs"));
     let packs_src = [
-        std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("packs"))),
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("packs"))),
         xdg_packs,
         Some(std::path::PathBuf::from("packs")),
-    ].into_iter().flatten().find(|p| p.exists());
+    ]
+    .into_iter()
+    .flatten()
+    .find(|p| p.exists());
     if let Some(src) = packs_src {
         seed_builtin_packs(&state.packs_dir, &src)?;
         println!("Seeded built-in packs");
@@ -197,14 +208,17 @@ defaultAction: deny
     // Hint about Infisical if not configured
     if config.infisical.is_none() {
         println!();
-        println!("  run `clix infisical add` or press [c] in the TUI Dashboard to configure Infisical auth");
+        println!(
+            "  run `clix infisical add` or press [c] in the TUI Dashboard to configure Infisical auth"
+        );
     }
 
     // On Linux, ensure OS isolation is actually usable — install AppArmor profile if needed
     #[cfg(target_os = "linux")]
     {
-        let restricted = std::fs::read_to_string("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
-            .unwrap_or_default();
+        let restricted =
+            std::fs::read_to_string("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
+                .unwrap_or_default();
         let already_installed = std::path::Path::new("/etc/apparmor.d/clix-worker").exists();
         if restricted.trim() == "1" && !already_installed {
             println!();
@@ -293,7 +307,10 @@ fn write_activation_scripts(bin_dir: &Path) -> Result<()> {
     );
     std::fs::write(bin_dir.join("activate.ps1"), &ps1_script)?;
 
-    println!("wrote activation scripts to {}/activate.{{sh,fish,ps1}}", bin_dir_str);
+    println!(
+        "wrote activation scripts to {}/activate.{{sh,fish,ps1}}",
+        bin_dir_str
+    );
     Ok(())
 }
 
@@ -318,7 +335,9 @@ pub fn adopt_creds(cli: &str) -> Result<()> {
     match cli {
         "gcloud" => adopt_gcloud_creds(&broker_creds_dir),
         "kubectl" => adopt_kubectl_creds(&broker_creds_dir),
-        other => Err(anyhow!("unsupported CLI for credential adoption: `{other}`. Supported: gcloud, kubectl")),
+        other => Err(anyhow!(
+            "unsupported CLI for credential adoption: `{other}`. Supported: gcloud, kubectl"
+        )),
     }
 }
 
@@ -341,14 +360,12 @@ fn adopt_gcloud_creds(broker_creds_dir: &Path) -> Result<()> {
     secure_dir(&dest_dir)?;
 
     let dest = dest_dir.join("adc.json");
-    std::fs::copy(&src, &dest)
-        .map_err(|e| anyhow!("copy ADC to broker store: {e}"))?;
+    std::fs::copy(&src, &dest).map_err(|e| anyhow!("copy ADC to broker store: {e}"))?;
     secure_file(&dest)?;
 
     // Replace the original with a dead symlink to make direct access fail
     // (ENOENT for anything trying to follow the symlink)
-    std::fs::remove_file(&src)
-        .map_err(|e| anyhow!("remove original ADC: {e}"))?;
+    std::fs::remove_file(&src).map_err(|e| anyhow!("remove original ADC: {e}"))?;
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink("/clix-broker-adopted-this-credential", &src)
@@ -356,7 +373,10 @@ fn adopt_gcloud_creds(broker_creds_dir: &Path) -> Result<()> {
     }
 
     println!("gcloud ADC adopted into broker store: {}", dest.display());
-    println!("Original path ({}) now points to a dead symlink.", src.display());
+    println!(
+        "Original path ({}) now points to a dead symlink.",
+        src.display()
+    );
     println!("Direct `gcloud auth print-access-token` will fail — use `clix run` instead.");
     Ok(())
 }
@@ -379,20 +399,24 @@ fn adopt_kubectl_creds(broker_creds_dir: &Path) -> Result<()> {
     secure_dir(&dest_dir)?;
 
     let dest = dest_dir.join("kubeconfig");
-    std::fs::copy(&src, &dest)
-        .map_err(|e| anyhow!("copy kubeconfig to broker store: {e}"))?;
+    std::fs::copy(&src, &dest).map_err(|e| anyhow!("copy kubeconfig to broker store: {e}"))?;
     secure_file(&dest)?;
 
-    std::fs::remove_file(&src)
-        .map_err(|e| anyhow!("remove original kubeconfig: {e}"))?;
+    std::fs::remove_file(&src).map_err(|e| anyhow!("remove original kubeconfig: {e}"))?;
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink("/clix-broker-adopted-this-credential", &src)
             .map_err(|e| anyhow!("create dead symlink at {}: {e}", src.display()))?;
     }
 
-    println!("kubectl config adopted into broker store: {}", dest.display());
-    println!("Original path ({}) now points to a dead symlink.", src.display());
+    println!(
+        "kubectl config adopted into broker store: {}",
+        dest.display()
+    );
+    println!(
+        "Original path ({}) now points to a dead symlink.",
+        src.display()
+    );
     Ok(())
 }
 
@@ -404,20 +428,20 @@ fn adopt_kubectl_creds(broker_creds_dir: &Path) -> Result<()> {
 ///
 /// Returns a summary string on success.
 pub fn adopt_sa_json(path: &str) -> Result<String> {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
 
     let src = std::path::Path::new(path);
     if !src.exists() {
         return Err(anyhow!("SA JSON file not found: {path}"));
     }
 
-    let content = std::fs::read(src)
-        .map_err(|e| anyhow!("read SA JSON: {e}"))?;
+    let content = std::fs::read(src).map_err(|e| anyhow!("read SA JSON: {e}"))?;
 
     // Parse to extract client_email
-    let sa: serde_json::Value = serde_json::from_slice(&content)
-        .map_err(|e| anyhow!("parse SA JSON: {e}"))?;
-    let client_email = sa["client_email"].as_str()
+    let sa: serde_json::Value =
+        serde_json::from_slice(&content).map_err(|e| anyhow!("parse SA JSON: {e}"))?;
+    let client_email = sa["client_email"]
+        .as_str()
         .ok_or_else(|| anyhow!("SA JSON missing client_email"))?
         .to_string();
 
@@ -435,8 +459,7 @@ pub fn adopt_sa_json(path: &str) -> Result<String> {
     let dest_filename = format!("sa-{short_hash}.json");
     let dest = dest_dir.join(&dest_filename);
 
-    std::fs::write(&dest, &content)
-        .map_err(|e| anyhow!("write SA to broker store: {e}"))?;
+    std::fs::write(&dest, &content).map_err(|e| anyhow!("write SA to broker store: {e}"))?;
     secure_file(&dest)?;
 
     // Replace original with dead symlink
@@ -523,9 +546,9 @@ profile clix-worker-system /usr/local/bin/clix-worker flags=(unconfined) {
         let dest = std::path::Path::new("/etc/apparmor.d/clix-worker");
 
         // Write profile to a user-owned temp path, then sudo-copy it into place
-        let tmp_path = std::path::PathBuf::from(format!("/tmp/clix-worker-apparmor-{}", std::process::id()));
-        std::fs::write(&tmp_path, PROFILE)
-            .map_err(|e| anyhow!("write profile to temp: {e}"))?;
+        let tmp_path =
+            std::path::PathBuf::from(format!("/tmp/clix-worker-apparmor-{}", std::process::id()));
+        std::fs::write(&tmp_path, PROFILE).map_err(|e| anyhow!("write profile to temp: {e}"))?;
 
         println!("Installing AppArmor profile to {} ...", dest.display());
 

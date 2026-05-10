@@ -271,7 +271,7 @@ impl WorkPool {
                     active_profile_bindings, build_registry, build_workflow_registry, load_policy,
                 };
                 use clix_core::policy::evaluate::ExecutionContext;
-                use clix_core::state::{home_dir, ClixState};
+                use clix_core::state::{ClixState, home_dir};
                 let state = match ClixState::load(home_dir()) {
                     Ok(s) => s,
                     Err(e) => {

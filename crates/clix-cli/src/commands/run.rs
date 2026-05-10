@@ -1,11 +1,11 @@
 use crate::output::print_json;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clix_core::execution::run_capability;
 use clix_core::execution::worker_registry::WorkerRegistry;
 use clix_core::loader::{active_profile_bindings, build_registry, load_policy};
 use clix_core::policy::evaluate::ExecutionContext;
 use clix_core::receipts::ReceiptStore;
-use clix_core::state::{home_dir, ClixState};
+use clix_core::state::{ClixState, home_dir};
 use std::sync::Arc;
 
 pub fn build_worker_registry(allow_unsandboxed: bool) -> Result<Option<Arc<WorkerRegistry>>> {
@@ -21,11 +21,11 @@ pub fn build_worker_registry(allow_unsandboxed: bool) -> Result<Option<Arc<Worke
             eprintln!("      install all clix binaries together, or set CLIX_ALLOW_UNSANDBOXED=1");
             return Ok(None);
         }
-        return Err(anyhow!(
+        Err(anyhow!(
             "clix-worker binary not found on PATH.\n\
              OS-level isolation requires all five clix binaries installed together.\n\
              To run without isolation (unsafe), set CLIX_ALLOW_UNSANDBOXED=1."
-        ));
+        ))
     }
 
     #[cfg(not(target_os = "linux"))]
@@ -81,64 +81,63 @@ pub fn run(capability: &str, input_pairs: &[String], json: bool, dry_run: bool) 
                 capability, decision, cap.isolation
             );
         }
-        return Ok(());
-    }
-
-    let store = ReceiptStore::open(&state.receipts_db)?;
-    let ctx = ExecutionContext {
-        env: state.config.default_env.clone(),
-        cwd: state.config.workspace_root.clone().unwrap_or_else(|| {
-            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-        }),
-        user: whoami::username(),
-        profile: state
-            .config
-            .active_profiles
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "default".to_string()),
-        approver: None,
-    };
-
-    let allow_unsandboxed = std::env::var("CLIX_ALLOW_UNSANDBOXED").is_ok();
-    let worker_registry = build_worker_registry(allow_unsandboxed)?;
-    let (profile_secret_bindings, profile_folder_bindings) = active_profile_bindings(&state)?;
-
-    let outcome = run_capability(
-        &registry,
-        &policy,
-        &state.config.infisical(),
-        &store,
-        worker_registry.as_ref(),
-        capability,
-        input,
-        ctx,
-        &profile_secret_bindings,
-        &profile_folder_bindings,
-    )
-    .map_err(|e| anyhow!("{e}"))?;
-    if json {
-        // Always emit the full outcome struct under --json for predictable agent parsing.
-        print_json(&outcome);
-    } else if outcome.ok {
-        println!("ok — receipt {}", outcome.receipt_id);
-        if let Some(result) = &outcome.result {
-            if let Some(stdout) = result["stdout"].as_str() {
-                if !stdout.is_empty() {
-                    print!("{stdout}");
-                }
-            } else if let Some(date) = result["date"].as_str() {
-                println!("{date}");
-            } else if let Some(output) = result["output"].as_str() {
-                println!("{output}");
-            }
-        }
-    } else if outcome.approval_required {
-        eprintln!("approval required — receipt {}", outcome.receipt_id);
-        std::process::exit(2);
     } else {
-        eprintln!("denied: {}", outcome.reason.unwrap_or_default());
-        std::process::exit(1);
+        let store = ReceiptStore::open(&state.receipts_db)?;
+        let ctx = ExecutionContext {
+            env: state.config.default_env.clone(),
+            cwd: state.config.workspace_root.clone().unwrap_or_else(|| {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            }),
+            user: whoami::username(),
+            profile: state
+                .config
+                .active_profiles
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "default".to_string()),
+            approver: None,
+        };
+
+        let allow_unsandboxed = std::env::var("CLIX_ALLOW_UNSANDBOXED").is_ok();
+        let worker_registry = build_worker_registry(allow_unsandboxed)?;
+        let (profile_secret_bindings, profile_folder_bindings) = active_profile_bindings(&state)?;
+
+        let outcome = run_capability(
+            &registry,
+            &policy,
+            &state.config.infisical(),
+            &store,
+            worker_registry.as_ref(),
+            capability,
+            input,
+            ctx,
+            &profile_secret_bindings,
+            &profile_folder_bindings,
+        )
+        .map_err(|e| anyhow!("{e}"))?;
+        if json {
+            // Always emit the full outcome struct under --json for predictable agent parsing.
+            print_json(&outcome);
+        } else if outcome.ok {
+            println!("ok — receipt {}", outcome.receipt_id);
+            if let Some(result) = &outcome.result {
+                if let Some(stdout) = result["stdout"].as_str() {
+                    if !stdout.is_empty() {
+                        print!("{stdout}");
+                    }
+                } else if let Some(date) = result["date"].as_str() {
+                    println!("{date}");
+                } else if let Some(output) = result["output"].as_str() {
+                    println!("{output}");
+                }
+            }
+        } else if outcome.approval_required {
+            eprintln!("approval required — receipt {}", outcome.receipt_id);
+            std::process::exit(2);
+        } else {
+            eprintln!("denied: {}", outcome.reason.unwrap_or_default());
+            std::process::exit(1);
+        }
     }
     Ok(())
 }

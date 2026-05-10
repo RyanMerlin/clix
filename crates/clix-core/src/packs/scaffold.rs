@@ -1,23 +1,34 @@
-use std::path::{Path, PathBuf};
 use crate::error::Result;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Preset { ReadOnly, ChangeControlled, Operator }
+pub enum Preset {
+    ReadOnly,
+    ChangeControlled,
+    Operator,
+}
 
 impl std::str::FromStr for Preset {
     type Err = String;
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
-            "read-only" | "readonly"          => Ok(Preset::ReadOnly),
-            "change-controlled" | "change"    => Ok(Preset::ChangeControlled),
-            "operator"                        => Ok(Preset::Operator),
-            _ => Err(format!("unknown preset: {s} (use: read-only, change-controlled, operator)")),
+            "read-only" | "readonly" => Ok(Preset::ReadOnly),
+            "change-controlled" | "change" => Ok(Preset::ChangeControlled),
+            "operator" => Ok(Preset::Operator),
+            _ => Err(format!(
+                "unknown preset: {s} (use: read-only, change-controlled, operator)"
+            )),
         }
     }
 }
 
 /// Generate a minimal pack scaffold in out_dir/<name>/.
-pub fn scaffold_pack(name: &str, preset: Preset, command: Option<&str>, out_dir: &Path) -> Result<PathBuf> {
+pub fn scaffold_pack(
+    name: &str,
+    preset: Preset,
+    command: Option<&str>,
+    out_dir: &Path,
+) -> Result<PathBuf> {
     let pack_dir = out_dir.join(name);
     std::fs::create_dir_all(pack_dir.join("capabilities"))?;
     std::fs::create_dir_all(pack_dir.join("profiles"))?;
@@ -25,13 +36,15 @@ pub fn scaffold_pack(name: &str, preset: Preset, command: Option<&str>, out_dir:
 
     let cmd = command.unwrap_or(name);
 
-    std::fs::write(pack_dir.join("pack.yaml"), format!(
-        "name: {name}\nversion: 1\ndescription: '{name} pack'\nprofiles:\n  - {name}\n"
-    ))?;
+    std::fs::write(
+        pack_dir.join("pack.yaml"),
+        format!("name: {name}\nversion: 1\ndescription: '{name} pack'\nprofiles:\n  - {name}\n"),
+    )?;
 
-    std::fs::write(pack_dir.join("profiles").join(format!("{name}.yaml")), format!(
-        "name: {name}\nversion: 1\ncapabilities:\n  - {name}.version\n"
-    ))?;
+    std::fs::write(
+        pack_dir.join("profiles").join(format!("{name}.yaml")),
+        format!("name: {name}\nversion: 1\ncapabilities:\n  - {name}.version\n"),
+    )?;
 
     let (cap_name, cap_content) = match preset {
         Preset::ReadOnly => (
@@ -54,7 +67,12 @@ pub fn scaffold_pack(name: &str, preset: Preset, command: Option<&str>, out_dir:
         ),
     };
 
-    std::fs::write(pack_dir.join("capabilities").join(format!("{cap_name}.yaml")), cap_content)?;
+    std::fs::write(
+        pack_dir
+            .join("capabilities")
+            .join(format!("{cap_name}.yaml")),
+        cap_content,
+    )?;
 
     Ok(pack_dir)
 }
@@ -67,9 +85,15 @@ mod tests {
     #[test]
     fn test_scaffold_readonly() {
         let dir = TempDir::new().unwrap();
-        let pack_dir = scaffold_pack("mytool", Preset::ReadOnly, Some("mytool"), dir.path()).unwrap();
+        let pack_dir =
+            scaffold_pack("mytool", Preset::ReadOnly, Some("mytool"), dir.path()).unwrap();
         assert!(pack_dir.join("pack.yaml").exists());
         assert!(pack_dir.join("profiles").join("mytool.yaml").exists());
-        assert!(pack_dir.join("capabilities").join("mytool.version.yaml").exists());
+        assert!(
+            pack_dir
+                .join("capabilities")
+                .join("mytool.version.yaml")
+                .exists()
+        );
     }
 }

@@ -11,11 +11,9 @@ pub struct DiscoveredBinary {
 /// Extensions that are never real Linux CLI tools — skip them entirely.
 /// Catches Windows DLLs, images, data files that appear on PATH in WSL.
 static SKIP_EXTENSIONS: &[&str] = &[
-    "dll", "DLL", "png", "ico", "bmp", "jpg", "jpeg",
-    "json", "xml", "ini", "cfg", "config", "log",
-    "txt", "md", "pdf", "zip", "tar", "gz",
-    "sys", "mui", "cat", "mum", "manifest",
-    "pri", "ptxml", "dsc",
+    "dll", "DLL", "png", "ico", "bmp", "jpg", "jpeg", "json", "xml", "ini", "cfg", "config", "log",
+    "txt", "md", "pdf", "zip", "tar", "gz", "sys", "mui", "cat", "mum", "manifest", "pri", "ptxml",
+    "dsc",
 ];
 
 /// Returns true if this directory should be excluded from the scan.
@@ -23,24 +21,29 @@ static SKIP_EXTENSIONS: &[&str] = &[
 fn is_excluded_dir(dir: &Path) -> bool {
     let s = dir.to_string_lossy();
     // Skip Windows drive mounts (/mnt/c, /mnt/d, ...)
-    if s.starts_with("/mnt/") {
+    if s.starts_with("/mnt/")
         // Allow /mnt/wsl and other non-drive mounts — only skip single-letter drive mounts
-        let after_mnt = &s[5..];
-        if let Some(rest) = after_mnt.splitn(2, '/').next() {
-            if rest.len() == 1 && rest.chars().next().map(|c| c.is_ascii_alphabetic()).unwrap_or(false) {
-                return true;  // /mnt/c/, /mnt/d/, etc.
-            }
-        }
+        && let Some(after_mnt) = s.strip_prefix("/mnt/")
+        && let Some(rest) = after_mnt.split('/').next()
+        && rest.len() == 1
+        && rest
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_alphabetic())
+            .unwrap_or(false)
+    {
+        return true; // /mnt/c/, /mnt/d/, etc.
     }
     false
 }
 
 /// Returns true if the filename has a skippable extension.
 fn has_skip_extension(name: &str) -> bool {
-    if let Some(ext) = name.rsplit('.').next() {
-        if ext != name {  // has an extension
-            return SKIP_EXTENSIONS.contains(&ext);
-        }
+    if let Some(ext) = name.rsplit('.').next()
+        && ext != name
+    {
+        // has an extension
+        return SKIP_EXTENSIONS.contains(&ext);
     }
     false
 }
@@ -54,7 +57,10 @@ pub fn scan_path() -> Vec<DiscoveredBinary> {
         dirs::home_dir().map(|h| h.join(".local/bin")),
         dirs::home_dir().map(|h| h.join(".cargo/bin")),
         dirs::home_dir().map(|h| h.join("go/bin")),
-    ].into_iter().flatten().collect();
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
 
     let mut search_dirs: Vec<PathBuf> = path_var
         .split(':')
@@ -71,15 +77,27 @@ pub fn scan_path() -> Vec<DiscoveredBinary> {
     let mut results = Vec::new();
 
     for dir in &search_dirs {
-        let Ok(entries) = std::fs::read_dir(dir) else { continue };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_file() { continue; }
+            if !path.is_file() {
+                continue;
+            }
             let Ok(meta) = entry.metadata() else { continue };
-            if meta.permissions().mode() & 0o111 == 0 { continue; }
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
-            if has_skip_extension(name) { continue; }
-            if !seen_names.insert(name.to_string()) { continue; }  // dedupe by name
+            if meta.permissions().mode() & 0o111 == 0 {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if has_skip_extension(name) {
+                continue;
+            }
+            if !seen_names.insert(name.to_string()) {
+                continue;
+            } // dedupe by name
             results.push(DiscoveredBinary {
                 name: name.to_string(),
                 path,

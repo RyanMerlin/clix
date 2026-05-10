@@ -1,4 +1,4 @@
-//! CLI smoke tests — exercise the `clix` binary via `assert_cmd`.
+//! CLI smoke tests — exercise the `clix` binary via `std::process::Command`.
 //!
 //! These tests verify:
 //! (a) `clix --help` exits 0 and mentions expected commands.
@@ -6,70 +6,91 @@
 //! (c) Bad subcommands produce a non-zero exit and helpful stderr.
 //! (f) `clix secrets test` with a bogus Infisical URL returns within 20s (reqwest timeout).
 
-use assert_cmd::Command;
-use predicates::prelude::*;
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
 
 fn clix() -> Command {
-    Command::cargo_bin("clix").expect("clix binary")
+    if let Some(exe) = std::env::var_os("CARGO_BIN_EXE_clix") {
+        return Command::new(exe);
+    }
+    if let Some(target_dir) = std::env::var_os("CARGO_TARGET_DIR") {
+        let target = std::path::PathBuf::from(target_dir);
+        let debug = target.join("debug").join("clix");
+        if debug.exists() {
+            return Command::new(debug);
+        }
+        let release = target.join("release").join("clix");
+        if release.exists() {
+            return Command::new(release);
+        }
+    }
+
+    let mut path = std::env::current_exe().expect("current_exe");
+    loop {
+        if path.join("target").exists() {
+            break;
+        }
+        if !path.pop() {
+            break;
+        }
+    }
+    let debug = path.join("target/debug/clix");
+    if debug.exists() {
+        return Command::new(debug);
+    }
+    Command::new(path.join("target/release/clix"))
+}
+
+fn output(args: &[&str], envs: &[(&str, &std::path::Path)]) -> std::process::Output {
+    let mut cmd = clix();
+    cmd.args(args);
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    cmd.output().expect("run clix")
 }
 
 /// (a) `clix --help` exits 0 and mentions core subcommands.
 #[test]
 fn test_help_exits_zero() {
-    clix()
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("run"))
-        .stdout(predicate::str::contains("profile"))
-        .stdout(predicate::str::contains("pack"));
+    let out = output(&["--help"], &[]);
+    assert!(out.status.success(), "help failed: {:?}", out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("run"));
+    assert!(stdout.contains("profile"));
+    assert!(stdout.contains("pack"));
 }
 
 /// (b) `clix profile list` with an empty CLIX_HOME exits 0.
 #[test]
 fn test_profile_list_empty_home() {
     let home = tempdir().unwrap();
-    clix()
-        .arg("profile")
-        .arg("list")
-        .env("CLIX_HOME", home.path())
-        .assert()
-        .success();
+    let out = output(&["profile", "list"], &[("CLIX_HOME", home.path())]);
+    assert!(out.status.success(), "profile list failed: {:?}", out);
 }
 
 /// (c) Unknown subcommand produces non-zero exit.
 #[test]
 fn test_unknown_subcommand_fails() {
-    clix()
-        .arg("definitely-not-a-real-command")
-        .assert()
-        .failure();
+    let out = output(&["definitely-not-a-real-command"], &[]);
+    assert!(!out.status.success(), "unexpected success: {:?}", out);
 }
 
 /// (d) `clix capabilities list` with an empty home exits 0 (empty output).
 #[test]
 fn test_capabilities_list_empty_home() {
     let home = tempdir().unwrap();
-    clix()
-        .arg("capabilities")
-        .arg("list")
-        .env("CLIX_HOME", home.path())
-        .assert()
-        .success();
+    let out = output(&["capabilities", "list"], &[("CLIX_HOME", home.path())]);
+    assert!(out.status.success(), "capabilities list failed: {:?}", out);
 }
 
 /// (e) `clix receipts list` with an empty home exits 0.
 #[test]
 fn test_receipts_list_empty_home() {
     let home = tempdir().unwrap();
-    clix()
-        .arg("receipts")
-        .arg("list")
-        .env("CLIX_HOME", home.path())
-        .assert()
-        .success();
+    let out = output(&["receipts", "list"], &[("CLIX_HOME", home.path())]);
+    assert!(out.status.success(), "receipts list failed: {:?}", out);
 }
 
 /// (f) `clix secrets test` with a bogus Infisical URL must complete within 20s
@@ -90,13 +111,27 @@ activeInfisical: default
     std::fs::write(home.path().join("config.yaml"), config_yaml).unwrap();
 
     let start = Instant::now();
-    clix()
-        .arg("secrets")
-        .arg("test")
+    let mut child = clix()
+        .args(["secrets", "test"])
         .env("CLIX_HOME", home.path())
-        .timeout(Duration::from_secs(25))
-        .assert()
-        .failure(); // non-zero because the URL is unreachable
+        .stderr(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn secrets test");
+
+    let deadline = Instant::now() + Duration::from_secs(25);
+    loop {
+        if let Some(status) = child.try_wait().expect("poll child") {
+            assert!(!status.success(), "unexpected success");
+            break;
+        }
+        if Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("secrets test exceeded timeout");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
     assert!(
         start.elapsed() < Duration::from_secs(20),
         "secrets test took too long — likely blocked on network call: {:?}",

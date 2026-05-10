@@ -14,9 +14,11 @@
 /// (`unshare --user` must work — true on Ubuntu/Debian with default settings).
 #[cfg(target_os = "linux")]
 mod jail_escape {
+    use clix_core::manifest::capability::{CgroupLimits, FsPolicy, NetworkPolicy};
+    use clix_core::sandbox::jail::{
+        JailConfig, discover_lib_deps, enter_jail, env_keys, resolve_and_hash_binary,
+    };
     use std::path::PathBuf;
-    use clix_core::sandbox::jail::{JailConfig, resolve_and_hash_binary, discover_lib_deps, enter_jail, env_keys};
-    use clix_core::manifest::capability::{FsPolicy, NetworkPolicy, CgroupLimits};
 
     // ── Probe dispatcher ──────────────────────────────────────────────────────
     // When the test binary is re-invoked with CLIX_JAIL_PROBE set, we run the
@@ -51,9 +53,12 @@ mod jail_escape {
     /// Attempt to exec /bin/sh — should fail: /bin/sh is not bind-mounted
     /// into the jail (only the pinned CLI binary is).
     fn probe_exec_sh() {
-        let result = std::process::Command::new("/bin/sh").arg("-c").arg("true").output();
+        let result = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg("true")
+            .output();
         match result {
-            Err(_) => std::process::exit(0),    // expected: exec failed → jail worked
+            Err(_) => std::process::exit(0), // expected: exec failed → jail worked
             Ok(out) if !out.status.success() => std::process::exit(0),
             Ok(_) => {
                 eprintln!("ESCAPE: /bin/sh succeeded inside jail");
@@ -103,7 +108,9 @@ mod jail_escape {
 
     /// Execute the pinned binary itself — should succeed.
     fn probe_pinned_binary_exec(config: &JailConfig) {
-        let bin_name = config.pinned_binary.file_name()
+        let bin_name = config
+            .pinned_binary
+            .file_name()
             .and_then(|n| n.to_str())
             .expect("binary name");
         let jail_bin = PathBuf::from("/bin").join(bin_name);
@@ -127,11 +134,18 @@ mod jail_escape {
         // parent: wait for child
         let mut status: libc::c_int = 0;
         unsafe { libc::waitpid(child_pid, &mut status, 0) };
-        let code = if libc::WIFEXITED(status) { libc::WEXITSTATUS(status) } else { 1 };
+        let code = if libc::WIFEXITED(status) {
+            libc::WEXITSTATUS(status)
+        } else {
+            1
+        };
         if code == 0 {
             std::process::exit(0);
         } else {
-            eprintln!("FAIL: could not exec pinned binary {}: child exited {code}", jail_bin.display());
+            eprintln!(
+                "FAIL: could not exec pinned binary {}: child exited {code}",
+                jail_bin.display()
+            );
             std::process::exit(1);
         }
     }
@@ -139,8 +153,8 @@ mod jail_escape {
     // ── Test infrastructure ────────────────────────────────────────────────────
 
     fn jail_config_for(binary: &str) -> JailConfig {
-        let (path, sha256) = resolve_and_hash_binary(binary)
-            .unwrap_or_else(|e| panic!("resolve {binary}: {e}"));
+        let (path, sha256) =
+            resolve_and_hash_binary(binary).unwrap_or_else(|e| panic!("resolve {binary}: {e}"));
         let libs = discover_lib_deps(&path);
         JailConfig {
             pinned_binary: path,
@@ -164,9 +178,15 @@ mod jail_escape {
         let mut cmd = std::process::Command::new(&exe);
         cmd.env_clear();
         // Keep PATH so the child can find itself, and TMPDIR for tempfile
-        if let Ok(p) = std::env::var("PATH") { cmd.env("PATH", p); }
-        if let Ok(t) = std::env::var("TMPDIR") { cmd.env("TMPDIR", t); }
-        for (k, v) in env_pairs { cmd.env(k, v); }
+        if let Ok(p) = std::env::var("PATH") {
+            cmd.env("PATH", p);
+        }
+        if let Ok(t) = std::env::var("TMPDIR") {
+            cmd.env("TMPDIR", t);
+        }
+        for (k, v) in env_pairs {
+            cmd.env(k, v);
+        }
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
 
@@ -205,7 +225,10 @@ mod jail_escape {
         // Positive: verify /proc is mounted and basic fd introspection works
         let config = jail_config_for("true");
         let (code, _, stderr) = run_probe("open_dev_null", &config);
-        assert_eq!(code, 0, "probe open_dev_null failed (jail too restrictive):\n{stderr}");
+        assert_eq!(
+            code, 0,
+            "probe open_dev_null failed (jail too restrictive):\n{stderr}"
+        );
     }
 
     #[test]
@@ -224,7 +247,9 @@ mod jail_escape {
 #[ctor::ctor]
 fn maybe_run_probe() {
     // Only intercept if CLIX_JAIL_PROBE is set
-    if std::env::var("CLIX_JAIL_PROBE").is_err() { return; }
+    if std::env::var("CLIX_JAIL_PROBE").is_err() {
+        return;
+    }
     jail_escape::run_probe_if_requested();
     // If run_probe_if_requested returns without exiting, something went wrong.
     eprintln!("probe returned without exit");

@@ -1,12 +1,12 @@
-use std::path::Path;
-use serde::Serialize;
 use crate::error::Result;
+use crate::manifest::capability::CapabilityManifest;
+use crate::manifest::loader::load_dir;
 use crate::manifest::loader::load_manifest;
 use crate::manifest::pack::PackManifest;
-use crate::manifest::capability::CapabilityManifest;
 use crate::manifest::profile::ProfileManifest;
 use crate::manifest::workflow::WorkflowManifest;
-use crate::manifest::loader::load_dir;
+use serde::Serialize;
+use std::path::Path;
 
 #[derive(Debug, Serialize)]
 pub struct DiscoverReport {
@@ -25,20 +25,33 @@ pub fn discover_pack(path: &Path) -> Result<DiscoverReport> {
         .iter()
         .map(|f| path.join(f))
         .find(|p| p.exists())
-        .ok_or_else(|| crate::error::ClixError::Pack(
-            format!("no pack.yaml found in {}", path.display())
-        ))?;
+        .ok_or_else(|| {
+            crate::error::ClixError::Pack(format!("no pack.yaml found in {}", path.display()))
+        })?;
 
     let pack: PackManifest = load_manifest(&manifest_path)?;
 
-    let profiles: Vec<ProfileManifest> = load_dir(&path.join("profiles"))
-        .unwrap_or_else(|e| { warnings.push(format!("profiles: {e}")); vec![] });
+    let profiles: Vec<ProfileManifest> = load_dir(&path.join("profiles")).unwrap_or_else(|e| {
+        warnings.push(format!("profiles: {e}"));
+        vec![]
+    });
     let capabilities: Vec<CapabilityManifest> = load_dir(&path.join("capabilities"))
-        .unwrap_or_else(|e| { warnings.push(format!("capabilities: {e}")); vec![] });
-    let workflows: Vec<WorkflowManifest> = load_dir(&path.join("workflows"))
-        .unwrap_or_else(|e| { warnings.push(format!("workflows: {e}")); vec![] });
+        .unwrap_or_else(|e| {
+            warnings.push(format!("capabilities: {e}"));
+            vec![]
+        });
+    let workflows: Vec<WorkflowManifest> = load_dir(&path.join("workflows")).unwrap_or_else(|e| {
+        warnings.push(format!("workflows: {e}"));
+        vec![]
+    });
 
-    Ok(DiscoverReport { pack, profiles, capabilities, workflows, warnings })
+    Ok(DiscoverReport {
+        pack,
+        profiles,
+        capabilities,
+        workflows,
+        warnings,
+    })
 }
 
 #[cfg(test)]

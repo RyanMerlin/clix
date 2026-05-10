@@ -9,12 +9,12 @@
 //! Scoping flags:
 //!   `--namespace NS`  — only capabilities in that namespace group
 //!   `--all`           — flat list of every capability (default: namespace stub view for two-tool; full list otherwise)
+use crate::output::print_json;
 use anyhow::Result;
 use clix_core::loader::build_registry;
-use clix_core::registry::CapabilityRegistry;
-use clix_core::state::{home_dir, ClixState};
 use clix_core::manifest::capability::CapabilityManifest;
-use crate::output::print_json;
+use clix_core::registry::CapabilityRegistry;
+use clix_core::state::{ClixState, home_dir};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExportFormat {
@@ -31,7 +31,9 @@ impl ExportFormat {
             "gemini" => Ok(Self::Gemini),
             "openai" | "openai-compat" => Ok(Self::OpenAi),
             "two-tool" | "twotool" | "2tool" => Ok(Self::TwoTool),
-            other => anyhow::bail!("unknown format '{other}'. Use: claude, gemini, openai, two-tool"),
+            other => {
+                anyhow::bail!("unknown format '{other}'. Use: claude, gemini, openai, two-tool")
+            }
         }
     }
 }
@@ -57,7 +59,11 @@ pub fn export(format_str: &str, namespace: Option<&str>, all: bool) -> Result<()
 /// on demand; you only pay ~400 tokens upfront regardless of how many capabilities
 /// are installed.
 fn export_two_tool(registry: &CapabilityRegistry) -> Result<()> {
-    let ns_list: Vec<String> = registry.namespaces().iter().map(|s| s.key.clone()).collect();
+    let ns_list: Vec<String> = registry
+        .namespaces()
+        .iter()
+        .map(|s| s.key.clone())
+        .collect();
     let ns_hint = if ns_list.is_empty() {
         "No namespaces installed yet.".to_string()
     } else {
@@ -120,7 +126,9 @@ fn export_two_tool(registry: &CapabilityRegistry) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(&tools)?);
     eprintln!();
     eprintln!("// Two-tool pattern: register the above tools array in your API call.");
-    eprintln!("// Handle tool_use responses: route 'clix_discover' to `clix capabilities` commands,");
+    eprintln!(
+        "// Handle tool_use responses: route 'clix_discover' to `clix capabilities` commands,"
+    );
     eprintln!("//   and 'clix_run' to `clix run <capability> --json`.");
     eprintln!("// See docs/integration-claude.md for a full Python/TypeScript implementation.");
     Ok(())
@@ -171,14 +179,21 @@ fn to_gemini_schema(schema: &serde_json::Value) -> serde_json::Value {
                 if k == "type" {
                     // Gemini uses uppercase type names
                     if let Some(s) = v.as_str() {
-                        out.insert("type".to_string(), serde_json::Value::String(s.to_uppercase()));
+                        out.insert(
+                            "type".to_string(),
+                            serde_json::Value::String(s.to_uppercase()),
+                        );
                     }
                 } else if k == "properties" {
                     if let Some(props) = v.as_object() {
-                        let gemini_props: serde_json::Map<_, _> = props.iter()
+                        let gemini_props: serde_json::Map<_, _> = props
+                            .iter()
                             .map(|(pk, pv)| (pk.clone(), to_gemini_schema(pv)))
                             .collect();
-                        out.insert("properties".to_string(), serde_json::Value::Object(gemini_props));
+                        out.insert(
+                            "properties".to_string(),
+                            serde_json::Value::Object(gemini_props),
+                        );
                     }
                 } else if k == "items" {
                     out.insert("items".to_string(), to_gemini_schema(v));
@@ -214,13 +229,15 @@ fn openai_tool(cap: &CapabilityManifest) -> serde_json::Value {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn select_caps<'a>(registry: &'a CapabilityRegistry, namespace: Option<&str>, all: bool) -> Vec<&'a CapabilityManifest> {
+fn select_caps<'a>(
+    registry: &'a CapabilityRegistry,
+    namespace: Option<&str>,
+    _all: bool,
+) -> Vec<&'a CapabilityManifest> {
     if let Some(ns) = namespace {
         registry.by_namespace(ns)
-    } else if all {
-        registry.all()
     } else {
-        registry.all() // default: all (two-tool handles its own logic)
+        registry.all()
     }
 }
 
@@ -237,12 +254,16 @@ mod tests {
     #[test]
     fn test_sanitize_tool_name() {
         assert_eq!(sanitize_tool_name("git.status"), "git__status");
-        assert_eq!(sanitize_tool_name("gcloud.aiplatform.models.list"), "gcloud__aiplatform__models__list");
+        assert_eq!(
+            sanitize_tool_name("gcloud.aiplatform.models.list"),
+            "gcloud__aiplatform__models__list"
+        );
     }
 
     #[test]
     fn test_gemini_schema_uppercase() {
-        let schema = serde_json::json!({"type": "object", "properties": {"foo": {"type": "string"}}});
+        let schema =
+            serde_json::json!({"type": "object", "properties": {"foo": {"type": "string"}}});
         let out = to_gemini_schema(&schema);
         assert_eq!(out["type"], "OBJECT");
         assert_eq!(out["properties"]["foo"]["type"], "STRING");
@@ -250,10 +271,22 @@ mod tests {
 
     #[test]
     fn test_format_from_str() {
-        assert!(matches!(ExportFormat::from_str("claude").unwrap(), ExportFormat::Claude));
-        assert!(matches!(ExportFormat::from_str("gemini").unwrap(), ExportFormat::Gemini));
-        assert!(matches!(ExportFormat::from_str("openai").unwrap(), ExportFormat::OpenAi));
-        assert!(matches!(ExportFormat::from_str("two-tool").unwrap(), ExportFormat::TwoTool));
+        assert!(matches!(
+            ExportFormat::from_str("claude").unwrap(),
+            ExportFormat::Claude
+        ));
+        assert!(matches!(
+            ExportFormat::from_str("gemini").unwrap(),
+            ExportFormat::Gemini
+        ));
+        assert!(matches!(
+            ExportFormat::from_str("openai").unwrap(),
+            ExportFormat::OpenAi
+        ));
+        assert!(matches!(
+            ExportFormat::from_str("two-tool").unwrap(),
+            ExportFormat::TwoTool
+        ));
         assert!(ExportFormat::from_str("unknown").is_err());
     }
 }

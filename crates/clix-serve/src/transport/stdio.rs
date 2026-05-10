@@ -1,9 +1,11 @@
+use crate::dispatch::{ServeState, dispatch};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use crate::dispatch::{dispatch, ServeState};
 
 pub async fn process_line(serve: Arc<ServeState>, line: &str) -> Option<String> {
-    if line.trim().is_empty() { return None; }
+    if line.trim().is_empty() {
+        return None;
+    }
     let req: serde_json::Value = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(e) => {
@@ -22,7 +24,9 @@ pub async fn serve_stdio(serve: Arc<ServeState>) -> anyhow::Result<()> {
     loop {
         line.clear();
         let n = reader.read_line(&mut line).await?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         if let Some(resp) = process_line(Arc::clone(&serve), &line).await {
             writer.write_all(resp.as_bytes()).await?;
             writer.write_all(b"\n").await?;
@@ -35,21 +39,30 @@ pub async fn serve_stdio(serve: Arc<ServeState>) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
     use clix_core::policy::PolicyBundle;
     use clix_core::receipts::ReceiptStore;
     use clix_core::registry::{CapabilityRegistry, WorkflowRegistry};
     use clix_core::state::ClixState;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_home(prefix: &str) -> std::path::PathBuf {
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let home = std::env::temp_dir().join(format!("{}-{}-{}", prefix, std::process::id(), id));
+        std::fs::create_dir_all(&home).unwrap();
+        home
+    }
 
     fn make_serve() -> Arc<ServeState> {
-        let home = std::env::temp_dir().join("clix-stdio-test");
-        std::fs::create_dir_all(&home).unwrap();
+        let home = unique_home("clix-stdio-test");
         Arc::new(ServeState {
-            cap_registry:    CapabilityRegistry::from_vec(vec![]),
-            wf_registry:     WorkflowRegistry::from_vec(vec![]),
-            policy:          PolicyBundle::default(),
-            store:           Mutex::new(ReceiptStore::open(&home.join("receipts.db")).unwrap()),
-            state:           ClixState::from_home(home),
+            cap_registry: CapabilityRegistry::from_vec(vec![]),
+            wf_registry: WorkflowRegistry::from_vec(vec![]),
+            policy: PolicyBundle::default(),
+            store: Mutex::new(ReceiptStore::open(&home.join("receipts.db")).unwrap()),
+            state: ClixState::from_home(home),
             worker_registry: None,
         })
     }
@@ -57,7 +70,12 @@ mod tests {
     #[tokio::test]
     async fn test_process_line_initialize() {
         let s = make_serve();
-        let resp = process_line(s, r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#).await.unwrap();
+        let resp = process_line(
+            s,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+        )
+        .await
+        .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&resp).unwrap();
         assert_eq!(parsed["result"]["serverInfo"]["name"], "clix");
     }

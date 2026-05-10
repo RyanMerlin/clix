@@ -1,6 +1,6 @@
-use ratatui::{prelude::*, widgets::*};
 use crate::tui::app::{App, Focus};
 use crate::tui::theme;
+use ratatui::{prelude::*, widgets::*};
 
 pub struct BrokerScreenState {
     pub running: bool,
@@ -25,7 +25,13 @@ impl BrokerScreenState {
         let ping_ms = try_ping(&socket_path);
         let adopted = scan_adopted_creds();
 
-        Self { running: running || ping_ms.is_some(), pid, ping_ms, socket_path, adopted }
+        Self {
+            running: running || ping_ms.is_some(),
+            pid,
+            ping_ms,
+            socket_path,
+            adopted,
+        }
     }
 }
 
@@ -62,8 +68,8 @@ fn process_alive(pid: i32) -> bool {
 }
 
 fn try_ping(socket_path: &str) -> Option<u64> {
-    use std::os::unix::net::UnixStream;
     use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixStream;
     use std::time::{Duration, Instant};
 
     let timeout = Duration::from_secs(3);
@@ -109,27 +115,28 @@ fn scan_adopted_creds() -> Vec<AdoptedCred> {
 
     // gcloud SA registry
     let sa_registry = creds.join("gcloud").join("sa_registry.json");
-    if sa_registry.exists() {
-        if let Ok(text) = std::fs::read_to_string(&sa_registry) {
-            if let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(&text) {
-                for entry in entries {
-                    let email = entry["email"].as_str().unwrap_or("?").to_string();
-                    let path = entry["path"].as_str().unwrap_or("?").to_string();
-                    let kind = format!("gcloud:sa-{}", &path[..path.len().min(8)]);
-                    result.push(AdoptedCred {
-                        kind,
-                        detail: email,
-                        adopted_at: None,
-                    });
-                }
-            }
+    if sa_registry.exists()
+        && let Ok(text) = std::fs::read_to_string(&sa_registry)
+        && let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(&text)
+    {
+        for entry in entries {
+            let email = entry["email"].as_str().unwrap_or("?").to_string();
+            let path = entry["path"].as_str().unwrap_or("?").to_string();
+            let kind = format!("gcloud:sa-{}", &path[..path.len().min(8)]);
+            result.push(AdoptedCred {
+                kind,
+                detail: email,
+                adopted_at: None,
+            });
         }
     }
 
     // kubectl
     let kubeconfig = creds.join("kubectl").join("kubeconfig");
     if kubeconfig.exists() {
-        let adopted_at = std::fs::metadata(&kubeconfig).ok().and_then(|m| m.modified().ok());
+        let adopted_at = std::fs::metadata(&kubeconfig)
+            .ok()
+            .and_then(|m| m.modified().ok());
         result.push(AdoptedCred {
             kind: "kubectl".to_string(),
             detail: kubeconfig.display().to_string(),
@@ -142,10 +149,14 @@ fn scan_adopted_creds() -> Vec<AdoptedCred> {
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name_str = name.to_string_lossy().to_string();
-            if name_str == "gcloud" || name_str == "kubectl" { continue; }
+            if name_str == "gcloud" || name_str == "kubectl" {
+                continue;
+            }
             let secret_env = entry.path().join("secret.env");
             if secret_env.exists() {
-                let adopted_at = std::fs::metadata(&secret_env).ok().and_then(|m| m.modified().ok());
+                let adopted_at = std::fs::metadata(&secret_env)
+                    .ok()
+                    .and_then(|m| m.modified().ok());
                 result.push(AdoptedCred {
                     kind: format!("generic:{name_str}"),
                     detail: secret_env.display().to_string(),
@@ -162,8 +173,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let state = app.broker_status.as_ref();
     let focused = app.focus == Focus::Content;
 
-    let chunks = Layout::vertical([Constraint::Length(6), Constraint::Min(0)])
-        .split(area);
+    let chunks = Layout::vertical([Constraint::Length(6), Constraint::Min(0)]).split(area);
 
     render_status_card(f, state, chunks[0], focused);
     render_creds_list(f, state, chunks[1]);
@@ -179,11 +189,21 @@ fn render_status_card(f: &mut Frame, state: Option<&BrokerScreenState>, area: Re
     f.render_widget(block, area);
 
     if let Some(s) = state {
-        let status_style = if s.running { theme::ok() } else { theme::danger() };
+        let status_style = if s.running {
+            theme::ok()
+        } else {
+            theme::danger()
+        };
         let status_text = if s.running { "RUNNING" } else { "STOPPED" };
 
-        let pid_str = s.pid.map(|p| p.to_string()).unwrap_or_else(|| "—".to_string());
-        let ping_str = s.ping_ms.map(|ms| format!("{ms}ms")).unwrap_or_else(|| "—".to_string());
+        let pid_str = s
+            .pid
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| "—".to_string());
+        let ping_str = s
+            .ping_ms
+            .map(|ms| format!("{ms}ms"))
+            .unwrap_or_else(|| "—".to_string());
 
         let lines = vec![
             Line::from(vec![
@@ -207,7 +227,10 @@ fn render_status_card(f: &mut Frame, state: Option<&BrokerScreenState>, area: Re
     } else {
         let lines = vec![
             Line::from(""),
-            Line::from(Span::styled("  press r to probe broker status", theme::muted())),
+            Line::from(Span::styled(
+                "  press r to probe broker status",
+                theme::muted(),
+            )),
         ];
         f.render_widget(Paragraph::new(lines), inner);
     }
@@ -229,25 +252,40 @@ fn render_creds_list(f: &mut Frame, state: Option<&BrokerScreenState>, area: Rec
                 theme::muted(),
             )))]
         } else {
-            s.adopted.iter().map(|cred| {
-                let age = cred.adopted_at.map(|t| {
-                    if let Ok(dur) = std::time::SystemTime::now().duration_since(t) {
-                        let secs = dur.as_secs();
-                        if secs < 3600 { format!("{}m ago", secs / 60) }
-                        else if secs < 86400 { format!("{}h ago", secs / 3600) }
-                        else { format!("{}d ago", secs / 86400) }
-                    } else { "?".to_string() }
-                }).unwrap_or_else(|| "?".to_string());
+            s.adopted
+                .iter()
+                .map(|cred| {
+                    let age = cred
+                        .adopted_at
+                        .map(|t| {
+                            if let Ok(dur) = std::time::SystemTime::now().duration_since(t) {
+                                let secs = dur.as_secs();
+                                if secs < 3600 {
+                                    format!("{}m ago", secs / 60)
+                                } else if secs < 86400 {
+                                    format!("{}h ago", secs / 3600)
+                                } else {
+                                    format!("{}d ago", secs / 86400)
+                                }
+                            } else {
+                                "?".to_string()
+                            }
+                        })
+                        .unwrap_or_else(|| "?".to_string());
 
-                ListItem::new(Line::from(vec![
-                    Span::styled(format!("  {:30}", cred.kind), theme::accent()),
-                    Span::styled(format!("  {:40}", cred.detail), theme::dim()),
-                    Span::styled(format!("  {age}"), theme::muted()),
-                ]))
-            }).collect()
+                    ListItem::new(Line::from(vec![
+                        Span::styled(format!("  {:30}", cred.kind), theme::accent()),
+                        Span::styled(format!("  {:40}", cred.detail), theme::dim()),
+                        Span::styled(format!("  {age}"), theme::muted()),
+                    ]))
+                })
+                .collect()
         }
     } else {
-        vec![ListItem::new(Line::from(Span::styled("  press r to load", theme::muted())))]
+        vec![ListItem::new(Line::from(Span::styled(
+            "  press r to load",
+            theme::muted(),
+        )))]
     };
 
     f.render_widget(List::new(items), inner);

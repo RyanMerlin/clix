@@ -1,15 +1,15 @@
 pub mod approve;
 pub mod broker;
 pub mod capabilities;
-pub mod infisical;
-pub mod secrets;
 pub mod doctor;
+pub mod infisical;
 pub mod init;
 pub mod mcp;
 pub mod pack;
 pub mod profile;
 pub mod receipts;
 pub mod run;
+pub mod secrets;
 pub mod serve;
 pub mod shim;
 pub mod status;

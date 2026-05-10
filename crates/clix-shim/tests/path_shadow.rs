@@ -12,19 +12,23 @@
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use assert_cmd::Command;
-use predicates::prelude::*;
 use tempfile::tempdir;
 
 fn shim_bin() -> std::path::PathBuf {
     // Locate the built clix-shim binary
     let mut path = std::env::current_exe().expect("current_exe");
     loop {
-        if path.join("target").exists() { break; }
-        if !path.pop() { break; }
+        if path.join("target").exists() {
+            break;
+        }
+        if !path.pop() {
+            break;
+        }
     }
     let debug = path.join("target/debug/clix-shim");
-    if debug.exists() { return debug; }
+    if debug.exists() {
+        return debug;
+    }
     path.join("target/release/clix-shim")
 }
 
@@ -45,7 +49,11 @@ fn test_shim_exits_127_no_gateway() {
         .arg("status")
         .status()
         .map(|s| {
-            assert_eq!(s.code().unwrap_or(-1), 127, "shim should exit 127 when gateway unreachable");
+            assert_eq!(
+                s.code().unwrap_or(-1),
+                127,
+                "shim should exit 127 when gateway unreachable"
+            );
         })
         .unwrap_or_else(|e| eprintln!("skipping: {e}"));
 }

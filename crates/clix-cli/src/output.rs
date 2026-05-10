@@ -47,7 +47,10 @@ pub fn format_value(value: &Value, format: &OutputFormat) -> String {
 }
 
 pub fn print_json(value: &impl serde::Serialize) {
-    println!("{}", serde_json::to_string_pretty(value).unwrap_or_else(|e| e.to_string()));
+    println!(
+        "{}",
+        serde_json::to_string_pretty(value).unwrap_or_else(|e| e.to_string())
+    );
 }
 
 pub fn print_kv(rows: &[(&str, String)]) {
@@ -116,7 +119,12 @@ fn format_array_as_table(arr: &[Value]) -> String {
 
     let row_maps: Vec<std::collections::HashMap<&str, &str>> = flat_rows
         .iter()
-        .map(|pairs| pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect())
+        .map(|pairs| {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect()
+        })
         .collect();
 
     // Column widths, capped at 60 chars.
@@ -182,7 +190,11 @@ fn format_array_as_table(arr: &[Value]) -> String {
 fn flatten_object(obj: &serde_json::Map<String, Value>, prefix: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for (key, val) in obj {
-        let full_key = if prefix.is_empty() { key.clone() } else { format!("{prefix}.{key}") };
+        let full_key = if prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{prefix}.{key}")
+        };
         match val {
             Value::Object(nested) => out.extend(flatten_object(nested, &full_key)),
             _ => out.push((full_key, value_to_cell(val))),
@@ -220,7 +232,9 @@ fn json_to_yaml(value: &Value, indent: usize) -> String {
             }
         }
         Value::Array(arr) => {
-            if arr.is_empty() { return "[]".to_string(); }
+            if arr.is_empty() {
+                return "[]".to_string();
+            }
             let mut out = String::new();
             for item in arr {
                 let val_str = json_to_yaml(item, indent + 1);
@@ -229,7 +243,9 @@ fn json_to_yaml(value: &Value, indent: usize) -> String {
             out
         }
         Value::Object(obj) => {
-            if obj.is_empty() { return "{}".to_string(); }
+            if obj.is_empty() {
+                return "{}".to_string();
+            }
             let mut out = String::new();
             for (key, val) in obj {
                 match val {
@@ -262,14 +278,19 @@ fn format_csv(value: &Value) -> String {
         return value_to_cell(value);
     };
 
-    if arr.is_empty() { return String::new(); }
+    if arr.is_empty() {
+        return String::new();
+    }
 
     // Array of non-objects
     if !arr.iter().any(|v| v.is_object()) {
         let mut output = String::new();
         for item in arr {
             if let Value::Array(inner) = item {
-                let cells: Vec<String> = inner.iter().map(|v| csv_escape(&value_to_cell(v))).collect();
+                let cells: Vec<String> = inner
+                    .iter()
+                    .map(|v| csv_escape(&value_to_cell(v)))
+                    .collect();
                 let _ = writeln!(output, "{}", cells.join(","));
             } else {
                 let _ = writeln!(output, "{}", csv_escape(&value_to_cell(item)));
@@ -282,7 +303,9 @@ fn format_csv(value: &Value) -> String {
     for item in arr {
         if let Value::Object(obj) = item {
             for key in obj.keys() {
-                if !columns.contains(key) { columns.push(key.clone()); }
+                if !columns.contains(key) {
+                    columns.push(key.clone());
+                }
             }
         }
     }
@@ -320,9 +343,13 @@ fn csv_escape(s: &str) -> String {
 fn extract_items(value: &Value) -> Option<(&str, &Vec<Value>)> {
     if let Value::Object(obj) = value {
         for (key, val) in obj {
-            if key == "nextPageToken" || key == "kind" || key.starts_with('_') { continue; }
-            if let Value::Array(arr) = val {
-                if !arr.is_empty() { return Some((key, arr)); }
+            if key == "nextPageToken" || key == "kind" || key.starts_with('_') {
+                continue;
+            }
+            if let Value::Array(arr) = val
+                && !arr.is_empty()
+            {
+                return Some((key, arr));
             }
         }
     }

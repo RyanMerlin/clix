@@ -5,11 +5,11 @@
 //!   Public key:  `~/.clix/pack-signing.pub` (PEM, mode 0644)
 //!   Trusted keys: `~/.clix/trusted-pack-keys/<fingerprint>.pub`
 
-use std::path::{Path, PathBuf};
-use ed25519_dalek::{SigningKey, VerifyingKey, Signature, Signer, Verifier};
-use rand_core::OsRng;
-use sha2::{Sha256, Digest};
 use crate::error::{ClixError, Result};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use rand_core::OsRng;
+use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
 
 // ─── Fingerprint ─────────────────────────────────────────────────────────────
 

@@ -30,7 +30,9 @@ pub fn load_help(tool: &str, version: &str) -> String {
 /// Returns all `(tool, version)` pairs for available fixtures.
 pub fn available_help_fixtures() -> Vec<(String, String)> {
     let dir = fixtures_dir();
-    let Ok(entries) = std::fs::read_dir(&dir) else { return vec![]; };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return vec![];
+    };
     entries
         .filter_map(|e| {
             let e = e.ok()?;
