@@ -5,6 +5,8 @@
 
 Paste this into your system prompt or agent context. It's the complete reference for interacting with clix as a CLI.
 
+If you are a human getting started for the first time, use [docs/quickstart.md](quickstart.md) instead.
+
 ---
 
 ## What clix does

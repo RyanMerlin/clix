@@ -6,6 +6,8 @@
 
 Three integration patterns, ordered by how much context budget you want to spend.
 
+If you are new to clix, start with [docs/quickstart.md](quickstart.md) first, then come back here for integration-specific patterns.
+
 ---
 
 ## Pattern 1 — Direct CLI (zero context cost, recommended)

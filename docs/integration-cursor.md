@@ -2,6 +2,8 @@
 
 Cursor has native MCP support. `clix serve` is a fully compliant MCP server.
 
+If you are new to clix, start with [docs/quickstart.md](quickstart.md) first. This guide assumes you already know whether you want a project-scoped MCP server or a global setup.
+
 ---
 
 ## Setup (30 seconds)

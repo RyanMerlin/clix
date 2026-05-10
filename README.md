@@ -82,6 +82,8 @@ capability is actually used.
 
 ## Quick start
 
+If you are new to clix, start with [docs/quickstart.md](docs/quickstart.md). It walks through install, init, verification, and the first commands in a simple order.
+
 ```sh
 # Install
 curl -fsSL https://raw.githubusercontent.com/RyanMerlin/clix/main/scripts/install.sh | sh
@@ -89,22 +91,17 @@ curl -fsSL https://raw.githubusercontent.com/RyanMerlin/clix/main/scripts/instal
 # Set up and install built-in packs
 clix init
 
-# See what's available (lean JSON — agent-friendly)
+# Verify the install
+clix doctor --json
+
+# See what's available
 clix capabilities list --json
-clix capabilities search "list" --json
 
 # Get the full schema for one capability
 clix capabilities show git.status --json
 
 # Run a capability
 clix run git.status --json
-clix run git.log -i limit=10 --json
-
-# Preview without executing
-clix run git.status --dry-run --json
-
-# Health check
-clix doctor --json
 ```
 
 All commands support `--json` for machine-readable, agent-parseable output.
@@ -347,6 +344,7 @@ Set `CLIX_STRICT_VERIFY=1` to verify the SBOM and attestations during install (r
 
 ## Docs
 
+- [Quickstart](docs/quickstart.md) — install, init, verify, and try clix end to end
 - [Agent quickstart](docs/agent-quickstart.md) — paste-into-prompt CLI reference for agents
 - [Claude integration](docs/integration-claude.md) — direct CLI, two-tool API, Claude Code MCP setup
 - [Gemini integration](docs/integration-gemini.md) — function declarations, google-generativeai SDK
