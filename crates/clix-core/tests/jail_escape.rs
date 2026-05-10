@@ -244,7 +244,7 @@ mod jail_escape {
 // Integration test binaries have their own main — we intercept it here so that
 // re-invocations with CLIX_JAIL_PROBE run the probe instead of normal tests.
 #[cfg(target_os = "linux")]
-#[ctor::ctor]
+#[ctor::ctor(unsafe)]
 fn maybe_run_probe() {
     // Only intercept if CLIX_JAIL_PROBE is set
     if std::env::var("CLIX_JAIL_PROBE").is_err() {
