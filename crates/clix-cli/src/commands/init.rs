@@ -197,7 +197,7 @@ defaultAction: deny
     // Hint about Infisical if not configured
     if config.infisical.is_none() {
         println!();
-        println!("  run `clix secrets set` or press [c] in the TUI Dashboard to configure Infisical secrets");
+        println!("  run `clix infisical add` or press [c] in the TUI Dashboard to configure Infisical auth");
     }
 
     // On Linux, ensure OS isolation is actually usable — install AppArmor profile if needed

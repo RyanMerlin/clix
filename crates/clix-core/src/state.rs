@@ -75,8 +75,6 @@ impl ClixState {
         }
         // Promote legacy single-entry infisical field to named profiles map
         migrate_infisical_config(&mut state.config);
-        #[cfg(target_os = "linux")]
-        crate::secrets::keyring::merge_keyring_into_config(&mut state.config);
         Ok(state)
     }
 
@@ -212,7 +210,7 @@ pub struct InfisicalConfig {
     pub client_id: Option<String>,
     #[serde(default)]
     pub client_secret: Option<String>,
-    /// Infisical project-scoped service token (st.xxx) — primary auth method.
+    /// Infisical project-scoped service token (st.xxx) for tightly scoped fallback use.
     /// When set, used directly as a Bearer token; no exchange needed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_token: Option<String>,
@@ -249,18 +247,49 @@ pub struct InfisicalProfiles<'a> {
 
 impl<'a> InfisicalProfiles<'a> {
     /// Resolve a specific profile by name, or the active profile if `name` is None.
-    pub fn resolve(&self, name: Option<&str>) -> Option<&'a InfisicalConfig> {
+    /// On Linux, this overlays any keyring-backed auth material onto the on-disk config.
+    pub fn resolve(&self, name: Option<&str>) -> Option<InfisicalConfig> {
         let key = name.or(self.active)?;
-        self.profiles.get(key)
+        let base = self.profiles.get(key)?;
+        Some(base.effective_for_profile(key))
     }
 
     /// Return the active profile, if any.
-    pub fn active_profile(&self) -> Option<&'a InfisicalConfig> {
+    pub fn active_profile(&self) -> Option<InfisicalConfig> {
         self.resolve(None)
     }
 
     pub fn is_empty(&self) -> bool {
         self.profiles.is_empty()
+    }
+}
+
+impl InfisicalConfig {
+    /// Build the runtime-effective Infisical config for a named profile.
+    /// On Linux, this overlays keyring-backed auth material so config.yaml can stay secret-free.
+    pub fn effective_for_profile(&self, profile_name: &str) -> Self {
+        #[cfg(target_os = "linux")]
+        {
+            let mut effective = self.clone();
+            if let Some((client_id, client_secret)) = crate::secrets::keyring::load_credentials(profile_name) {
+                effective.client_id = Some(client_id);
+                effective.client_secret = Some(client_secret);
+            } else if profile_name == "default" && effective.client_id.is_none() {
+                if let Some((client_id, client_secret)) = crate::secrets::keyring::load_legacy_credentials() {
+                    effective.client_id = Some(client_id);
+                    effective.client_secret = Some(client_secret);
+                }
+            }
+            if let Some(token) = crate::secrets::keyring::load_service_token(profile_name) {
+                effective.service_token = Some(token);
+            }
+            effective
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = profile_name;
+            self.clone()
+        }
     }
 }
 
@@ -351,8 +380,8 @@ mod tests {
             default_environment: "dev".to_string(),
         });
         let resolver = InfisicalProfiles { profiles: &profiles, active: Some("work") };
-        assert_eq!(resolver.active_profile().map(|p| p.default_environment.as_str()), Some("prod"));
-        assert_eq!(resolver.resolve(Some("personal")).map(|p| p.default_environment.as_str()), Some("dev"));
+        assert_eq!(resolver.active_profile().map(|p| p.default_environment), Some("prod".to_string()));
+        assert_eq!(resolver.resolve(Some("personal")).map(|p| p.default_environment), Some("dev".to_string()));
         assert!(resolver.resolve(Some("nonexistent")).is_none());
     }
 }

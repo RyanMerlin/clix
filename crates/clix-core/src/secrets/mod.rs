@@ -86,7 +86,7 @@ pub fn test_connectivity(cfg: &InfisicalConfig) -> ConnectivityReport {
             root_folder_count: 0,
             latency_ms: 0,
             token_expires_in: None,
-            error: Some("Profile not configured — add a service token or machine identity credentials".to_string()),
+            error: Some("Profile not configured — add universal auth credentials or a service token".to_string()),
         };
     }
 
@@ -228,7 +228,7 @@ pub fn resolve_credentials(
                             "Infisical profile '{profile_name}' not configured (run `clix infisical add` to set one up)"
                         ))
                     })?;
-                fetch_infisical_secret(cfg, secret_ref)?
+                fetch_infisical_secret(&cfg, secret_ref)?
             }
         };
         resolved.insert(key.clone(), value);
@@ -255,7 +255,7 @@ pub fn list_infisical_secrets(
 ) -> Result<Vec<String>> {
     if !cfg.is_configured() {
         return Err(ClixError::CredentialResolution(
-            "Infisical profile is not configured — add a service token or machine identity credentials".to_string(),
+            "Infisical profile is not configured — add universal auth credentials or a service token".to_string(),
         ));
     }
     if project_id.is_empty() {
@@ -289,7 +289,7 @@ pub fn list_infisical_secrets(
     Ok(names)
 }
 
-/// List subfolder names at a given path in Infisical.
+/// List folder names at a given path in Infisical.
 pub fn list_infisical_folders(
     cfg: &InfisicalConfig,
     project_id: &str,
@@ -298,7 +298,7 @@ pub fn list_infisical_folders(
 ) -> Result<Vec<String>> {
     if !cfg.is_configured() {
         return Err(ClixError::CredentialResolution(
-            "Infisical profile is not configured — add a service token or machine identity credentials".to_string(),
+            "Infisical profile is not configured — add universal auth credentials or a service token".to_string(),
         ));
     }
     if project_id.is_empty() {
@@ -330,6 +330,82 @@ pub fn list_infisical_folders(
         .map(|arr| arr.iter().filter_map(|f| f["name"].as_str().map(|n| n.to_string())).collect())
         .unwrap_or_default();
     Ok(names)
+}
+
+/// Create or update a secret in Infisical.
+pub fn upsert_infisical_secret(
+    cfg: &InfisicalConfig,
+    project_id: &str,
+    environment: &str,
+    secret_path: &str,
+    secret_name: &str,
+    secret_value: &str,
+) -> Result<()> {
+    if !cfg.is_configured() {
+        return Err(ClixError::CredentialResolution(
+            "Infisical profile is not configured — add universal auth credentials or a service token".to_string(),
+        ));
+    }
+    if project_id.is_empty() {
+        return Err(ClixError::CredentialResolution(
+            "project_id is required to set secrets".to_string(),
+        ));
+    }
+    if secret_name.trim().is_empty() {
+        return Err(ClixError::CredentialResolution(
+            "secret name cannot be empty".to_string(),
+        ));
+    }
+
+    let token = get_infisical_token(cfg)?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .connect_timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| ClixError::CredentialResolution(e.to_string()))?;
+    let url = format!(
+        "{}/api/v4/secrets/{}",
+        cfg.site_url.trim_end_matches('/'),
+        urlencoding::encode(secret_name),
+    );
+    let body = serde_json::json!({
+        "projectId": project_id,
+        "environment": environment,
+        "secretValue": secret_value,
+        "secretPath": secret_path,
+        "secretComment": "",
+        "type": "shared",
+        "skipMultilineEncoding": false,
+    });
+
+    let attempt = |method: reqwest::Method| {
+        client
+            .request(method, &url)
+            .bearer_auth(&token)
+            .json(&body)
+            .send()
+            .map_err(|e| ClixError::CredentialResolution(format!("Infisical secret write: {e}")))
+    };
+
+    let resp = attempt(reqwest::Method::PATCH)?;
+    if resp.status().is_success() {
+        return Ok(());
+    }
+
+    if resp.status().as_u16() != 404 {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(ClixError::CredentialResolution(format!("Infisical {status}: {body}")));
+    }
+
+    let resp = attempt(reqwest::Method::POST)?;
+    if resp.status().is_success() {
+        return Ok(());
+    }
+
+    let status = resp.status();
+    let body = resp.text().unwrap_or_default();
+    Err(ClixError::CredentialResolution(format!("Infisical {status}: {body}")))
 }
 
 fn fetch_infisical_secret(cfg: &InfisicalConfig, secret_ref: &crate::manifest::capability::InfisicalRef) -> Result<String> {

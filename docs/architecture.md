@@ -116,7 +116,7 @@ MCP protocol version: `2024-11-05`. Methods:
 Credentials are resolved at execution time, then ephemeral broker-minted tokens are merged on top:
 
 1. **env** — plain environment variable declared in the capability manifest
-2. **infisical** — fetched from Infisical via REST API using a machine identity token
+2. **infisical** — fetched from Infisical via REST API using Universal Auth / machine identity, with service token as a fallback
 3. **broker** — short-lived token minted by `clix-broker` immediately before dispatch (gcloud, kubectl, etc.)
 
 A `SecretRedactor` is built from all resolved values and applied to stdout/stderr before the receipt is written. Values are sorted longest-first to prevent partial replacement.

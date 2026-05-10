@@ -68,6 +68,7 @@ fn cmd_list(use_json: bool) -> Result<()> {
                 "site_url": cfg.site_url,
                 "project_id": cfg.default_project_id,
                 "environment": cfg.default_environment,
+                "auth_source": infisical_auth_source(name, cfg),
             })
         }).collect();
         println!("{}", serde_json::to_string_pretty(&profiles)?);
@@ -75,12 +76,13 @@ fn cmd_list(use_json: bool) -> Result<()> {
         println!("No Infisical profiles configured.");
         println!("Run `clix infisical add <name>` to add one.");
     } else {
-        println!("{:<16} {:<8} {:<36} {}", "NAME", "ACTIVE", "SITE", "ENV");
+        println!("{:<16} {:<8} {:<36} {:<10} {}", "NAME", "ACTIVE", "SITE", "AUTH", "ENV");
         for (name, cfg) in &state.config.infisical_profiles {
-            println!("{:<16} {:<8} {:<36} {}",
+            println!("{:<16} {:<8} {:<36} {:<10} {}",
                 name,
                 if name == active { "*" } else { "" },
                 cfg.site_url,
+                infisical_auth_source(name, cfg),
                 cfg.default_environment,
             );
         }
@@ -118,8 +120,9 @@ fn cmd_add(name: &str, site_url: Option<String>, project_id: Option<String>, env
     state.save_config()?;
     println!("Profile '{}' added.", name);
 
-    let cfg_ref = state.config.infisical_profiles.get(name).unwrap();
-    run_connectivity_check(cfg_ref);
+    if let Some(cfg) = state.config.infisical().resolve(Some(name)) {
+        run_connectivity_check(&cfg);
+    }
     Ok(())
 }
 
@@ -194,7 +197,7 @@ fn cmd_test(name: Option<&str>) -> Result<()> {
     };
 
     println!("Testing profile '{}' → {} …", profile_name, cfg.site_url);
-    let report = test_connectivity(cfg);
+    let report = test_connectivity(&cfg);
 
     if report.auth_ok {
         println!("  ✓ auth ok  ({}ms)", report.latency_ms);
@@ -274,17 +277,31 @@ fn read_credentials(from_stdin: bool) -> Result<(String, String)> {
 fn store_creds_or_config(state: &mut ClixState, name: &str, client_id: &str, client_secret: &str) -> Result<()> {
     #[cfg(target_os = "linux")]
     {
-        use clix_core::secrets::keyring::{store_credentials, KeyringResult};
+        use clix_core::secrets::keyring::{delete_credentials, store_credentials, KeyringResult};
+        if client_id.is_empty() && client_secret.is_empty() {
+            match delete_credentials(name) {
+                KeyringResult::Ok | KeyringResult::Unavailable(_) => {}
+            }
+            let cfg = state.config.infisical_profiles.get_mut(name).unwrap();
+            cfg.client_id = None;
+            cfg.client_secret = None;
+            return Ok(());
+        }
         match store_credentials(name, client_id, client_secret) {
-            KeyringResult::Ok => return Ok(()),
+            KeyringResult::Ok => {
+                let cfg = state.config.infisical_profiles.get_mut(name).unwrap();
+                cfg.client_id = None;
+                cfg.client_secret = None;
+                return Ok(());
+            }
             KeyringResult::Unavailable(e) => {
                 eprintln!("Keyring unavailable ({}), storing in config.yaml", e);
             }
         }
     }
     let cfg = state.config.infisical_profiles.get_mut(name).unwrap();
-    cfg.client_id = Some(client_id.to_string());
-    cfg.client_secret = Some(client_secret.to_string());
+    cfg.client_id = if client_id.is_empty() { None } else { Some(client_id.to_string()) };
+    cfg.client_secret = if client_secret.is_empty() { None } else { Some(client_secret.to_string()) };
     Ok(())
 }
 
@@ -294,5 +311,29 @@ fn run_connectivity_check(cfg: &InfisicalConfig) {
         println!("✓ Infisical connected ({}ms)", report.latency_ms);
     } else {
         eprintln!("✗ {}", report.error.as_deref().unwrap_or("auth failed").chars().take(80).collect::<String>());
+    }
+}
+
+fn infisical_auth_source(name: &str, cfg: &InfisicalConfig) -> &'static str {
+#[cfg(target_os = "linux")]
+    {
+        use clix_core::secrets::keyring::{load_credentials, load_service_token};
+        if load_credentials(name).is_some() {
+            "universal-auth"
+        } else if load_service_token(name).is_some() {
+            "service-token"
+        } else if cfg.client_id.is_some() || cfg.client_secret.is_some() || cfg.service_token.is_some() {
+            "config"
+        } else {
+            "unset"
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        if cfg.client_id.is_some() || cfg.client_secret.is_some() || cfg.service_token.is_some() {
+            "config"
+        } else {
+            "unset"
+        }
     }
 }

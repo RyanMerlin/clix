@@ -97,4 +97,10 @@ No server needed — runs in-process and exits.
 3. Select a profile with `↑`/`↓`, then press `s` to open **Edit Secrets**
 4. Press `a` to add a new binding row, type the env-var name, press Enter
 5. Press `i` (or `p`) to open the Infisical tree picker — navigate folders with `↑`/`↓`/`→`/`←`, press Enter to select a secret path
-6. Press `ctrl-s` to save; the secret is now injected under that env-var name whenever this profile is active
+6. Press `ctrl-s` to save; the secret is injected under that env-var name whenever this profile is active
+
+For one-off writes into Infisical itself, use:
+
+```sh
+clix secrets put DB_PASSWORD 'secret-value' --path /prod/api
+```

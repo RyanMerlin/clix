@@ -33,8 +33,8 @@ pub fn run(json: bool) -> Result<()> {
         .unwrap_or_else(|| "none".to_string());
 
     // Check Infisical connectivity
-    let infisical_status = if let Some(ref cfg) = state.config.infisical {
-        let report = test_connectivity(cfg);
+    let infisical_status = if let Some(cfg) = state.config.infisical().active_profile() {
+        let report = test_connectivity(&cfg);
         if report.auth_ok {
             format!("connected ({}ms)", report.latency_ms)
         } else {

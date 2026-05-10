@@ -1,6 +1,6 @@
 use clap::Subcommand;
 use anyhow::Result;
-use clix_core::secrets::{test_connectivity, preview};
+use clix_core::secrets::{preview, test_connectivity, upsert_infisical_secret};
 use clix_core::state::{ClixState, InfisicalConfig};
 
 #[derive(Subcommand, Debug)]
@@ -12,6 +12,21 @@ pub enum SecretsCmd {
     },
     /// Test connectivity to Infisical
     Test,
+    /// Create or update a secret in Infisical
+    Put {
+        /// Secret name/key to write
+        name: String,
+        /// Secret value. If omitted, clix prompts interactively unless --stdin is used.
+        value: Option<String>,
+        /// Read the secret value from stdin instead of argv or an interactive prompt
+        #[arg(long)] stdin: bool,
+        /// Override the project/workspace ID for this write
+        #[arg(long)] project: Option<String>,
+        /// Override the environment for this write
+        #[arg(long)] env: Option<String>,
+        /// Secret path within the workspace
+        #[arg(long, default_value = "/")] path: String,
+    },
     /// Configure Infisical credentials (updates the active profile, or creates "default")
     Set {
         #[arg(long)] site_url: Option<String>,
@@ -42,6 +57,8 @@ pub fn run_secrets(cmd: SecretsCmd, state: &ClixState) -> Result<()> {
     match cmd {
         SecretsCmd::Show { yaml, json } => cmd_show(state, yaml, json),
         SecretsCmd::Test => cmd_test(state),
+        SecretsCmd::Put { name, value, stdin, project, env, path } =>
+            cmd_put(state, &name, value, stdin, project.as_deref(), env.as_deref(), &path),
         SecretsCmd::Set { site_url, project_id, env, stdin } => cmd_set(state, site_url, project_id, env, stdin),
         SecretsCmd::Unset => cmd_unset(state),
         SecretsCmd::List { path, project, env, plain } => cmd_list(state, &path, project.as_deref(), env.as_deref(), plain),
@@ -55,21 +72,30 @@ fn cmd_show(state: &ClixState, use_yaml: bool, use_json: bool) -> Result<()> {
 
     // Determine credential source for the active profile
     #[cfg(target_os = "linux")]
-    let from_keyring = {
+    let source = {
         let active_name = state.config.active_infisical.as_deref().unwrap_or("default");
-        clix_core::secrets::keyring::load_credentials(active_name).is_some()
+        if clix_core::secrets::keyring::load_credentials(active_name).is_some() {
+            "universal-auth"
+        } else if clix_core::secrets::keyring::load_service_token(active_name).is_some() {
+            "service-token"
+        } else {
+            "unset"
+        }
     };
     #[cfg(not(target_os = "linux"))]
-    let from_keyring = false;
+    let source = "unset";
 
-    let source = if from_keyring { "keyring" } else { "config.yaml" };
-
-    let site_url = cfg.map(|c| c.site_url.as_str()).unwrap_or("(not set)");
-    let client_id = cfg.and_then(|c| c.client_id.as_deref()).unwrap_or("");
-    let client_secret = cfg.and_then(|c| c.client_secret.as_deref()).unwrap_or("");
-    let project_id = cfg.and_then(|c| c.default_project_id.as_deref()).unwrap_or("");
-    let environment = cfg.map(|c| c.default_environment.as_str()).unwrap_or("dev");
+    let site_url = cfg.as_ref().map(|c| c.site_url.as_str()).unwrap_or("(not set)");
+    let client_id = cfg.as_ref().and_then(|c| c.client_id.as_deref()).unwrap_or("");
+    let client_secret = cfg.as_ref().and_then(|c| c.client_secret.as_deref()).unwrap_or("");
+    let project_id = cfg.as_ref().and_then(|c| c.default_project_id.as_deref()).unwrap_or("");
+    let environment = cfg.as_ref().map(|c| c.default_environment.as_str()).unwrap_or("dev");
     let active_name = state.config.active_infisical.as_deref().unwrap_or("(none)");
+    let source = if source == "unset" && !(client_id.is_empty() && client_secret.is_empty() && cfg.as_ref().and_then(|c| c.service_token.as_deref()).is_none()) {
+        "config.yaml"
+    } else {
+        source
+    };
 
     if use_json {
         let v = serde_json::json!({
@@ -109,10 +135,10 @@ fn cmd_show(state: &ClixState, use_yaml: bool, use_json: bool) -> Result<()> {
 fn cmd_test(state: &ClixState) -> Result<()> {
     let profiles = state.config.infisical();
     let cfg = profiles.active_profile()
-        .ok_or_else(|| anyhow::anyhow!("No active Infisical profile — run `clix secrets set` or `clix infisical add`"))?;
+        .ok_or_else(|| anyhow::anyhow!("No active Infisical profile — run `clix infisical add`"))?;
 
     println!("Testing Infisical connectivity to {} …", cfg.site_url);
-    let report = test_connectivity(cfg);
+    let report = test_connectivity(&cfg);
 
     if report.auth_ok {
         println!("  ✓ auth ok");
@@ -130,6 +156,30 @@ fn cmd_test(state: &ClixState) -> Result<()> {
         eprintln!("  ✗ error: {}", report.error.as_deref().unwrap_or("unknown"));
         std::process::exit(1);
     }
+    Ok(())
+}
+
+fn cmd_put(
+    state: &ClixState,
+    name: &str,
+    value: Option<String>,
+    from_stdin: bool,
+    project: Option<&str>,
+    env: Option<&str>,
+    path: &str,
+) -> Result<()> {
+    let profiles = state.config.infisical();
+    let cfg = profiles.active_profile()
+        .ok_or_else(|| anyhow::anyhow!("Infisical not configured"))?;
+    let project_id = project
+        .or_else(|| cfg.default_project_id.as_deref())
+        .ok_or_else(|| anyhow::anyhow!("no project_id — use --project or configure default"))?;
+    let environment = env.unwrap_or(&cfg.default_environment);
+    let secret_value = read_secret_value(value, from_stdin)?;
+    let secret_path = normalize_secret_path(path);
+
+    upsert_infisical_secret(&cfg, project_id, environment, &secret_path, name, &secret_value)?;
+    println!("Updated Infisical secret '{}' at {}/{}, path {}.", name, project_id, environment, secret_path);
     Ok(())
 }
 
@@ -167,20 +217,22 @@ fn cmd_set(_state: &ClixState, site_url: Option<String>, project_id: Option<Stri
         .clone()
         .unwrap_or_else(|| "default".to_string());
 
-    let cfg = new_state.config.infisical_profiles
-        .entry(profile_name.clone())
-        .or_insert_with(|| InfisicalConfig {
-            site_url: "https://app.infisical.com".to_string(),
-            client_id: None,
-            client_secret: None,
-            service_token: None,
-            default_project_id: None,
-            default_environment: "dev".to_string(),
-        });
+    {
+        let cfg = new_state.config.infisical_profiles
+            .entry(profile_name.clone())
+            .or_insert_with(|| InfisicalConfig {
+                site_url: "https://app.infisical.com".to_string(),
+                client_id: None,
+                client_secret: None,
+                service_token: None,
+                default_project_id: None,
+                default_environment: "dev".to_string(),
+            });
 
-    if let Some(u) = site_url { cfg.site_url = u; }
-    if let Some(p) = project_id { cfg.default_project_id = Some(p); }
-    cfg.default_environment = env;
+        if let Some(u) = site_url { cfg.site_url = u; }
+        if let Some(p) = project_id { cfg.default_project_id = Some(p); }
+        cfg.default_environment = env;
+    }
 
     if new_state.config.active_infisical.is_none() {
         new_state.config.active_infisical = Some(profile_name.clone());
@@ -193,6 +245,9 @@ fn cmd_set(_state: &ClixState, site_url: Option<String>, project_id: Option<Stri
         match store_credentials(&profile_name, &client_id, &client_secret) {
             KeyringResult::Ok => {
                 println!("Credentials stored in keyring.");
+                let cfg = new_state.config.infisical_profiles.get_mut(&profile_name).unwrap();
+                cfg.client_id = None;
+                cfg.client_secret = None;
             }
             KeyringResult::Unavailable(e) => {
                 eprintln!("Keyring unavailable ({}), storing in config.yaml", e);
@@ -213,14 +268,44 @@ fn cmd_set(_state: &ClixState, site_url: Option<String>, project_id: Option<Stri
     println!("Configuration saved (profile: {}).", profile_name);
 
     // Run connectivity test
-    let cfg_ref = new_state.config.infisical_profiles.get(&profile_name).unwrap();
-    let report = test_connectivity(cfg_ref);
+    let cfg_ref = new_state.config.infisical().resolve(Some(&profile_name)).unwrap();
+    let report = test_connectivity(&cfg_ref);
     if report.auth_ok {
         println!("✓ Infisical connected ({}ms)", report.latency_ms);
     } else {
         eprintln!("✗ Infisical: {}", report.error.as_deref().unwrap_or("auth failed").chars().take(60).collect::<String>());
     }
     Ok(())
+}
+
+fn read_secret_value(value: Option<String>, from_stdin: bool) -> Result<String> {
+    if let Some(value) = value {
+        return Ok(value);
+    }
+    if from_stdin {
+        let mut buf = String::new();
+        use std::io::Read;
+        std::io::stdin().read_to_string(&mut buf)?;
+        return Ok(buf.trim_end_matches(|c| c == '\r' || c == '\n').to_string());
+    }
+
+    let secret = rpassword::prompt_password("secret value: ")
+        .unwrap_or_else(|_| {
+            eprintln!("(warning: hidden input unavailable, secret will be visible)");
+            let mut buf = String::new();
+            let _ = std::io::stdin().read_line(&mut buf);
+            buf.trim().to_string()
+        });
+    Ok(secret)
+}
+
+fn normalize_secret_path(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed == "/" {
+        "/".to_string()
+    } else {
+        format!("/{}/", trimmed.trim_matches('/'))
+    }
 }
 
 fn cmd_unset(state: &ClixState) -> Result<()> {
@@ -243,6 +328,7 @@ fn cmd_unset(state: &ClixState) -> Result<()> {
     if let Some(cfg) = new_state.config.infisical_profiles.get_mut(&profile_name) {
         cfg.client_id = None;
         cfg.client_secret = None;
+        cfg.service_token = None;
     }
     new_state.save_config()?;
     println!("Infisical credentials removed from profile '{}'.", profile_name);
@@ -258,9 +344,9 @@ fn cmd_list(state: &ClixState, path: &str, project: Option<&str>, env: Option<&s
         .ok_or_else(|| anyhow::anyhow!("no project_id — use --project or configure default"))?;
     let environment = env.unwrap_or(&cfg.default_environment);
 
-    let folders = clix_core::secrets::list_infisical_folders(cfg, project_id, environment, path)
+    let folders = clix_core::secrets::list_infisical_folders(&cfg, project_id, environment, path)
         .unwrap_or_default();
-    let secrets = clix_core::secrets::list_infisical_secrets(cfg, project_id, environment, path)
+    let secrets = clix_core::secrets::list_infisical_secrets(&cfg, project_id, environment, path)
         .unwrap_or_default();
 
     for f in &folders {
@@ -289,7 +375,7 @@ fn cmd_tree(state: &ClixState, path: &str, depth: u8, project: Option<&str>, env
         .ok_or_else(|| anyhow::anyhow!("no project_id — use --project or configure default"))?;
     let environment = env.unwrap_or(&cfg.default_environment);
 
-    print_tree(cfg, project_id, environment, path, 0, depth);
+    print_tree(&cfg, project_id, environment, path, 0, depth);
     Ok(())
 }
 

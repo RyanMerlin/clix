@@ -41,6 +41,8 @@ pub enum AccountsAction {
     Save {
         name: String,
         site_url: String,
+        client_id: String,
+        client_secret: String,
         service_token: String,   // empty = keep existing token
         project_id: String,
         environment: String,
@@ -169,14 +171,14 @@ impl InfisicalAccountsState {
                     InfisicalSetupAction::Cancel => {
                         self.mode = AccountsMode::List;
                     }
-                    InfisicalSetupAction::Save { site_url, service_token, project_id, environment } => {
+                    InfisicalSetupAction::Save { site_url, client_id, client_secret, service_token, project_id, environment } => {
                         if name.is_empty() {
                             self.status = Some(("Enter a profile name first (press BackTab)".into(), true));
                         } else if self.profiles.iter().any(|(n, _)| n == &name) {
                             self.status = Some((format!("Profile '{}' already exists", name), true));
                         } else {
                             self.mode = AccountsMode::List;
-                            return AccountsAction::Save { name, site_url, service_token, project_id, environment };
+                            return AccountsAction::Save { name, site_url, client_id, client_secret, service_token, project_id, environment };
                         }
                     }
                     InfisicalSetupAction::None => {}
@@ -196,9 +198,9 @@ impl InfisicalAccountsState {
             InfisicalSetupAction::Cancel => {
                 self.mode = AccountsMode::List;
             }
-            InfisicalSetupAction::Save { site_url, service_token, project_id, environment } => {
+            InfisicalSetupAction::Save { site_url, client_id, client_secret, service_token, project_id, environment } => {
                 self.mode = AccountsMode::List;
-                return AccountsAction::Save { name, site_url, service_token, project_id, environment };
+                return AccountsAction::Save { name, site_url, client_id, client_secret, service_token, project_id, environment };
             }
             InfisicalSetupAction::None => {}
         }

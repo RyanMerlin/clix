@@ -80,7 +80,7 @@ pub fn load_credentials(profile_name: &str) -> Option<(String, String)> {
 
 /// Attempt to load from the legacy (pre-multi-profile) unsuffixed keyring keys.
 /// Used as a migration fallback for the "default" profile on first run after upgrade.
-fn load_legacy_credentials() -> Option<(String, String)> {
+pub fn load_legacy_credentials() -> Option<(String, String)> {
     let id_entry = keyring::Entry::new(SERVICE, "infisical-client-id").ok()?;
     let client_id = id_entry.get_password().ok()?;
     let secret_entry = keyring::Entry::new(SERVICE, "infisical-client-secret").ok()?;
@@ -107,26 +107,4 @@ pub fn delete_credentials(profile_name: &str) -> KeyringResult {
         let _ = tok_entry.delete_credential();
     }
     KeyringResult::Ok
-}
-
-/// Called during ClixState::load — overlays keyring creds into each named profile.
-/// Also handles the legacy single-slot migration: if a "default" profile has no
-/// client_id but the old unsuffixed keyring entry exists, use it.
-pub fn merge_keyring_into_config(config: &mut crate::state::ClixConfig) {
-    for (name, profile) in config.infisical_profiles.iter_mut() {
-        if let Some((id, secret)) = load_credentials(name) {
-            profile.client_id = Some(id);
-            profile.client_secret = Some(secret);
-        } else if name == "default" && profile.client_id.is_none() {
-            // Legacy migration: try the old unsuffixed keyring slot.
-            if let Some((id, secret)) = load_legacy_credentials() {
-                profile.client_id = Some(id);
-                profile.client_secret = Some(secret);
-            }
-        }
-        // Service token overlay — takes precedence, stored in a separate slot
-        if let Some(tok) = load_service_token(name) {
-            profile.service_token = Some(tok);
-        }
-    }
 }

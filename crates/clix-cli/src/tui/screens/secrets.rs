@@ -31,24 +31,24 @@ fn render_config_card(f: &mut Frame, app: &App, area: Rect) {
     #[cfg(target_os = "linux")]
     let (auth_label, auth_value, auth_source) = {
         use clix_core::secrets::keyring;
-        if keyring::load_service_token(&app.infisical_profile_name).is_some() {
+        if keyring::load_credentials(&app.infisical_profile_name).is_some() {
+            ("universal_auth", "(set)", "keyring")
+        } else if cfg.and_then(|c| c.client_id.as_deref()).is_some() {
+            ("universal_auth", "(set)", "config.yaml")
+        } else if keyring::load_service_token(&app.infisical_profile_name).is_some() {
             ("service_token", "(set)", "keyring")
         } else if cfg.and_then(|c| c.service_token.as_deref()).is_some() {
             ("service_token", "(set)", "config.yaml")
-        } else if keyring::load_credentials(&app.infisical_profile_name).is_some() {
-            ("machine_identity", "(set)", "keyring")
-        } else if cfg.and_then(|c| c.client_id.as_deref()).is_some() {
-            ("machine_identity", "(set)", "config.yaml")
         } else {
             ("auth", "(not configured)", "—")
         }
     };
     #[cfg(not(target_os = "linux"))]
     let (auth_label, auth_value, auth_source) = {
-        if cfg.and_then(|c| c.service_token.as_deref()).is_some() {
+        if cfg.and_then(|c| c.client_id.as_deref()).is_some() {
+            ("universal_auth", "(set)", "config.yaml")
+        } else if cfg.and_then(|c| c.service_token.as_deref()).is_some() {
             ("service_token", "(set)", "config.yaml")
-        } else if cfg.and_then(|c| c.client_id.as_deref()).is_some() {
-            ("machine_identity", "(set)", "config.yaml")
         } else {
             ("auth", "(not configured)", "—")
         }
