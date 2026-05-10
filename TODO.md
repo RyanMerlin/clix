@@ -1,6 +1,6 @@
 # clix — Roadmap & Next Steps
 
-## Recently shipped (v0.3.0)
+## Recently shipped (v0.5.0)
 
 ### Core hardening
 - **Default-deny policy** — `PolicyBundle::default()` denies everything; `allow_all()` only in tests.
@@ -25,7 +25,7 @@
 - **`clix doctor`** reports `sandbox-exec (BETA)` on macOS, `landlock` on Linux
 
 ### Compiler health
-- **Zero warnings** across clix-cli, clix-core, clix-broker (commit `2ee42fd`)
+- **Zero warnings** across the workspace after the Rust 2024 migration
 
 ### TUI overhaul (all 5 slices)
 - **Infisical hang fixed**: `reqwest::blocking::Client` now has 10s timeout + 5s connect timeout on all 4 HTTP call sites in `clix-core/src/secrets/mod.rs`
@@ -113,7 +113,7 @@
 - [x] `terraform-observe` — `validate`, `plan`, `show`, `state list`, `output` — shipped
 - [x] `argocd-observe` — `app list`, `app get`, `app diff`, `app history` — shipped
 - [x] `incus-readonly` — `list`, `info`, `snapshot list`, `image list` — shipped
-- [x] `gcloud-aiplatform` — Vertex AI inspection — shipped (v0.3.0)
+- [x] `gcloud-aiplatform` — Vertex AI inspection — shipped
 
 ### Pack authoring UX
 - [x] `clix pack onboard` — probes `--help`/`--version`, scaffolds a pack from discovered entry points.
