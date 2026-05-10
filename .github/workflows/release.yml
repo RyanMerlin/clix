@@ -81,7 +81,12 @@ jobs:
 
           mkdir -p staging
           for bin in clix clix-serve clix-worker clix-broker clix-shim; do
-            cp "${BINDIR}/${bin}" staging/
+            src="${BINDIR}/${bin}"
+            if [[ -f "${src}" ]]; then
+              cp "${src}" staging/
+            else
+              echo "skipping missing ${src}"
+            fi
           done
 
           tar czf "${ARTIFACT}.tar.gz" -C staging .
