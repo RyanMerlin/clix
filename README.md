@@ -2,6 +2,10 @@
 
 **An agent-optimized CLI gateway. CLIs are vastly more powerful than MCP servers — clix makes them reliable, discoverable, and safe for agent use.**
 
+<p align="center">
+  <img src="assets/clix-cli-gateway.png" alt="clix architecture hero" width="1200" />
+</p>
+
 Agents talk to clix as a plain CLI tool. No MCP tool registration, no upfront context cost, no catalogue to maintain. The agent discovers capabilities on demand, calls them with typed inputs, gets structured JSON output and a receipt. On Linux, subprocess calls run inside a real OS-level jail (namespaces, Landlock, seccomp, binary pinning). On macOS / Windows you get policy enforcement and a full audit trail.
 
 > **Full OS isolation:** Linux x86_64 and aarch64.
