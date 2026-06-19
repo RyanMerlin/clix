@@ -4,7 +4,7 @@
 
 Report exploitable bugs **privately** — do not open a public GitHub issue.
 
-- Email: rmerlin5@pm.me, or use [GitHub private vulnerability reporting](https://github.com/rmerlin/clix/security/advisories/new).
+- Use [GitHub private vulnerability reporting](https://github.com/RyanMerlin/clix/security/advisories/new) — the preferred private channel, routed straight to the maintainer.
 - Response target: acknowledgement within 72 hours, patch timeline within 14 days.
 - Please include: affected component, reproduction steps, impact assessment.
 
